@@ -1,0 +1,9 @@
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# audit run-output artifacts (scan byproducts; hold internal endpoints)
+audit/v_audit_*/
+audit/*_rerun.json
+audit/*_MERGED.json
