@@ -43,6 +43,7 @@ import json
 import math
 import logging
 import time
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -53,6 +54,12 @@ from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateD
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from torch.utils.data import DataLoader, DistributedSampler, Dataset
 import glob
+
+INFERENCE_DIR = Path(__file__).resolve().parents[1] / "inference"
+if str(INFERENCE_DIR) not in sys.path:
+    sys.path.insert(0, str(INFERENCE_DIR))
+
+from one_wire import EmptyAssistantMask, install_chat_template, tokenize_sft_record
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -145,59 +152,11 @@ def save_lora_only_fsdp(model, accelerator, out_dir, adapter_name="default"):
     return total_gb
 
 def _tokenize_sft_pair(messages, tokenizer, tools=None):
-    """Tokenize SFT conversation with assistant-only loss.
-
-    Uses incremental template application to find exact assistant token boundaries.
-    Handles Qwen3.5 chat template which adds special tokens around content.
-
-    `tools`: the record's top-level tool schema. Passed to the chat template so
-    the available-tools list is present in the prompt at train time (#1). Caller
-    must pass None when a system message already embeds <tools> (avoid double-inject).
-    """
-    try:
-        full_text = tokenizer.apply_chat_template(messages, tokenize=False, tools=tools,
-                                                  add_generation_prompt=False, enable_thinking=False)
-    except Exception:
-        parts = [f"<|{m['role']}|>\n{m['content']}" for m in messages]
-        full_text = "\n".join(parts) + tokenizer.eos_token
-
-    full_ids = tokenizer.encode(full_text, add_special_tokens=False)
-    labels = [-100] * len(full_ids)
-
-    # Build prefix up to each assistant message to find exact token boundaries
-    for i, m in enumerate(messages):
-        if m["role"] != "assistant":
-            continue
-        # Template up to (but not including) this assistant message
-        prefix_msgs = messages[:i]
-        try:
-            prefix_text = tokenizer.apply_chat_template(
-                prefix_msgs, tokenize=False, tools=tools, add_generation_prompt=True, enable_thinking=False)
-        except Exception:
-            prefix_text = ""
-
-        # Template including this assistant message
-        incl_msgs = messages[:i+1]
-        try:
-            incl_text = tokenizer.apply_chat_template(
-                incl_msgs, tokenize=False, tools=tools, add_generation_prompt=False, enable_thinking=False)
-        except Exception:
-            incl_text = full_text
-
-        prefix_ids = tokenizer.encode(prefix_text, add_special_tokens=False) if prefix_text else []
-        incl_ids = tokenizer.encode(incl_text, add_special_tokens=False)
-
-        # Assistant tokens are between prefix end and incl end
-        start = len(prefix_ids)
-        end = len(incl_ids)
-        for j in range(start, min(end, len(full_ids))):
-            labels[j] = full_ids[j]
-
-    # If no labels were set (fallback), train on everything
-    if all(l == -100 for l in labels):
-        labels = list(full_ids)
-
-    return full_ids, labels
+    """Tokenize through the canonical one-wire compiler with assistant-only loss."""
+    row = {"messages": messages}
+    if tools:
+        row["tools"] = tools
+    return tokenize_sft_record(row, tokenizer)
 
 
 class BucketSFTDataset(Dataset):
@@ -221,15 +180,21 @@ class BucketSFTDataset(Dataset):
 
         # ── Cache key ─────────────────────────────────────────────────────
         # Hash of: corpus path + corpus mtime + tokenizer.name_or_path + max_seq
+        # + chat template. Template changes alter assistant masks, so old caches
+        # must not be reused across one-wire compiler fixes.
         # If any of those change, regenerate the cache.
         import hashlib, pickle, time
         corpus_st = os.stat(sft_jsonl_path)
+        template_hash = hashlib.sha256(
+            (getattr(tokenizer, "chat_template", "") or "").encode("utf-8")
+        ).hexdigest()
         cache_key_parts = [
             os.path.abspath(sft_jsonl_path),
             str(corpus_st.st_size),
             str(int(corpus_st.st_mtime)),
             getattr(tokenizer, "name_or_path", "?"),
             f"max_seq={max_seq}",
+            f"chat_template_sha256={template_hash}",
         ]
         cache_key = hashlib.sha256("|".join(cache_key_parts).encode()).hexdigest()[:16]
         cache_dir = os.path.join(os.path.dirname(sft_jsonl_path), "tokenized_cache")
@@ -256,6 +221,8 @@ class BucketSFTDataset(Dataset):
         log.info(f"Pre-tokenizing SFT corpus from {sft_jsonl_path} (no cache hit)...")
         n_rows = 0
         n_split = 0
+        n_empty_mask = 0
+        n_tokenize_error = 0
         with open(sft_jsonl_path) as f:
             for line in f:
                 line = line.strip()
@@ -282,7 +249,11 @@ class BucketSFTDataset(Dataset):
                     row_tools = None
                 try:
                     ids, labels = _tokenize_sft_pair(msgs, tokenizer, tools=row_tools)
+                except EmptyAssistantMask:
+                    n_empty_mask += 1
+                    continue
                 except Exception:
+                    n_tokenize_error += 1
                     continue
                 n_rows += 1
                 if len(ids) <= max_seq:
@@ -308,7 +279,11 @@ class BucketSFTDataset(Dataset):
 
         log.info(f"BucketSFTDataset: {n_rows} rows -> {len(self.samples)} samples "
                  f"({n_split} extra from outlier splits, length-sorted, "
+                 f"{n_empty_mask} empty assistant masks dropped, "
+                 f"{n_tokenize_error} render/tokenize errors, "
                  f"DYNAMIC padding via collate)")
+        if not self.samples:
+            raise RuntimeError("BucketSFTDataset has no usable samples after canonical render/mask filtering")
 
         # ── Save cache (atomic via temp+rename) ───────────────────────────
         # Multi-rank race-safe: all 4 ranks tokenize independently first time
@@ -527,7 +502,7 @@ def main():
                      "inference", "qwen3.5-tooluse.jinja"),
     )
     if _ct and _ct.lower() != "none" and os.path.isfile(_ct):
-        tokenizer.chat_template = open(_ct, encoding="utf-8").read()
+        install_chat_template(tokenizer, _ct)
         if accelerator.is_main_process:
             log.info(f"Chat template: loaded canonical {_ct} (train==inference tool-call format)")
     elif accelerator.is_main_process:
