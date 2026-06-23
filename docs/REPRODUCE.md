@@ -14,9 +14,9 @@ Step-by-step to re-run the PALIOS-TAEY training pipeline on equivalent hardware.
 - Base models from Hugging Face: `Qwen3.5-9B-Base`, `Huihui-Qwen3.5-35B-A3B-abliterated`
 - The audit harness from [`../audit/`](../audit/) if you intend to run the behavioral 163-probe audit after bake
 
-The recipes (`launch_*.sh` in [`moe-35b/recipes/`](../moe-35b/recipes/) and [`dense-9b/recipes/`](../dense-9b/recipes/)) are documented for the deployment that ran them. Env-variable overrides are honored where present (e.g., `OUTPUT_DIR`, `RESUME_DELTA`, `DPO_DATA`, `MODEL_PATH`, `FROZEN_EXPERTS`, `KEYSTONE_LAYERS`).
+The recipes (`launch_*.sh` in [`moe-35b/recipes/`](../moe-35b/recipes/) and [`dense-9b/recipes/`](../dense-9b/recipes/)) are documented for the deployment that ran them. Dense 9B CPT is public-safe and fail-loud: paths, node hosts, fabric addresses, and step counts must be supplied by env or a local copy of [`dense-9b/configs/cpt_cluster.env.example`](../dense-9b/configs/cpt_cluster.env.example).
 
-> **Trainer & config scripts — all shipped, referenced by relative path.** Each recipe's `accelerate launch` line now invokes its trainer and `--config_file` by relative repo path (`trainers/…py`, `configs/…yaml`) — every one is shipped: `trainers/train_dpo_v2.py` (the MoE hybrid LoRA+ESFT DPO trainer behind the 84.7% headline), `train_fsdp_v3.py` (MoE FSDP SFT), `train_fsdp_dense_9b.py` (9B-dense FSDP SFT/CPT), `train_cpt_qwen35_dense.py`, `train_recovery_sft_qwen35_dense.py`, `chunk_corpus_offline.py`, `bake_phase_combined_v1_tail_v2.py`; `configs/fsdp_lora.yaml`, `configs/fsdp_dense_9b.yaml`, etc. So a fresh clone runs from the repo root after you set the env-overrideable operator paths (`MODEL_PATH`, `OUTPUT_DIR`, data dirs) and the multi-node addressing (`NODE0_IP..NODE3_IP` or `NODE_RANK`). (Two scripts are *not* shipped and are explicitly disclaimed where referenced: the NCCL synth probe — §1 below — and the `bake_orpo.py`/`bake_config_a_v2.py` bake scripts — §4 below.)
+> **Trainer & config scripts — all shipped, referenced by relative path.** Each recipe's `accelerate launch` line now invokes its trainer and `--config_file` by relative repo path (`trainers/…py`, `configs/…yaml`) — every one is shipped: `trainers/train_dpo_v2.py` (the MoE hybrid LoRA+ESFT DPO trainer behind the 84.7% headline), `train_fsdp_v3.py` (MoE FSDP SFT), `train_fsdp_dense_9b.py` (9B-dense FSDP SFT/CPT), `train_cpt_qwen35_dense.py`, `train_recovery_sft_qwen35_dense.py`, `chunk_corpus_offline.py`, `build_training_data.py`, `bake_phase_combined_v1_tail_v2.py`; `configs/fsdp_lora.yaml`, `configs/fsdp_dense_9b.yaml`, etc. So a fresh clone runs from the repo root after you set the required operator paths (`MODEL_PATH`, `OUTPUT_DIR`, data dirs) and multi-node addressing (`NODE_HOSTS_CSV` for orchestration, plus `MASTER_ADDR`/`NODE_RANK` or `NODE0_IP..NODE3_IP`). (Two scripts are *not* shipped and are explicitly disclaimed where referenced: the NCCL synth probe — §1 below — and the `bake_orpo.py`/`bake_config_a_v2.py` bake scripts — §4 below.)
 
 ---
 
@@ -152,12 +152,17 @@ bash recipes/launch_sft_tools_qwen35_9b_fsdp.sh
 ### 3.2 Phase 2 CPT
 
 ```bash
-export RESUME_DELTA=/home/<user>/training_outputs/sft_tools_qwen35_9b_fsdp/final
-export OUTPUT_DIR=/home/<user>/training_outputs/cpt_v3_v4_dense_9b
-bash recipes/launch_cpt_phase2_qwen35_9b_fsdp.sh
+source /path/to/filled-cpt-cluster.env
+export MODEL_PATH=/path/to/text-derived-or-phase1-sft-model
+export CPT_DATA=/path/to/cpt_corpus.jsonl
+export OUTPUT_DIR=/path/to/cpt_v3_v4_dense_9b
+export TOTAL_STEPS=<from-corpus-manifest>
+export MASTER_ADDR=<rank0-fabric-address>
+export NODE_RANK=<rank-on-this-worker>
+bash dense-9b/recipes/launch_cpt_phase2_qwen35_9b_fsdp.sh
 ```
 
-The CPT trainer is [`trainers/train_cpt_qwen35_dense.py`](../dense-9b/trainers/train_cpt_qwen35_dense.py). The Phase-2 expert config is [`configs/phase2_expert_config.json`](../moe-35b/configs/phase2_expert_config.json) (44 KB).
+The 4-node CPT launcher uses [`dense-9b/trainers/train_fsdp_dense_9b.py`](../dense-9b/trainers/train_fsdp_dense_9b.py) with [`dense-9b/configs/fsdp_dense_9b.yaml`](../dense-9b/configs/fsdp_dense_9b.yaml). The canonical GB10 optimizer is Adafactor at `LR=2e-5`, `scale_parameter=False`, `relative_step=False`, `warmup_init=False`, `clip_threshold=1.0`, with manual `LambdaLR` linear warmup then decay. AdamW is intentionally not the dense-CPT recipe because it OOMs on GB10 UMA page-cache. For the dataset builder and orchestrator, see [`dense-9b/REPRODUCE.md`](../dense-9b/REPRODUCE.md).
 
 ### 3.3 Phase 3 Recovery SFT — wedge-fix path
 

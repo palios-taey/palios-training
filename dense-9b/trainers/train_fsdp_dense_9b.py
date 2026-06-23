@@ -77,6 +77,13 @@ KEYSTONE_LAYERS = [17, 28]  # 2 layers — 3.2GB optimizer/node, fits 5.7GB head
 # - embeddings/lm_head — frozen for v1 (conservative)
 
 
+def _required_env(name):
+    value = os.environ.get(name)
+    if not value:
+        raise RuntimeError(f"{name} must be set; this trainer has no operator-path default")
+    return value
+
+
 def _clean_fsdp_name(name):
     """Strip FSDP wrapper prefixes to get canonical model parameter name."""
     return name.replace("_fsdp_wrapped_module.", "").replace("module.", "")
@@ -476,14 +483,14 @@ def main():
     set_seed(42)
 
     # ── Config ──
-    model_path = os.environ.get("MODEL_PATH", "/home/user/models/Huihui-Qwen3.5-35B-A3B-abliterated")
+    model_path = _required_env("MODEL_PATH")
     delta_path = os.environ.get("RESUME_DELTA", "")
-    sft_dir = os.environ.get("SFT_DIR", "/var/spark/isma/training/sft")
-    cpt_data = os.environ.get("CPT_DATA", "/var/spark/isma/training/infra_soul_cpt.jsonl")
+    sft_dir = os.environ.get("SFT_DIR", "")
+    cpt_data = os.environ.get("CPT_DATA", "")
     general_dir = os.environ.get("GENERAL_DIR", "")
-    output_dir = os.environ.get("OUTPUT_DIR", "/var/spark/models/taey-lora-v1")
+    output_dir = _required_env("OUTPUT_DIR")
     max_seq = int(os.environ.get("MAX_SEQ", "8192"))
-    total_steps = int(os.environ.get("TOTAL_STEPS", "3000"))
+    total_steps = int(_required_env("TOTAL_STEPS"))
     save_every = int(os.environ.get("SAVE_EVERY", "50"))
     session_limit = int(os.environ.get("SESSION_LIMIT", "250"))
     # Keystone layers configurable via env var (JSON array) or default
@@ -498,12 +505,13 @@ def main():
     lr_lora = float(os.environ.get("LR_LORA", "3e-4"))       # LoRA adapters
     lr_router = float(os.environ.get("LR_ROUTER", "3e-5"))   # Router gates
     warmup_steps = int(os.environ.get("WARMUP_STEPS", "25"))
+    lr_min_ratio = float(os.environ.get("LR_MIN_RATIO", "0.0"))
 
     if accelerator.is_main_process:
         log.info(f"=== PALIOS-TAEY v3: Hybrid LoRA + ESFT ===")
         log.info(f"Model: {model_path}")
         log.info(f"Keystone layers: {keystone_layers}")
-        log.info(f"LR: esft={lr_esft}, lora={lr_lora}, router={lr_router}")
+        log.info(f"LR: esft={lr_esft}, lora={lr_lora}, router={lr_router}, min_ratio={lr_min_ratio}")
         log.info(f"Seq={max_seq}, session={session_limit}, save_every={save_every}")
         mem = torch.cuda.mem_get_info()
         log.info(f"UMA: free={mem[0]/1e9:.1f}GB total={mem[1]/1e9:.1f}GB")
@@ -703,6 +711,8 @@ def main():
             tokenizer=tokenizer, max_seq=max_seq,
         )
     else:
+        if not sft_dir:
+            raise RuntimeError("SFT_DIR must be set for SFT mode, or set CPT_DATA with a non-directory SFT_DIR sentinel for CPT mode")
         sft_jsonl = os.environ.get(
             "SFT_JSONL",
             os.path.join(sft_dir, "tools_sft.jsonl"),
@@ -822,30 +832,35 @@ def main():
         log.info(f"  CUDA free: {mem[0]/1e9:.1f}GB")
 
     # ── Optimizer: single param group, full-parameter Adafactor ──
-    # Adafactor (not AdamW) for all 9B params — factored row/column sums
-    # cut optimizer state from ~72 GB (AdamW fp32 m+v on 9B) to a few GB.
-    # AdamW would not fit even sharded across 4 nodes.
+    # Canonical GB10 recipe: Adafactor, not AdamW. AdamW's fp32 m/v state
+    # OOMs on GB10 UMA once page cache and FSDP shards are present.
     from transformers.optimization import Adafactor
-    sft_lr = float(os.environ.get("LR", "1e-5"))
+    sft_lr = float(os.environ.get("LR", "2e-5"))
+    clip_threshold = float(os.environ.get("ADAFACTOR_CLIP_THRESHOLD", "1.0"))
+    weight_decay = float(os.environ.get("WEIGHT_DECAY", "0.0"))
     optimizer = Adafactor(
         [p for p in model.parameters() if p.requires_grad],
         lr=sft_lr,
         scale_parameter=False,
         relative_step=False,
         warmup_init=False,
-        weight_decay=0.01,
-        clip_threshold=1.0,
+        weight_decay=weight_decay,
+        clip_threshold=clip_threshold,
     )
     if accelerator.is_main_process:
         n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        log.info(f"Optimizer: Adafactor (single group, {n_trainable/1e9:.2f}B params @ lr={sft_lr})")
+        log.info(
+            "Optimizer: Adafactor "
+            f"(single group, {n_trainable/1e9:.2f}B params @ lr={sft_lr}, "
+            f"clip_threshold={clip_threshold}, weight_decay={weight_decay})"
+        )
 
-    # ── LR scheduler: cosine decay to 10% floor ──
+    # ── LR scheduler: manual LambdaLR, linear warmup then linear decay ──
     def lr_lambda(step):
         if step < warmup_steps:
             return step / max(1, warmup_steps)
-        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-        return 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * progress))
+        progress = min(1.0, (step - warmup_steps) / max(1, total_steps - warmup_steps))
+        return max(lr_min_ratio, 1.0 - progress * (1.0 - lr_min_ratio))
 
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     optimizer, lr_scheduler = accelerator.prepare(optimizer, lr_scheduler)
