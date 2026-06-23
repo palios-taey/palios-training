@@ -51,7 +51,7 @@ import psutil
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 from torch.distributed.checkpoint.state_dict import get_model_state_dict, StateDictOptions
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 from torch.utils.data import DataLoader, DistributedSampler, Dataset
 import glob
 
@@ -59,6 +59,7 @@ INFERENCE_DIR = Path(__file__).resolve().parents[1] / "inference"
 if str(INFERENCE_DIR) not in sys.path:
     sys.path.insert(0, str(INFERENCE_DIR))
 
+from model_class_guard import load_qwen35_text_causal_lm_checked
 from one_wire import EmptyAssistantMask, install_chat_template, tokenize_sft_record
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -516,7 +517,7 @@ def main():
     # Other ranks: device_map="meta" = zero memory.
     if accelerator.is_main_process:
         log.info("Rank 0: loading model to CPU (zero-copy mmap, FSDP handles GPU placement)...")
-        model = AutoModelForCausalLM.from_pretrained(
+        model = load_qwen35_text_causal_lm_checked(
             model_path,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
@@ -527,7 +528,7 @@ def main():
         log.info(f"Rank 0: model loaded to CPU. RAM used={vm.used/1e9:.1f}GB free={vm.available/1e9:.1f}GB")
     else:
         log.info(f"Rank {accelerator.process_index}: loading model on meta device (zero memory)...")
-        model = AutoModelForCausalLM.from_pretrained(
+        model = load_qwen35_text_causal_lm_checked(
             model_path,
             torch_dtype=torch.bfloat16,
             trust_remote_code=True,
