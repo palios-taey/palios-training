@@ -47,7 +47,7 @@ def _render_with_jinja2(
     tools: Any,
     *,
     add_generation_prompt: bool,
-    enable_thinking: bool,
+    enable_thinking: bool | None,
     template_path: str | Path | None,
 ) -> str:
     from jinja2 import Environment
@@ -62,14 +62,16 @@ def _render_with_jinja2(
     env.filters["fromjson"] = fromjson
     env.filters["tojson"] = lambda value: json.dumps(value, ensure_ascii=False)
     template = env.from_string(load_chat_template(template_path))
-    return template.render(
-        messages=messages,
-        tools=tools,
-        add_generation_prompt=add_generation_prompt,
-        enable_thinking=enable_thinking,
-        add_vision_id=False,
-        raise_exception=raise_exception,
-    )
+    render_kwargs = {
+        "messages": messages,
+        "tools": tools,
+        "add_generation_prompt": add_generation_prompt,
+        "add_vision_id": False,
+        "raise_exception": raise_exception,
+    }
+    if enable_thinking is not None:
+        render_kwargs["enable_thinking"] = enable_thinking
+    return template.render(**render_kwargs)
 
 
 def render_record(
@@ -78,20 +80,21 @@ def render_record(
     *,
     tools: Any = None,
     add_generation_prompt: bool = False,
-    enable_thinking: bool = False,
+    enable_thinking: bool | None = False,
     template_path: str | Path | None = None,
 ) -> str:
     messages, row_tools = _messages_and_tools(record_or_messages, tools)
     if tokenizer is not None:
         if not getattr(tokenizer, "chat_template", None):
             install_chat_template(tokenizer, template_path)
-        return tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            tools=row_tools,
-            add_generation_prompt=add_generation_prompt,
-            enable_thinking=enable_thinking,
-        )
+        apply_kwargs = {
+            "tokenize": False,
+            "tools": row_tools,
+            "add_generation_prompt": add_generation_prompt,
+        }
+        if enable_thinking is not None:
+            apply_kwargs["enable_thinking"] = enable_thinking
+        return tokenizer.apply_chat_template(messages, **apply_kwargs)
     return _render_with_jinja2(
         messages,
         row_tools,

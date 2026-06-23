@@ -117,7 +117,25 @@ def check_template(path: str) -> None:
     rendered = render_record(fixture, template_path=path)
     if _validate_rendered_wire(rendered, f"template fixture {path}") < 1:
         _fail(f"inference template {path} did not render the structured tool_call fixture")
+    prompt_fixture = {"messages": [{"role": "user", "content": "Hello."}]}
+    explicit_no_think = render_record(
+        prompt_fixture,
+        template_path=path,
+        add_generation_prompt=True,
+        enable_thinking=False,
+    )
+    implicit_default = render_record(
+        prompt_fixture,
+        template_path=path,
+        add_generation_prompt=True,
+        enable_thinking=None,
+    )
+    if explicit_no_think != implicit_default:
+        _fail(f"inference template {path} implicit generation prompt differs from explicit enable_thinking=false")
+    if "<think>\n\n</think>\n\n" not in implicit_default or implicit_default.endswith("<think>\n"):
+        _fail(f"inference template {path} default generation prompt leaves <think> open")
     print(f"  template: {path} renders parseable Hermes-JSON, 0 XML <function=>/<parameter=>")
+    print(f"  template: {path} default generation prompt == explicit non-thinking")
 
 
 def check_eval_probes(path: str) -> None:
