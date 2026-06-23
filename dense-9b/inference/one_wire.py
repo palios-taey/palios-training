@@ -50,7 +50,7 @@ def _render_with_jinja2(
     enable_thinking: bool,
     template_path: str | Path | None,
 ) -> str:
-    from jinja2 import Environment, StrictUndefined
+    from jinja2 import Environment
 
     def raise_exception(message: str) -> None:
         raise ValueError(message)
@@ -58,7 +58,7 @@ def _render_with_jinja2(
     def fromjson(value: str) -> Any:
         return json.loads(value)
 
-    env = Environment(undefined=StrictUndefined, autoescape=False)
+    env = Environment(autoescape=False)
     env.filters["fromjson"] = fromjson
     env.filters["tojson"] = lambda value: json.dumps(value, ensure_ascii=False)
     template = env.from_string(load_chat_template(template_path))
