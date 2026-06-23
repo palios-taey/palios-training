@@ -8,21 +8,21 @@ The dense line: continued pre-training (CPT) and recovery SFT on **Qwen3.5-9B (d
 
 | Dir | Contents |
 |---|---|
-| `trainers/` | `train_fsdp_dense_9b.py` (FSDP+LoRA / full-FT, env-driven, bucket batching; CPT vs SFT mode auto-selected by env), `train_cpt_qwen35_dense.py`, `train_recovery_sft_qwen35_dense.py` (Phase 3 recovery SFT, pre-composes + chunks its own corpus), `chunk_corpus_offline.py` (offline conversation chunker — the wedge-fix for long multi-turn items on 4-Spark FSDP) |
-| `recipes/` | `launch_cpt_phase2_qwen35_9b_fsdp.sh`, `launch_sft_tools_qwen35_9b_fsdp.sh`, `launch_phase3_sft_single_spark.sh`, `launch_diagnostic_2x2.sh` |
-| `configs/` | `fsdp_dense_9b.yaml` (per-`Qwen3_5DecoderLayer` FSDP wrap) |
+| `trainers/` | `train_fsdp_dense_9b.py` (full-FT FSDP, env-driven, bucket batching; CPT vs SFT mode auto-selected by env), `build_training_data.py` (explicit-input dataset builder), `train_cpt_qwen35_dense.py`, `train_recovery_sft_qwen35_dense.py` (Phase 3 recovery SFT, pre-composes + chunks its own corpus), `chunk_corpus_offline.py` (offline conversation chunker — the wedge-fix for long multi-turn items on 4-Spark FSDP) |
+| `recipes/` | `launch_cpt_phase2_qwen35_9b_fsdp.sh`, `launch_fsdp_orchestrator_cpt_v0.sh`, `launch_sft_tools_qwen35_9b_fsdp.sh`, `launch_phase3_sft_single_spark.sh`, `launch_diagnostic_2x2.sh` |
+| `configs/` | `fsdp_dense_9b.yaml` (per-`Qwen3_5DecoderLayer` FSDP wrap), `cpt_cluster.env.example` (public-safe sample env) |
 | `inference/` | `qwen3.5-tooluse.jinja` (canonical tool template), `toolcall_format_gate.py` (prelaunch format gate) |
 
 ## Running
 
-Recipes resolve their trainer and config by `$SCRIPT_DIR/../{trainers,configs}/`, so they work from any working directory. All deployment paths (`MODEL_PATH`, `OUTPUT`/`OUTPUT_DIR`, `DATA`/`SFT_DIR`, `CPT_DATA`, `RESUME_DELTA`, …) are env-overrideable — substitute for your cluster:
+Recipes resolve their trainer and config by `$SCRIPT_DIR/../{trainers,configs}/`, so they work from any working directory. The CPT path is fail-loud: `MODEL_PATH`, `CPT_DATA`, `OUTPUT_DIR`, `TOTAL_STEPS`, and node addressing must be set explicitly. Start from [`REPRODUCE.md`](REPRODUCE.md) and a local copy of [`configs/cpt_cluster.env.example`](configs/cpt_cluster.env.example):
 
 ```bash
-MODEL_PATH=/your/qwen35-9b SFT_DIR=/your/tools_sft_dir OUTPUT_DIR=/your/out \
-  bash recipes/launch_sft_tools_qwen35_9b_fsdp.sh
+source /path/to/filled-cpt-cluster.env
+bash recipes/launch_cpt_phase2_qwen35_9b_fsdp.sh
 ```
 
-The trainers read all config from environment variables (no argparse) — the launch comment in each recipe lists the vars it consumes.
+The canonical dense CPT optimizer is Adafactor at `LR=2e-5` with `scale_parameter=False`, `relative_step=False`, `warmup_init=False`, `clip_threshold=1.0`, and manual `LambdaLR` linear warmup then linear decay. AdamW is intentionally not the default because it OOMs on the GB10 UMA page-cache regime.
 
 ## What is real here vs not
 

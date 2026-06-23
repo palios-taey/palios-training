@@ -1,14 +1,13 @@
 #!/bin/bash
-# 4-node FSDP launcher for Qwen3.5-9B-Base tools+chat SFT (Phase 1 per
-# /home/user/infra-corpus/TOOLS.md). Run on EACH Spark; the script detects its
-# own fabric IP and assigns rank from it.
+# 4-node FSDP launcher for Qwen3.5-9B dense CPT. Run on each worker node, or
+# set NODE_RANK explicitly when launched by the orchestrator.
 #
 # Adapted from launch_fsdp_bare_metal.sh (proven on 35B-A3B). The NCCL recipe,
 # rank-by-IP detection, and accelerate-launch pattern are unchanged. Differences:
 #   - MODEL_PATH: Qwen3.5-9B-Base (dense) instead of the 35B-A3B abliterated
-#   - DATA_PATH: tools+chat SFT corpus (68K samples)
+#   - CPT_DATA: dense CPT corpus JSONL
 #   - Accelerate config: fsdp_dense_9b.yaml (Qwen3_5DecoderLayer wrap)
-#   - Script: train_fsdp_dense_9b.py (FSDP+LoRA, bucket batch) — invoked below;
+#   - Script: train_fsdp_dense_9b.py (full-FT FSDP, bucket batch) — invoked below;
 #     shipped in ../trainers/train_fsdp_dense_9b.py
 #
 # Why this NCCL config (vs. the broken first attempt now archived):
@@ -19,16 +18,24 @@
 #   - TORCH_NCCL_DUMP_ON_TIMEOUT=1 so a future hang produces a flight-recorder
 #     dump instead of a silent freeze.
 
-set -eo pipefail
+set -euo pipefail
 
 # Resolve sibling dirs (configs/, trainers/) relative to this script's location,
 # so the recipe works regardless of the caller's working directory.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+require_env() {
+    local name="$1"
+    if [[ -z "${!name:-}" ]]; then
+        echo "ERROR: $name must be set; this public launcher has no operator-path default." >&2
+        exit 2
+    fi
+}
+
 # ── Environment ───────────────────────────────────────────────────────────
 export PATH="$HOME/.local/bin:/usr/local/cuda-13.0/bin:$PATH"
 export CUDA_HOME="/usr/local/cuda-13.0"
-export LD_LIBRARY_PATH="/usr/local/cuda-13.0/lib64:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="/usr/local/cuda-13.0/lib64:${LD_LIBRARY_PATH:-}"
 
 # ── NCCL — Blackwell / DGX Spark proven recipe (verbatim from Phase 1 SFT,
 # commit dd9e12e — that config ran 4367 steps clean over 9 hours). All today's
@@ -59,19 +66,19 @@ export TOKENIZERS_PARALLELISM=false
 # IMPORTANT: CPT must start from Phase 1 SFT (NOT base). Prior cycle bug:
 # defaulted to base, threw away 9h of Phase 1 SFT compute (tools+chat).
 # The trained-base invariant is documented in plans/canonical_dense_9b_recipe_v1.md.
-export MODEL_PATH="${MODEL_PATH:-/home/user/training_outputs/sft_tools_qwen35_9b_fsdp/final/converted}"
+require_env MODEL_PATH
+export MODEL_PATH
 # train_fsdp_dense_9b.py: CPT mode is selected when CPT_DATA is set AND SFT_DIR is
-# either empty OR not-a-directory. Orchestrator forwards env vars only when non-empty,
-# AND the trainer defaults SFT_DIR to /var/spark/isma/training/sft (a real dir on the
-# Sparks) when not set. So passing SFT_DIR="" gets dropped by the orchestrator and
-# the trainer then thinks SFT mode is desired. Use an explicit sentinel (non-empty,
-# clearly non-dir) so the orchestrator forwards it and the trainer routes to CPT mode.
-export SFT_DIR="/nonexistent/cpt_mode_sentinel"
+# either empty OR not-a-directory. Use a non-empty sentinel so SSH/env wrappers
+# forward it and the trainer routes to CPT mode.
+export SFT_DIR="${SFT_DIR:-__PALIOS_CPT_MODE_SENTINEL__}"
 # CPT_DATA must be the rebuilt v3 corpus matching the canonical recipe. NO default
 # to prevent a future bug from launching against a stale/wrong corpus. Caller MUST set.
-export CPT_DATA="${CPT_DATA:?ERROR: CPT_DATA must be set to a v3 corpus jsonl path; do not default to a stale corpus}"
+require_env CPT_DATA
+export CPT_DATA
 export GENERAL_DIR="${GENERAL_DIR:-}"
-export OUTPUT_DIR="${OUTPUT_DIR:-/home/user/training_outputs/cpt_v3_dense_9b}"
+require_env OUTPUT_DIR
+export OUTPUT_DIR
 mkdir -p "$OUTPUT_DIR"
 
 # Pre-flight: refuse to launch if MODEL_PATH points at base (catches the prior cycle bug)
@@ -88,7 +95,7 @@ if [[ "$CPT_DATA" == *cpt_merged_clean.jsonl ]]; then
     exit 1
 fi
 
-# ── Trainer knobs (defaults from 2026-05-08 Family consult: Gemini + Grok converge) ─────────
+# ── Trainer knobs ────────────────────────────────────────────────────────
 # MAX_SEQ=16384 — Phase 1 SFT proven, both consult responses converge on this value.
 #                Per Apr 21 methodology + GitHub issues, packing is unsafe (Qwen3.5 GDN NaN at step 1).
 #                Per Family consult dissent, full-pad-to-MAX_SEQ wedges the cluster (both prior 4-Spark
@@ -96,7 +103,8 @@ fi
 #                variable-length tokens; collate_fn does dynamic batch-max padding.
 # BATCH_SIZE_PER_RANK=8 — Phase 1 SFT proven on this exact stack (Grok recommends 8; Gemini argues 4
 #                for safety margin — going 8 since it's the proven value).
-# LR=1e-5 / WARMUP_STEPS=100 — Phase 1 SFT default, Family consult convergence.
+# LR=2e-5 + Adafactor is the canonical GB10 UMA recipe. AdamW OOMs once
+# optimizer state and page cache are present.
 export MAX_SEQ="${MAX_SEQ:-4096}"
 # BATCH=2 per 5/5 Family consult 2026-05-10 (Claude regime-separation argument).
 # CPT corpus is uniformly near-MAX vs SFT's mostly-below-MAX, so per-step mean
@@ -109,54 +117,62 @@ export BATCH_SIZE_PER_RANK="${BATCH_SIZE_PER_RANK:-1}"
 export GRAD_ACCUM="${GRAD_ACCUM:-4}"
 # TOTAL_STEPS depends on corpus size after re-chunk at chunk_tokens=15800. Caller MUST set explicitly
 # based on the v3 manifest after gemini's rebuild.
-export TOTAL_STEPS="${TOTAL_STEPS:?ERROR: TOTAL_STEPS must be set; depends on cpt_v3_v3 corpus row count}"
+require_env TOTAL_STEPS
+export TOTAL_STEPS
 # Resume from a saved checkpoint when set (relative or absolute path)
 export RESUME_DELTA="${RESUME_DELTA:-}"
 export SAVE_EVERY="${SAVE_EVERY:-200}"
 export SESSION_LIMIT="${SESSION_LIMIT:-200}"
 export WARMUP_STEPS="${WARMUP_STEPS:-100}"
-export LR="${LR:-1e-5}"
+export LR="${LR:-2e-5}"
+export ADAFACTOR_CLIP_THRESHOLD="${ADAFACTOR_CLIP_THRESHOLD:-1.0}"
+export LR_MIN_RATIO="${LR_MIN_RATIO:-0.0}"
 
 # ── Multi-node configuration ──────────────────────────────────────────────
-# --- Multi-node addressing ---------------------------------------------------
-# Operator-internal cluster IPs were REMOVED for public release. Set these to
-# YOUR cluster: NODE0_IP..NODE3_IP (NODE0 = rank 0 / master), or set NODE_RANK
-# per node. MASTER_ADDR defaults to NODE0_IP.
-MASTER_ADDR="${MASTER_ADDR:-${NODE0_IP}}"
+# Operator-internal cluster IPs were removed for public release. Set NODE_RANK
+# per node, or set NODE0_IP..NODE{N-1}_IP and let this script match a local IP.
+MASTER_ADDR="${MASTER_ADDR:-${NODE0_IP:-}}"
+require_env MASTER_ADDR
 MASTER_PORT="${MASTER_PORT:-29500}"
 NUM_NODES="${NUM_NODES:-4}"
 GPUS_PER_NODE=1
 
-# Detect rank from local fabric IP. Mapping is fixed by the cluster wiring:
-#   ${NODE0_IP} = Spark 1 = rank 0  (master)
-#   ${NODE1_IP} = Spark 2 = rank 1
-#   ${NODE2_IP} = Spark 3 = rank 2
-#   ${NODE3_IP} = Spark 4 = rank 3
-MY_IP=$(ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -v '^127\.' | head -n 1)
-
-case "$MY_IP" in
-    "${NODE0_IP}") RANK=0 ;;
-    "${NODE1_IP}") RANK=1 ;;
-    "${NODE2_IP}") RANK=2 ;;
-    "${NODE3_IP}") RANK=3 ;;
-    *)
-        echo "ERROR: Unknown fabric IP '$MY_IP' on $(hostname). Set NODE0_IP..NODE3_IP (or NODE_RANK per node)." >&2
+if [[ -n "${NODE_RANK:-}" ]]; then
+    RANK="$NODE_RANK"
+else
+    MY_IPS="$(ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep -v '^127\.' | tr '\n' ' ')"
+    RANK=""
+    for ((idx=0; idx<NUM_NODES; idx++)); do
+        node_ip_var="NODE${idx}_IP"
+        node_ip="${!node_ip_var:-}"
+        if [[ -z "$node_ip" ]]; then
+            echo "ERROR: $node_ip_var must be set when NODE_RANK is not provided." >&2
+            exit 2
+        fi
+        if grep -qw "$node_ip" <<< "$MY_IPS"; then
+            RANK="$idx"
+            break
+        fi
+    done
+    if [[ -z "$RANK" ]]; then
+        echo "ERROR: could not infer rank from local IPs '$MY_IPS'. Set NODE_RANK explicitly." >&2
         exit 1
-        ;;
-esac
+    fi
+fi
 
-echo "FSDP tools+chat SFT on $(hostname) (IP: $MY_IP, Rank: $RANK / $((NUM_NODES - 1)))"
+echo "FSDP dense CPT on $(hostname) (Rank: $RANK / $((NUM_NODES - 1)))"
 echo "  MODEL:  $MODEL_PATH"
-echo "  DATA:   $DATA_PATH"
+echo "  CPT:    $CPT_DATA"
 echo "  OUTPUT: $OUTPUT_DIR"
 echo "  MASTER: $MASTER_ADDR:$MASTER_PORT"
+echo "  OPTIM:  Adafactor lr=$LR clip=$ADAFACTOR_CLIP_THRESHOLD warmup=$WARMUP_STEPS linear_decay_min_ratio=$LR_MIN_RATIO"
 echo ""
 
 # train_fsdp_dense_9b.py reads ALL config from environment variables (no
 # argparse) — same pattern as train_fsdp_v3.py. The env vars set above are
 # what it consumes: MODEL_PATH, SFT_DIR, CPT_DATA, GENERAL_DIR, OUTPUT_DIR,
-# MAX_SEQ, TOTAL_STEPS, SAVE_EVERY, SESSION_LIMIT, WARMUP_STEPS, LR_LORA,
-# LR_ROUTER, LR_ESFT, FREEZE_CONFIG.
+# MAX_SEQ, TOTAL_STEPS, SAVE_EVERY, SESSION_LIMIT, WARMUP_STEPS, LR,
+# ADAFACTOR_CLIP_THRESHOLD, LR_MIN_RATIO.
 
 accelerate launch \
     --config_file "$SCRIPT_DIR/../configs/fsdp_dense_9b.yaml" \
