@@ -25,6 +25,7 @@ import gc
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -37,129 +38,16 @@ from transformers import (
     TrainingArguments,
 )
 
+INFERENCE_DIR = Path(__file__).resolve().parents[1] / "inference"
+if str(INFERENCE_DIR) not in sys.path:
+    sys.path.insert(0, str(INFERENCE_DIR))
 
-def _compose_hermes_conversation(item):
-    """Hand-compose conversation in Hermes JSON wire format. Bypasses chat template.
-
-    Path (D) per treasurer 2026-05-02 — the bundled and qwen3.5-fixed.jinja
-    chat templates BOTH render structured tool_calls in XML format
-    (<function=NAME><parameter=KEY>VAL</parameter></function>), but the smoke
-    probe parses Hermes JSON ({\"name\":..., \"arguments\":{...}}). Phase 1 SFT
-    passed only because the base Qwen3.5-9B-Base prior emits JSON despite XML
-    training. CPT v2 erased that prior; no chat-template-rendered training can
-    teach JSON because no rendering produces it. This function pre-composes
-    the conversation as a raw string with explicit Hermes JSON wire format.
-
-    Output structure:
-      <|im_start|>system\n{tool_use_protocol + <tools>JSON</tools>}\n<|im_end|>
-      <|im_start|>user\n...\n<|im_end|>
-      <|im_start|>assistant\n<think>reasoning</think>\n<tool_call>{JSON}</tool_call>\n<|im_end|>
-      <|im_start|>user\n<tool_response>...</tool_response>\n<|im_end|>
-      <|im_start|>assistant\n...\n<|im_end|>
-
-    Returns: composed string + list of (assistant_start, assistant_end) char-index pairs
-             so the caller can derive token-level assistant-only loss masks.
-    """
-    msgs = item['messages']
-    tools = item.get('tools') or []
-
-    pieces = []  # list of (text, role) for boundary tracking
-    sys_msg = msgs[0] if msgs and msgs[0].get('role') == 'system' else None
-    sys_content = (sys_msg.get('content') or '') if sys_msg else ''
-    if tools:
-        tools_block = (
-            "\n\n# Tools\n\nYou have access to the following functions:\n\n<tools>\n"
-            + "\n".join(json.dumps(t) for t in tools)
-            + "\n</tools>\n\nFor each function call, return a json object with"
-              " function name and arguments within <tool_call></tool_call> tags:\n"
-              "<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n"
-              "</tool_call>"
-        )
-        sys_content = sys_content + tools_block
-    if sys_content:
-        pieces.append((f"<|im_start|>system\n{sys_content}<|im_end|>", "system"))
-
-    start_idx = 1 if sys_msg else 0
-    for m in msgs[start_idx:]:
-        role = m.get('role', '')
-        content = m.get('content') or ''
-        tcs = m.get('tool_calls') or []
-
-        if role == 'assistant':
-            body = content
-            for tc in tcs:
-                fn = (tc.get('function') or {})
-                name = fn.get('name', '')
-                args_raw = fn.get('arguments', '{}')
-                if isinstance(args_raw, str):
-                    try:
-                        args = json.loads(args_raw)
-                    except Exception:
-                        args = args_raw
-                else:
-                    args = args_raw
-                hermes_call = "<tool_call>\n" + json.dumps({"name": name, "arguments": args}) + "\n</tool_call>"
-                body = body + ("\n" if body else "") + hermes_call
-            pieces.append((f"<|im_start|>assistant\n{body}<|im_end|>", "assistant"))
-        elif role == 'tool':
-            tr = content
-            if not tr.startswith('<tool_response>'):
-                tr = f"<tool_response>\n{tr}\n</tool_response>"
-            pieces.append((f"<|im_start|>user\n{tr}<|im_end|>", "tool"))
-        else:
-            pieces.append((f"<|im_start|>{role}\n{content}<|im_end|>", role))
-
-    sep = "\n"
-    full_text = sep.join(p[0] for p in pieces)
-
-    # Per-piece char index ranges + role tags
-    char_ranges = []
-    pos = 0
-    for i, (text, role) in enumerate(pieces):
-        start = pos
-        end = pos + len(text)
-        char_ranges.append((start, end, role))
-        pos = end + (len(sep) if i < len(pieces) - 1 else 0)
-
-    return full_text, char_ranges
-
-
-def _tokenize_sft_pair(messages_or_item, tokenizer):
-    """Path (D): tokenize hand-composed Hermes JSON conversation with assistant-only loss.
-
-    Accepts either:
-      - dict with 'messages' (and optional 'tools') — composes via _compose_hermes_conversation
-      - list of messages (legacy) — wraps in {'messages': msgs}
-
-    Loss mask: -100 for everything; assistant turn TOKENS get full_ids[j].
-    Boundaries are computed by tokenizing the prefix string (everything before
-    each assistant piece) and the prefix+including string, taking the token
-    range between them.
-    """
-    if isinstance(messages_or_item, dict):
-        item = messages_or_item
-    else:
-        item = {"messages": messages_or_item}
-
-    full_text, char_ranges = _compose_hermes_conversation(item)
-    full_ids = tokenizer.encode(full_text, add_special_tokens=False)
-    labels = [-100] * len(full_ids)
-
-    for (start_char, end_char, role) in char_ranges:
-        if role != "assistant":
-            continue
-        prefix_text = full_text[:start_char]
-        incl_text = full_text[:end_char]
-        prefix_ids = tokenizer.encode(prefix_text, add_special_tokens=False) if prefix_text else []
-        incl_ids = tokenizer.encode(incl_text, add_special_tokens=False)
-        start_tok = len(prefix_ids)
-        end_tok = len(incl_ids)
-        for j in range(start_tok, min(end_tok, len(full_ids))):
-            labels[j] = full_ids[j]
-
-    if all(l == -100 for l in labels):
-        labels = list(full_ids)
-    return full_ids, labels
+from one_wire import (
+    EmptyAssistantMask,
+    install_chat_template,
+    templated_token_len,
+    tokenize_sft_record,
+)
 
 
 class SFTCollator:
@@ -261,15 +149,9 @@ def load_chat_jsonl(path: str) -> list:
     return rows
 
 
-def _templated_token_len(messages, tok):
-    """Token length of a messages list after applying the chat template."""
-    try:
-        text = tok.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False, enable_thinking=False,
-        )
-    except Exception:
-        text = "\n".join(f"<|{m.get('role','')}|>\n{m.get('content','')}" for m in messages)
-    return len(tok.encode(text, add_special_tokens=False))
+def _templated_token_len(item_or_messages, tok):
+    """Token length of the canonical one-wire rendering."""
+    return templated_token_len(item_or_messages, tok)
 
 
 def chunk_conversation(item, tok, max_seq):
@@ -287,7 +169,7 @@ def chunk_conversation(item, tok, max_seq):
     """
     messages = item["messages"]
     tools = item.get("tools")
-    if _templated_token_len(messages, tok) <= max_seq:
+    if _templated_token_len(item, tok) <= max_seq:
         return [item]
 
     sys_msg = None
@@ -305,7 +187,7 @@ def chunk_conversation(item, tok, max_seq):
 
     sys_only_msgs = [sys_msg] if sys_msg else []
     sys_overhead = (
-        _templated_token_len(sys_only_msgs, tok) if sys_only_msgs else 0
+        _templated_token_len({"messages": sys_only_msgs, "tools": tools}, tok) if sys_only_msgs else 0
     )
     if max_seq - sys_overhead - 64 < 256:
         # System + tools alone is near budget — can't chunk meaningfully.
@@ -332,7 +214,7 @@ def chunk_conversation(item, tok, max_seq):
 
     def pack_len(pair_list):
         flat = [m for p in pair_list for m in p]
-        return _templated_token_len(sys_only_msgs + flat, tok)
+        return _templated_token_len({"messages": sys_only_msgs + flat, "tools": tools}, tok)
 
     # Greedy pack pairs into chunks
     chunks = []
@@ -375,7 +257,8 @@ def chunk_chat_item(item, tok, max_seq, anchor_size=512, overlap_tokens=512):
     drop content.
     """
     messages = item["messages"]
-    if _templated_token_len(messages, tok) <= max_seq:
+    tools = item.get("tools")
+    if _templated_token_len(item, tok) <= max_seq:
         return [item]
 
     # Find largest assistant message
@@ -395,7 +278,7 @@ def chunk_chat_item(item, tok, max_seq, anchor_size=512, overlap_tokens=512):
     asst_ids = tok.encode(asst_text, add_special_tokens=False)
 
     # Budget: full templated len minus the assistant's tokens + a safety margin
-    other_tokens = _templated_token_len(messages, tok) - target_len
+    other_tokens = _templated_token_len(item, tok) - target_len
     body_capacity = max_seq - other_tokens - 64
     if body_capacity < 256:
         # Even with assistant gone we still don't fit — keep original (rare;
@@ -413,7 +296,10 @@ def chunk_chat_item(item, tok, max_seq, anchor_size=512, overlap_tokens=512):
         chunk_text = tok.decode(slice_ids, skip_special_tokens=True)
         new_msgs = copy.deepcopy(messages)
         new_msgs[target_idx]["content"] = chunk_text
-        out.append({"messages": new_msgs})
+        new_item = {"messages": new_msgs}
+        if tools:
+            new_item["tools"] = tools
+        out.append(new_item)
         if start + body_capacity >= len(asst_ids):
             break
     return out if out else [item]
@@ -449,6 +335,8 @@ def main():
     tok = AutoTokenizer.from_pretrained(args.model, use_fast=True)
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
+    template_path = install_chat_template(tok)
+    log.info(f"Chat template: loaded canonical {template_path} (train==serve one-wire render)")
 
     log.info("Loading CPT checkpoint in bf16...")
     model = AutoModelForCausalLM.from_pretrained(
@@ -479,10 +367,8 @@ def main():
     #   2. chunk_chat_item: invoked as inner fallback when a single pair still
     #      exceeds budget. Splits the largest assistant message with anchored
     #      overlap.
-    # Budget uses 0.92*max_seq because chunk_*_item measures the chat-template
-    # rendering while _tokenize_sft_pair uses a hand-composed Hermes wire format;
-    # they diverge by a small constant (im_start/end framing). Margin ensures
-    # chunks still fit when re-encoded as Hermes.
+    # Budget uses 0.92*max_seq as a safety margin around the canonical chat
+    # template framing and tool schema overhead.
     chunk_budget = int(args.max_seq * 0.92)
     log.info(f"Chunking {len(rows)} items to fit max_seq={args.max_seq} (budget={chunk_budget})...")
     chunked_rows = []
@@ -496,26 +382,34 @@ def main():
              f"({n_split} items split into multiple chunks)")
     rows = chunked_rows
 
-    # Path (D): pre-compose + pre-tokenize at Python level, then build Dataset
+    # Canonical one-wire render + pre-tokenize at Python level, then build Dataset
     # with uniform {input_ids, labels} schema. Avoids PyArrow schema inference
     # failure on heterogeneous nested structures (tool_calls present in some
     # assistant messages but not others — pyarrow.ArrowInvalid: "cannot mix
     # struct and non-struct, non-null values").
     log.info(f"Pre-tokenizing (compose + encode + mask) {len(rows)} items, max_seq={args.max_seq}...")
     pretokenized = []
-    n_dropped = 0
+    n_too_long = 0
+    n_empty_mask = 0
+    n_tokenize_error = 0
     for r in rows:
         try:
-            ids, lbls = _tokenize_sft_pair(r, tok)
-        except Exception as e:
-            n_dropped += 1
+            ids, lbls = tokenize_sft_record(r, tok)
+        except EmptyAssistantMask:
+            n_empty_mask += 1
+            continue
+        except Exception:
+            n_tokenize_error += 1
             continue
         if len(ids) > args.max_seq:
-            n_dropped += 1
+            n_too_long += 1
             continue
         pretokenized.append({"input_ids": ids, "labels": lbls})
     log.info(f"Pre-tokenized: {len(rows)} items -> {len(pretokenized)} kept "
-             f"({n_dropped} dropped because > {args.max_seq} tokens or compose failed)")
+             f"({n_too_long} > {args.max_seq} tokens, {n_empty_mask} empty assistant masks, "
+             f"{n_tokenize_error} render/tokenize errors)")
+    if not pretokenized:
+        raise RuntimeError("No usable SFT rows after canonical render/mask filtering")
 
     tokenized = Dataset.from_list(pretokenized)
     log.info(f"Built Dataset with {len(tokenized)} sequences")

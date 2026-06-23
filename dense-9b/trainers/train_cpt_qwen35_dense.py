@@ -37,12 +37,13 @@ from pathlib import Path
 import torch
 from datasets import Dataset
 from transformers import (
-    AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
 )
+
+from model_class_guard import load_qwen35_text_causal_lm_checked
 
 logging.basicConfig(
     level=logging.INFO,
@@ -206,7 +207,7 @@ def main():
         tok.pad_token = tok.eos_token
 
     log.info("Loading model in bf16...")
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_qwen35_text_causal_lm_checked(
         args.model,
         torch_dtype=torch.bfloat16,
         device_map="auto",
