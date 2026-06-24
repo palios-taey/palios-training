@@ -43,6 +43,7 @@ import json
 import math
 import logging
 import time
+from contextlib import nullcontext
 
 import torch
 import torch.nn.functional as F
@@ -1321,7 +1322,9 @@ def main():
                 global_step += 1
                 continue
 
-            accelerator.backward(loss)
+            sync_context = nullcontext() if group_end else model.no_sync()
+            with sync_context:
+                accelerator.backward(loss)
             if not group_end:
                 continue
 

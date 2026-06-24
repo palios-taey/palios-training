@@ -19,7 +19,7 @@ fsdp_config:
   fsdp_cpu_ram_efficient_loading: false
   fsdp_forward_prefetch: true   # PERF (Perplexity DR v2 2026-04-28): overlaps next-layer all-gather with current-layer forward; +10-18% step-time win on multi-node FSDP. Already proven in sibling isma/training_configs/fsdp_cpt.yaml. Static-graph caveat from LoRA YAMLs doesn't apply — wrap is per-DecoderLayer and within-layer the graph is static even with dynamic input padding.
   fsdp_offload_params: false
-  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_sharding_strategy: SHARD_GRAD_OP
   fsdp_state_dict_type: SHARDED_STATE_DICT
   fsdp_sync_module_states: true
   fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer
