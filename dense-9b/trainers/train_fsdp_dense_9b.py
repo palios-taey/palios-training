@@ -449,9 +449,9 @@ class BucketCPTDataset(Dataset):
 
     def __getitem__(self, key):
         if isinstance(key, tuple):
-            idx, loss_denom_tokens, group_end, group_id, micro_id = key
+            idx, loss_denom_tokens, group_end, group_id, micro_id, pad_to_length = key
         else:
-            idx, loss_denom_tokens, group_end, group_id, micro_id = key, 0, True, -1, 0
+            idx, loss_denom_tokens, group_end, group_id, micro_id, pad_to_length = key, 0, True, -1, 0, 0
         entry = self.entries[idx]
         with open(self.cpt_path, "rb") as f:
             f.seek(entry["offset"])
@@ -471,6 +471,7 @@ class BucketCPTDataset(Dataset):
             "micro_id": int(micro_id),
             "bucket": entry["bucket"],
             "length": entry["length"],
+            "pad_to_length": int(pad_to_length),
         }
 
 
@@ -481,13 +482,12 @@ class CounterLike(dict):
 
 
 class DistributedTokenBucketBatchSampler:
-    """Distributed bucket sampler with exact token-budget accumulation groups.
+    """Accelerate-sharded bucket sampler with exact token-budget groups.
 
-    It forms global microbatches inside each length bucket, slices each
-    microbatch by rank, then shuffles microbatch order across buckets. Groups of
-    microbatches carry a shared global loss-token denominator so the training
-    loop can backprop sum(real-token losses) / real-token count exactly without
-    retaining multiple forward graphs.
+    The sampler returns an interleaved global schedule:
+    [micro0-rank0, micro0-rank1, ..., micro1-rank0, ...]. Accelerate's
+    BatchSamplerShard(split_batches=False) then gives each process its rank's
+    slice while preserving the same bucket and microbatch ordinal across ranks.
     """
 
     def __init__(
@@ -527,21 +527,23 @@ class DistributedTokenBucketBatchSampler:
             per_rank = self.bucket_batch_sizes[bucket]
             global_size = per_rank * self.num_replicas
             indices = sorted(bucket_to_indices[bucket], key=lambda i: (self.dataset.entries[i]["length"], i))
-            if not indices:
+            usable = len(indices) - (len(indices) % global_size)
+            if usable <= 0:
                 continue
-            pad = (-len(indices)) % global_size
-            if pad:
-                repeats = (indices * ((pad // len(indices)) + 1))[:pad]
-                indices = indices + repeats
+            indices = indices[:usable]
             for start in range(0, len(indices), global_size):
                 global_indices = indices[start : start + global_size]
-                rank_start = self.rank * per_rank
-                rank_indices = global_indices[rank_start : rank_start + per_rank]
+                rank_indices = [
+                    global_indices[r * per_rank : (r + 1) * per_rank]
+                    for r in range(self.num_replicas)
+                ]
                 global_loss_tokens = sum(self.dataset.entries[i]["loss_tokens"] for i in global_indices)
+                max_length = max(self.dataset.entries[i]["length"] for i in global_indices)
                 microbatches.append({
                     "bucket": bucket,
                     "indices": rank_indices,
                     "global_loss_tokens": global_loss_tokens,
+                    "max_length": max_length,
                 })
 
         rng.shuffle(microbatches)
@@ -557,10 +559,11 @@ class DistributedTokenBucketBatchSampler:
                 return
             for micro_id, micro in enumerate(group):
                 group_end = micro_id == len(group) - 1
-                batches.append([
-                    (idx, group_tokens, group_end, group_id, micro_id)
-                    for idx in micro["indices"]
-                ])
+                for rank_indices in micro["indices"]:
+                    batches.append([
+                        (idx, group_tokens, group_end, group_id, micro_id, micro["max_length"])
+                        for idx in rank_indices
+                    ])
             group = []
             group_tokens = 0
             group_id += 1
@@ -973,6 +976,8 @@ def main():
 
     def collate_fn(batch):
         max_len = max(len(b["input_ids"]) for b in batch)
+        if "pad_to_length" in batch[0]:
+            max_len = max(max_len, max(int(b["pad_to_length"]) for b in batch))
         target = _round_up(max_len, PAD_TO_MULTIPLE_OF)
         n = len(batch)
         input_ids = torch.full((n, target), pad_id, dtype=torch.long)
@@ -1000,6 +1005,7 @@ def main():
             out["group_id"] = torch.tensor([int(b["group_id"]) for b in batch], dtype=torch.long)
             out["micro_id"] = torch.tensor([int(b["micro_id"]) for b in batch], dtype=torch.long)
             out["length"] = torch.tensor([int(b["length"]) for b in batch], dtype=torch.long)
+            out["pad_to_length"] = torch.tensor([int(b["pad_to_length"]) for b in batch], dtype=torch.long)
             out["bucket"] = [b["bucket"] for b in batch]
         return out
 
