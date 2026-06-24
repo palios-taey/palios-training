@@ -45,6 +45,7 @@ import logging
 import time
 
 import torch
+import torch.nn.functional as F
 import torch.distributed as dist
 import psutil
 from accelerate import Accelerator
@@ -329,6 +330,248 @@ class BucketSFTDataset(Dataset):
     def __getitem__(self, idx):
         ids, labels = self.samples[idx]
         return {"input_ids": ids, "labels": labels, "is_dpo": False}
+
+
+class BucketCPTDataset(Dataset):
+    """Byte-offset CPT dataset with cached token lengths for bucket batching."""
+
+    def __init__(self, cpt_path, tokenizer, max_seq):
+        self.cpt_path = cpt_path
+        self.tokenizer = tokenizer
+        self.max_seq = max_seq
+        self.eos_token_id = tokenizer.eos_token_id
+        if self.eos_token_id is None:
+            raise RuntimeError("CPT training requires tokenizer.eos_token_id")
+
+        import hashlib, pickle, time
+        corpus_st = os.stat(cpt_path)
+        cache_key_parts = [
+            os.path.abspath(cpt_path),
+            str(corpus_st.st_size),
+            str(int(corpus_st.st_mtime)),
+            getattr(tokenizer, "name_or_path", "?"),
+            f"max_seq={max_seq}",
+            "bucket_cpt_index_v1",
+        ]
+        cache_key = hashlib.sha256("|".join(cache_key_parts).encode()).hexdigest()[:16]
+        cache_dir = os.path.join(os.path.dirname(cpt_path), "tokenized_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, f"cpt_index_{cache_key}.pkl")
+
+        if os.path.exists(cache_path):
+            try:
+                t0 = time.time()
+                with open(cache_path, "rb") as f:
+                    self.entries = pickle.load(f)
+                log.info(
+                    f"BucketCPTDataset: loaded {len(self.entries)} length-index entries "
+                    f"from {cache_path} in {time.time()-t0:.1f}s"
+                )
+                self._log_stats()
+                return
+            except Exception as e:
+                log.warning(f"CPT index cache load failed ({e}); rebuilding")
+
+        self.entries = []
+        bucket_counts = CounterLike()
+        log.info(f"Building CPT length index from {cpt_path}...")
+        t0 = time.time()
+        with open(cpt_path, "rb") as f:
+            while True:
+                offset = f.tell()
+                raw = f.readline()
+                if not raw:
+                    break
+                if not raw.strip():
+                    continue
+                try:
+                    row = json.loads(raw.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                text = str(row.get("text", "")).strip()
+                if not text:
+                    continue
+                length = len(tokenizer.encode(text, add_special_tokens=False)) + 1
+                if length > max_seq:
+                    raise RuntimeError(
+                        f"CPT row exceeds max_seq: {length}>{max_seq} at byte offset {offset}; "
+                        "rebuild the corpus before launching training"
+                    )
+                bucket = self.bucket_for_length(length)
+                entry = {
+                    "offset": offset,
+                    "length": length,
+                    "loss_tokens": max(length - 1, 1),
+                    "bucket": bucket,
+                }
+                self.entries.append(entry)
+                bucket_counts[bucket] += 1
+
+        if not self.entries:
+            raise RuntimeError(f"No CPT rows indexed from {cpt_path}")
+
+        log.info(
+            f"BucketCPTDataset: indexed {len(self.entries)} rows in {time.time()-t0:.1f}s "
+            f"buckets={dict(bucket_counts)}"
+        )
+        try:
+            tmp_path = cache_path + f".tmp.{os.getpid()}"
+            with open(tmp_path, "wb") as f:
+                pickle.dump(self.entries, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.rename(tmp_path, cache_path)
+            log.info(f"Saved CPT length index cache to {cache_path}")
+        except Exception as e:
+            log.warning(f"CPT index cache save failed ({e}); training will proceed without cache")
+        self._log_stats()
+
+    @staticmethod
+    def bucket_for_length(length):
+        if length < 2048:
+            return "short"
+        if length < 8192:
+            return "mid"
+        return "long"
+
+    def _log_stats(self):
+        lengths = sorted(e["length"] for e in self.entries)
+        bucket_counts = CounterLike()
+        for entry in self.entries:
+            bucket_counts[entry["bucket"]] += 1
+        p90 = lengths[int(0.9 * (len(lengths) - 1))]
+        log.info(
+            f"BucketCPTDataset stats: rows={len(lengths)} min={lengths[0]} "
+            f"median={lengths[len(lengths)//2]} p90={p90} max={lengths[-1]} "
+            f"buckets={dict(bucket_counts)}"
+        )
+
+    def __len__(self):
+        return len(self.entries)
+
+    def __getitem__(self, key):
+        if isinstance(key, tuple):
+            idx, loss_denom_tokens, group_end, group_id, micro_id = key
+        else:
+            idx, loss_denom_tokens, group_end, group_id, micro_id = key, 0, True, -1, 0
+        entry = self.entries[idx]
+        with open(self.cpt_path, "rb") as f:
+            f.seek(entry["offset"])
+            raw = f.readline()
+        row = json.loads(raw.decode("utf-8"))
+        text = str(row.get("text", "")).strip()
+        ids = self.tokenizer.encode(text, add_special_tokens=False) + [self.eos_token_id]
+        if len(ids) > self.max_seq:
+            raise RuntimeError(f"CPT row exceeds max_seq after tokenize: {len(ids)}>{self.max_seq}")
+        return {
+            "input_ids": ids,
+            "labels": list(ids),
+            "is_dpo": False,
+            "loss_denom_tokens": int(loss_denom_tokens),
+            "group_end": bool(group_end),
+            "group_id": int(group_id),
+            "micro_id": int(micro_id),
+            "bucket": entry["bucket"],
+            "length": entry["length"],
+        }
+
+
+class CounterLike(dict):
+    def __missing__(self, key):
+        self[key] = 0
+        return 0
+
+
+class DistributedTokenBucketBatchSampler:
+    """Distributed bucket sampler with exact token-budget accumulation groups.
+
+    It forms global microbatches inside each length bucket, slices each
+    microbatch by rank, then shuffles microbatch order across buckets. Groups of
+    microbatches carry a shared global loss-token denominator so the training
+    loop can backprop sum(real-token losses) / real-token count exactly without
+    retaining multiple forward graphs.
+    """
+
+    def __init__(
+        self,
+        dataset,
+        num_replicas,
+        rank,
+        bucket_batch_sizes,
+        target_tokens_per_step,
+        seed=42,
+    ):
+        self.dataset = dataset
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.bucket_batch_sizes = bucket_batch_sizes
+        self.target_tokens_per_step = target_tokens_per_step
+        self.seed = seed
+        self.epoch = 0
+
+    def set_epoch(self, epoch):
+        self.epoch = epoch
+
+    def __iter__(self):
+        return iter(self._rank_batches())
+
+    def __len__(self):
+        return len(self._rank_batches())
+
+    def _rank_batches(self):
+        rng = random.Random(self.seed + self.epoch)
+        bucket_to_indices = {"short": [], "mid": [], "long": []}
+        for idx, entry in enumerate(self.dataset.entries):
+            bucket_to_indices[entry["bucket"]].append(idx)
+
+        microbatches = []
+        for bucket in ("short", "mid", "long"):
+            per_rank = self.bucket_batch_sizes[bucket]
+            global_size = per_rank * self.num_replicas
+            indices = sorted(bucket_to_indices[bucket], key=lambda i: (self.dataset.entries[i]["length"], i))
+            if not indices:
+                continue
+            pad = (-len(indices)) % global_size
+            if pad:
+                repeats = (indices * ((pad // len(indices)) + 1))[:pad]
+                indices = indices + repeats
+            for start in range(0, len(indices), global_size):
+                global_indices = indices[start : start + global_size]
+                rank_start = self.rank * per_rank
+                rank_indices = global_indices[rank_start : rank_start + per_rank]
+                global_loss_tokens = sum(self.dataset.entries[i]["loss_tokens"] for i in global_indices)
+                microbatches.append({
+                    "bucket": bucket,
+                    "indices": rank_indices,
+                    "global_loss_tokens": global_loss_tokens,
+                })
+
+        rng.shuffle(microbatches)
+
+        batches = []
+        group = []
+        group_tokens = 0
+        group_id = 0
+
+        def flush_group():
+            nonlocal group, group_tokens, group_id
+            if not group:
+                return
+            for micro_id, micro in enumerate(group):
+                group_end = micro_id == len(group) - 1
+                batches.append([
+                    (idx, group_tokens, group_end, group_id, micro_id)
+                    for idx in micro["indices"]
+                ])
+            group = []
+            group_tokens = 0
+            group_id += 1
+
+        for micro in microbatches:
+            group.append(micro)
+            group_tokens += micro["global_loss_tokens"]
+            if group_tokens >= self.target_tokens_per_step:
+                flush_group()
+        flush_group()
+        return batches
 
 
 class CombinedSFTDataset(Dataset):
@@ -693,17 +936,24 @@ def main():
     # SFT mode: SFT_DIR points at a dir with *.jsonl messages-format data.
     #           Use BucketSFTDataset (length-sorted, dynamic-padding bucket).
     # CPT mode: SFT_DIR is empty AND CPT_DATA points at a jsonl with
-    #           {"text": "..."} entries. Use CombinedSFTDataset which has the
-    #           is_cpt branch that tokenizes raw text + supervises all tokens.
-    #           Random sampling (no length sort) for CPT — fine because pure
-    #           CPT has no chat-template structure to align.
+    #           {"text": "..."} entries. Use BucketCPTDataset by default:
+    #           length buckets, dynamic padding, token-average loss, and
+    #           token-budget accumulation. Set CPT_BUCKETING=0 only for a
+    #           diagnostic rollback to the old random CombinedSFTDataset path.
+    cpt_bucket_mode = False
     if cpt_data and (not sft_dir or not os.path.isdir(sft_dir)):
-        if accelerator.is_main_process:
-            log.info(f"CPT mode: dataset = CombinedSFTDataset(cpt_path={cpt_data})")
-        dataset = CombinedSFTDataset(
-            sft_dir="", cpt_path=cpt_data, general_dir="",
-            tokenizer=tokenizer, max_seq=max_seq,
-        )
+        if os.environ.get("CPT_BUCKETING", "1") == "0":
+            if accelerator.is_main_process:
+                log.info(f"CPT mode: dataset = CombinedSFTDataset(cpt_path={cpt_data}) [BUCKETING DISABLED]")
+            dataset = CombinedSFTDataset(
+                sft_dir="", cpt_path=cpt_data, general_dir="",
+                tokenizer=tokenizer, max_seq=max_seq,
+            )
+        else:
+            if accelerator.is_main_process:
+                log.info(f"CPT mode: dataset = BucketCPTDataset(cpt_path={cpt_data})")
+            dataset = BucketCPTDataset(cpt_data, tokenizer, max_seq)
+            cpt_bucket_mode = True
     else:
         sft_jsonl = os.environ.get(
             "SFT_JSONL",
@@ -727,32 +977,80 @@ def main():
         n = len(batch)
         input_ids = torch.full((n, target), pad_id, dtype=torch.long)
         labels = torch.full((n, target), -100, dtype=torch.long)
+        attention_mask = torch.zeros((n, target), dtype=torch.long)
         for i, b in enumerate(batch):
             ids = b["input_ids"]
             lbl = b["labels"]
             input_ids[i, : len(ids)] = torch.tensor(ids, dtype=torch.long)
             labels[i, : len(lbl)] = torch.tensor(lbl, dtype=torch.long)
-        return {"input_ids": input_ids, "labels": labels, "is_dpo": False}
+            attention_mask[i, : len(ids)] = 1
+        out = {
+            "input_ids": input_ids,
+            "labels": labels,
+            "attention_mask": attention_mask,
+            "is_dpo": False,
+        }
+        if "loss_denom_tokens" in batch[0]:
+            out["loss_denom_tokens"] = torch.tensor(
+                [int(b["loss_denom_tokens"]) for b in batch], dtype=torch.long
+            )
+            out["group_end"] = torch.tensor(
+                [1 if b["group_end"] else 0 for b in batch], dtype=torch.long
+            )
+            out["group_id"] = torch.tensor([int(b["group_id"]) for b in batch], dtype=torch.long)
+            out["micro_id"] = torch.tensor([int(b["micro_id"]) for b in batch], dtype=torch.long)
+            out["length"] = torch.tensor([int(b["length"]) for b in batch], dtype=torch.long)
+            out["bucket"] = [b["bucket"] for b in batch]
+        return out
 
-    # Bucket-batching sampler: partition the length-sorted dataset into
-    # contiguous chunks of size (batch_size * world_size), shuffle the chunks
-    # for some epoch-level randomization (don't shuffle within chunks — that
-    # would defeat bucket batching). Each rank reads its slot from each chunk.
-    train_batch_size = int(os.environ.get("BATCH_SIZE_PER_RANK", "4"))
-    sampler = DistributedSampler(
-        dataset,
-        num_replicas=accelerator.num_processes,
-        rank=accelerator.process_index,
-        shuffle=False,  # the dataset is already length-sorted; shuffling defeats it
-    )
-    dataloader = DataLoader(
-        dataset,
-        batch_size=train_batch_size,
-        sampler=sampler,
-        collate_fn=collate_fn,
-        pin_memory=False,
-        num_workers=0,
-    )
+    if cpt_bucket_mode:
+        bucket_batch_sizes = {
+            "short": int(os.environ.get("CPT_SHORT_BATCH", "16")),
+            "mid": int(os.environ.get("CPT_MID_BATCH", "4")),
+            "long": int(os.environ.get("CPT_LONG_BATCH", "1")),
+        }
+        token_budget_per_step = int(os.environ.get("TOKEN_BUDGET_PER_STEP", "262144"))
+        sampler = DistributedTokenBucketBatchSampler(
+            dataset,
+            num_replicas=accelerator.num_processes,
+            rank=accelerator.process_index,
+            bucket_batch_sizes=bucket_batch_sizes,
+            target_tokens_per_step=token_budget_per_step,
+            seed=42,
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_sampler=sampler,
+            collate_fn=collate_fn,
+            pin_memory=False,
+            num_workers=0,
+        )
+        if accelerator.is_main_process:
+            log.info(
+                "CPT bucket batching: "
+                f"short<2K batch/rank={bucket_batch_sizes['short']}, "
+                f"mid2-8K batch/rank={bucket_batch_sizes['mid']}, "
+                f"long8-16K batch/rank={bucket_batch_sizes['long']}, "
+                f"target_tokens/optimizer_step={token_budget_per_step}"
+            )
+    else:
+        # SFT mode keeps the previous length-sorted DistributedSampler behavior;
+        # diagnostic CPT rollback also lands here.
+        train_batch_size = int(os.environ.get("BATCH_SIZE_PER_RANK", "4"))
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=accelerator.num_processes,
+            rank=accelerator.process_index,
+            shuffle=False,  # the dataset is already length-sorted; shuffling defeats it
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=train_batch_size,
+            sampler=sampler,
+            collate_fn=collate_fn,
+            pin_memory=False,
+            num_workers=0,
+        )
 
     # ── Override FSDP mixed precision: param stays bf16, only reduce in fp32 ──
     # Accelerate's mixed_precision=bf16 upcasts ALL params to fp32 during forward → OOM.
@@ -913,6 +1211,8 @@ def main():
     dpo_weight = float(os.environ.get("DPO_WEIGHT", "0.1"))   # DPO loss weight
 
     if dpo_dir and os.path.isdir(dpo_dir):
+        if cpt_bucket_mode:
+            raise RuntimeError("DPO_DIR is incompatible with CPT token-budget bucket mode")
         dpo_dataset = CombinedSFTDataset(dpo_dir, "", "", tokenizer, max_seq)
         dpo_sampler = DistributedSampler(dpo_dataset, num_replicas=accelerator.num_processes,
                                           rank=accelerator.process_index, shuffle=True)
@@ -936,10 +1236,50 @@ def main():
             if global_step >= total_steps:
                 break
 
-            # Standard SFT loss (packed sequences)
-            outputs = model(input_ids=batch["input_ids"], labels=batch["labels"])
-            loss = outputs.loss
-            del outputs
+            token_budget_batch = "loss_denom_tokens" in batch
+            group_end = True
+            log_loss = None
+            bucket_label = "legacy"
+            group_denom_tokens = 0
+
+            if token_budget_batch:
+                group_end = bool(batch["group_end"][0].item())
+                group_denom_tokens = int(batch["loss_denom_tokens"][0].item())
+                bucket_label = batch["bucket"][0] if batch.get("bucket") else "unknown"
+                if group_denom_tokens <= 0:
+                    raise RuntimeError("CPT token-budget batch missing positive loss denominator")
+
+                outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+                shift_logits = outputs.logits[..., :-1, :].contiguous()
+                shift_labels = batch["labels"][..., 1:].contiguous()
+                token_loss_sum = F.cross_entropy(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                    ignore_index=-100,
+                    reduction="sum",
+                )
+                local_loss_tokens = (shift_labels != -100).sum().to(device=accelerator.device, dtype=torch.long)
+                loss = token_loss_sum * accelerator.num_processes / float(group_denom_tokens)
+
+                loss_stats = torch.stack([
+                    token_loss_sum.detach().float(),
+                    local_loss_tokens.detach().float(),
+                ])
+                dist.all_reduce(loss_stats, op=dist.ReduceOp.SUM)
+                log_loss = loss_stats[0] / torch.clamp(loss_stats[1], min=1.0)
+                del outputs, shift_logits, shift_labels, token_loss_sum, local_loss_tokens, loss_stats
+            else:
+                # Legacy SFT / diagnostic CPT rollback path. This remains
+                # sequence-average loss because those paths do not provide a
+                # fixed token-budget group denominator.
+                outputs = model(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch.get("attention_mask"),
+                    labels=batch["labels"],
+                )
+                loss = outputs.loss
+                log_loss = loss.detach()
+                del outputs
 
             # Periodic DPO step
             if dpo_dataloader and (global_step - resume_step) % dpo_interval == 0 and (global_step - resume_step) > 0:
@@ -971,6 +1311,9 @@ def main():
                 continue
 
             accelerator.backward(loss)
+            if not group_end:
+                continue
+
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             lr_scheduler.step()
@@ -984,9 +1327,13 @@ def main():
                 alloc = stats["allocated_bytes.all.current"]
                 reserved = stats["reserved_bytes.all.current"]
                 frag = (reserved - alloc) / reserved if reserved > 0 else 0
-                log.info(f"[step {global_step}] loss={loss.item():.4f} "
+                extra = (
+                    f" bucket={bucket_label} group_tokens={group_denom_tokens}"
+                    if token_budget_batch else ""
+                )
+                log.info(f"[step {global_step}] loss={log_loss.item():.4f} "
                          f"lr={lr_scheduler.get_last_lr()[0]:.2e} free={mem[0]/1e9:.1f}GB "
-                         f"frag={frag:.1%}")
+                         f"frag={frag:.1%}{extra}")
 
             if global_step == resume_step + 1 and accelerator.is_main_process:
                 torch.cuda.synchronize()
