@@ -1067,6 +1067,11 @@ def main():
         log.info(f"FSDP MixedPrecision: param=bf16, reduce=fp32, buffer=bf16")
 
     # ── FSDP prepare ──
+    if cpt_bucket_mode:
+        accelerator.even_batches = False
+        accelerator.dataloader_config.even_batches = False
+        if accelerator.is_main_process:
+            log.info("Accelerate even_batches=False for variable-size CPT token bucket batch_sampler")
     if accelerator.is_main_process:
         log.info("Calling accelerator.prepare()...")
     model, dataloader = accelerator.prepare(model, dataloader)
