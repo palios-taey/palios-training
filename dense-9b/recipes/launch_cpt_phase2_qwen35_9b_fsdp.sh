@@ -38,6 +38,10 @@ export NCCL_IB_HCA=rocep1s0f0:1,roceP2p1s0f0:1
 export NCCL_IB_TC=104
 export NCCL_IB_TIMEOUT=23
 export NCCL_NET_GDR_LEVEL=0
+# RCA fix-test 2026-06-28: NCCL 2.27+ defaults NCCL_NET_GDR_C2C=1, which can override GDR_LEVEL=0 on
+# C2C-attached NICs (our GB10 topology) — i.e. "GDR off" was likely FALSE. Explicitly force it off.
+export NCCL_NET_GDR_C2C="${NCCL_NET_GDR_C2C:-0}"
+export NCCL_NET_GDR_READ="${NCCL_NET_GDR_READ:-0}"
 export NCCL_IB_RETRY_CNT=7
 export NCCL_TIMEOUT=1800
 export TORCH_NCCL_DUMP_ON_TIMEOUT=1
@@ -45,13 +49,18 @@ export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=1800
 # GID INDEX PIN 2026-05-12 — see SFT launcher for rationale
 export NCCL_IB_GID_INDEX=3
 # QPS_PER_CONNECTION 2026-05-12 — see SFT launcher
-export NCCL_IB_QPS_PER_CONNECTION=4
+# RCA fix-test 2026-06-28: 4 QPs/conn × 3 peers × 2 rails = 24 concurrent RC QPs; under the first-collective
+# burst all retry-storm at once. Drop to 1 to serialize DMA (5/5 panel). Overridable.
+export NCCL_IB_QPS_PER_CONNECTION="${NCCL_IB_QPS_PER_CONNECTION:-4}"
 
 # ── FLA / Triton — GB10 sm_121 hardening ──────────────────────────────────
 export FLA_USE_TMA=0
 export TRITON_AUTOTUNE_DISABLE=1
 export FLA_DISABLE_CAUSAL_CONV1D=1
-export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True,garbage_collection_threshold:0.8"
+# RCA fix-test 2026-06-28: garbage_collection_threshold:0.8 ties to the 81%-UMA flatline at the wedge
+# (Gemini Deep Think: 0.8 GC churn -> SMMUv3 TLB-shootdown storm -> PCIe CTO -> SError/GIC lock). Made
+# env-overridable so we can A/B drop it without losing the recipe default.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True,garbage_collection_threshold:0.8}"
 export TOKENIZERS_PARALLELISM=false
 
 # ── Training paths ────────────────────────────────────────────────────────

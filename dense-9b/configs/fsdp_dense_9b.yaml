@@ -15,11 +15,12 @@ distributed_type: FSDP
 downcast_bf16: 'no'
 fsdp_config:
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
-  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_backward_prefetch: BACKWARD_POST   # peak-reduction (5/5 consult 2026-06-29, Gemini): POST holds less concurrent transient memory than PRE — shrinks the backward coincident peak that wedges .80 at 4096.
   fsdp_cpu_ram_efficient_loading: false
-  fsdp_forward_prefetch: true   # PERF (Perplexity DR v2 2026-04-28): overlaps next-layer all-gather with current-layer forward; +10-18% step-time win on multi-node FSDP. Already proven in sibling isma/training_configs/fsdp_cpt.yaml. Static-graph caveat from LoRA YAMLs doesn't apply — wrap is per-DecoderLayer and within-layer the graph is static even with dynamic input padding.
+  fsdp_forward_prefetch: false   # keep off — stacking all-gathers raises the transient peak (the wedge surface).
+  fsdp_limit_all_gathers: true   # peak-reduction (5/5 consult): serialize all-gathers so only one layer's unsharded params are in-flight → caps the transient backward peak (55GB at 4096 sits near the host-resource threshold).
   fsdp_offload_params: false
-  fsdp_sharding_strategy: FULL_SHARD
+  fsdp_sharding_strategy: SHARD_GRAD_OP   # Jesse's designed experiment 356638c (perf-exp1): ZeRO-2 keeps params resident (no per-layer AllGather in backward) → comm 216GB→40GB/step (~5x). The AllGather burst is what overwhelms the host-staged CPU-proxy → SBSA watchdog timeout → kernel panic (CAPTURED d3baf51, rank0 mid-AllGather). Trades memory (have 119GB) for comm (the wedge cause). FULL_SHARD was the regression I was running.
   fsdp_state_dict_type: SHARDED_STATE_DICT
   fsdp_sync_module_states: true
   fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer
