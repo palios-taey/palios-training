@@ -43,6 +43,7 @@ import json
 import math
 import logging
 import time
+from contextlib import nullcontext
 
 import torch
 import torch.nn.functional as F
@@ -1321,7 +1322,9 @@ def main():
                 global_step += 1
                 continue
 
-            accelerator.backward(loss)
+            sync_context = nullcontext() if group_end else model.no_sync()
+            with sync_context:
+                accelerator.backward(loss)
             if not group_end:
                 continue
 
@@ -1338,13 +1341,18 @@ def main():
                 alloc = stats["allocated_bytes.all.current"]
                 reserved = stats["reserved_bytes.all.current"]
                 frag = (reserved - alloc) / reserved if reserved > 0 else 0
+                # Transient peak since last window — the backward-pass high-water that the
+                # inter-step free= trough never shows (wedge diagnostic, consult 2026-06-29).
+                peak_res = stats["reserved_bytes.all.peak"] / 1e9
+                peak_alloc = stats["allocated_bytes.all.peak"] / 1e9
                 extra = (
                     f" bucket={bucket_label} group_tokens={group_denom_tokens}"
                     if token_budget_batch else ""
                 )
                 log.info(f"[step {global_step}] loss={log_loss.item():.4f} "
                          f"lr={lr_scheduler.get_last_lr()[0]:.2e} free={mem[0]/1e9:.1f}GB "
-                         f"frag={frag:.1%}{extra}")
+                         f"frag={frag:.1%} peakRes={peak_res:.1f}GB peakAlloc={peak_alloc:.1f}GB{extra}")
+                torch.cuda.reset_peak_memory_stats()  # per-window peak
 
             if global_step == resume_step + 1 and accelerator.is_main_process:
                 torch.cuda.synchronize()

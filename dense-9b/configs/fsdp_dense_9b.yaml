@@ -1,0 +1,35 @@
+# 4-node FSDP config for Qwen3.5-9B-Base full-parameter SFT.
+#
+# Adapted from jesse/production_configs/fsdp_lora.yaml (which was for the
+# 35B-A3B MoE LoRA+ESFT runs). Differences from that file:
+#   - transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer (dense 9B class)
+#                                    instead of Qwen3_5MoeDecoderLayer
+#   - mixed_precision: 'no' is preserved — accelerate's native bf16 mode
+#     creates an fp32 master copy of every parameter which causes UMA OOM.
+#     The trainer loads weights in bf16 directly and Trainer's bf16=True
+#     handles the activation/gradient cast.
+
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: FSDP
+downcast_bf16: 'no'
+fsdp_config:
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_backward_prefetch: BACKWARD_POST   # peak-reduction (5/5 consult 2026-06-29, Gemini): POST holds less concurrent transient memory than PRE — shrinks the backward coincident peak that wedges .80 at 4096.
+  fsdp_cpu_ram_efficient_loading: false
+  fsdp_forward_prefetch: false   # keep off — stacking all-gathers raises the transient peak (the wedge surface).
+  fsdp_limit_all_gathers: true   # peak-reduction (5/5 consult): serialize all-gathers so only one layer's unsharded params are in-flight → caps the transient backward peak (55GB at 4096 sits near the host-resource threshold).
+  fsdp_offload_params: false
+  fsdp_sharding_strategy: SHARD_GRAD_OP   # Jesse's designed experiment 356638c (perf-exp1): ZeRO-2 keeps params resident (no per-layer AllGather in backward) → comm 216GB→40GB/step (~5x). The AllGather burst is what overwhelms the host-staged CPU-proxy → SBSA watchdog timeout → kernel panic (CAPTURED d3baf51, rank0 mid-AllGather). Trades memory (have 119GB) for comm (the wedge cause). FULL_SHARD was the regression I was running.
+  fsdp_state_dict_type: SHARDED_STATE_DICT
+  fsdp_sync_module_states: true
+  fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer
+  fsdp_use_orig_params: true
+machine_rank: 0
+main_training_function: main
+mixed_precision: 'no'
+num_machines: 4
+num_processes: 4
+rdzv_backend: static
+same_network: true
+use_cpu: false
