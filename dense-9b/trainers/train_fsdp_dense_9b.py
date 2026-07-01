@@ -786,8 +786,12 @@ def main():
     # Solution: rank 0 loads to CPU (zero-copy mmap from safetensors, no CUDA allocation).
     # FSDP sync_module_states broadcasts rank 0's CPU params → CUDA on all ranks during wrap.
     # Other ranks: device_map="meta" = zero memory.
-    if accelerator.is_main_process:
-        log.info("Rank 0: loading model to CPU (zero-copy mmap, FSDP handles GPU placement)...")
+    # FSDP: only rank0 loads real weights (sync_module_states broadcasts to meta ranks during wrap).
+    # DDP (no fsdp_plugin): NO such broadcast — EVERY rank must load the full real model to CPU
+    # (accelerator.prepare() then moves each rank's copy to its GPU). 9B bf16 ≈ 18GB/node, fits 120GB.
+    _is_fsdp = getattr(accelerator.state, "fsdp_plugin", None) is not None
+    if accelerator.is_main_process or not _is_fsdp:
+        log.info(f"Rank {accelerator.process_index}: loading FULL model to CPU (real weights; fsdp={_is_fsdp})...")
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16,
@@ -796,7 +800,7 @@ def main():
             low_cpu_mem_usage=True,
         )
         vm = psutil.virtual_memory()
-        log.info(f"Rank 0: model loaded to CPU. RAM used={vm.used/1e9:.1f}GB free={vm.available/1e9:.1f}GB")
+        log.info(f"Rank {accelerator.process_index}: model loaded to CPU. RAM used={vm.used/1e9:.1f}GB free={vm.available/1e9:.1f}GB")
     else:
         log.info(f"Rank {accelerator.process_index}: loading model on meta device (zero memory)...")
         model = AutoModelForCausalLM.from_pretrained(
@@ -933,7 +937,7 @@ def main():
         transformer_layer_cls={Qwen3_5DecoderLayer},
     )
     # DDP (MULTI_GPU) has no fsdp_plugin — full model resident per node, no wrap policy.
-    if accelerator.state.fsdp_plugin is not None:
+    if getattr(accelerator.state, "fsdp_plugin", None) is not None:
         accelerator.state.fsdp_plugin.auto_wrap_policy = layer_policy
         if accelerator.is_main_process:
             log.info("FSDP wrap policy: Qwen3_5DecoderLayer (full-param FT, no LoRA wrap)")
@@ -1074,7 +1078,7 @@ def main():
         buffer_dtype=torch.bfloat16,
     )
     # DDP has no fsdp_plugin: model is already bf16, grads all-reduce in bf16 (no fp32 master).
-    if accelerator.state.fsdp_plugin is not None:
+    if getattr(accelerator.state, "fsdp_plugin", None) is not None:
         accelerator.state.fsdp_plugin.mixed_precision_policy = mp_policy
         if accelerator.is_main_process:
             log.info(f"FSDP MixedPrecision: param=bf16, reduce=fp32, buffer=bf16")
@@ -1455,7 +1459,7 @@ def _save_checkpoint(model, optimizer, lr_scheduler, tokenizer,
 
     trainable_state = {}
     shard_gb = 0.0
-    if accelerator.state.fsdp_plugin is not None:
+    if getattr(accelerator.state, "fsdp_plugin", None) is not None:
         # FSDP: params sharded — gather full params on rank0 to save.
         with FSDP.summon_full_params(model, rank0_only=True, writeback=False):
             if accelerator.is_main_process:
