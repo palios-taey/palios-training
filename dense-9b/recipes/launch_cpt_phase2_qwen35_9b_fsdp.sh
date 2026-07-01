@@ -172,7 +172,7 @@ echo ""
 # LR_ROUTER, LR_ESFT, FREEZE_CONFIG.
 
 accelerate launch \
-    --config_file "$SCRIPT_DIR/../configs/fsdp_dense_9b.yaml" \
+    --config_file "${ACCEL_CONFIG:-$SCRIPT_DIR/../configs/fsdp_dense_9b.yaml}" \
     --num_machines "$NUM_NODES" \
     --num_processes "$((NUM_NODES * GPUS_PER_NODE))" \
     --machine_rank "$RANK" \

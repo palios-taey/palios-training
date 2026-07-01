@@ -932,9 +932,13 @@ def main():
         transformer_auto_wrap_policy,
         transformer_layer_cls={Qwen3_5DecoderLayer},
     )
-    accelerator.state.fsdp_plugin.auto_wrap_policy = layer_policy
-    if accelerator.is_main_process:
-        log.info("FSDP wrap policy: Qwen3_5DecoderLayer (full-param FT, no LoRA wrap)")
+    # DDP (MULTI_GPU) has no fsdp_plugin — full model resident per node, no wrap policy.
+    if accelerator.state.fsdp_plugin is not None:
+        accelerator.state.fsdp_plugin.auto_wrap_policy = layer_policy
+        if accelerator.is_main_process:
+            log.info("FSDP wrap policy: Qwen3_5DecoderLayer (full-param FT, no LoRA wrap)")
+    elif accelerator.is_main_process:
+        log.info("DDP mode: no FSDP wrap policy (full 9B resident per node)")
 
     # ── Dataset selection: SFT (Phase 1) vs CPT (Phase 2) ─────────────────
     # SFT mode: SFT_DIR points at a dir with *.jsonl messages-format data.
@@ -1069,9 +1073,13 @@ def main():
         reduce_dtype=torch.float32,     # Gradient reductions in fp32 (fixes NaN)
         buffer_dtype=torch.bfloat16,
     )
-    accelerator.state.fsdp_plugin.mixed_precision_policy = mp_policy
-    if accelerator.is_main_process:
-        log.info(f"FSDP MixedPrecision: param=bf16, reduce=fp32, buffer=bf16")
+    # DDP has no fsdp_plugin: model is already bf16, grads all-reduce in bf16 (no fp32 master).
+    if accelerator.state.fsdp_plugin is not None:
+        accelerator.state.fsdp_plugin.mixed_precision_policy = mp_policy
+        if accelerator.is_main_process:
+            log.info(f"FSDP MixedPrecision: param=bf16, reduce=fp32, buffer=bf16")
+    elif accelerator.is_main_process:
+        log.info("DDP mode: bf16 params + bf16 grad all-reduce (no FSDP MP policy)")
 
     # ── FSDP prepare ──
     if cpt_bucket_mode:
@@ -1447,13 +1455,24 @@ def _save_checkpoint(model, optimizer, lr_scheduler, tokenizer,
 
     trainable_state = {}
     shard_gb = 0.0
-    with FSDP.summon_full_params(model, rank0_only=True, writeback=False):
+    if accelerator.state.fsdp_plugin is not None:
+        # FSDP: params sharded — gather full params on rank0 to save.
+        with FSDP.summon_full_params(model, rank0_only=True, writeback=False):
+            if accelerator.is_main_process:
+                for name, param in model.named_parameters():
+                    if param.requires_grad:
+                        trainable_state[name] = param.detach().cpu().clone()
+                shard_gb = sum(t.numel() * t.element_size() for t in trainable_state.values()) / 1e9
+                log.info(f"Gathered {len(trainable_state)} trainable tensors ({shard_gb:.2f}GB) on rank 0")
+    else:
+        # DDP: full model replicated on every rank — read rank0's copy directly (no summon).
         if accelerator.is_main_process:
-            for name, param in model.named_parameters():
+            unwrapped = accelerator.unwrap_model(model)
+            for name, param in unwrapped.named_parameters():
                 if param.requires_grad:
-                    trainable_state[name] = param.detach().cpu().clone()
+                    trainable_state[_clean_fsdp_name(name)] = param.detach().cpu().clone()
             shard_gb = sum(t.numel() * t.element_size() for t in trainable_state.values()) / 1e9
-            log.info(f"Gathered {len(trainable_state)} trainable tensors ({shard_gb:.2f}GB) on rank 0")
+            log.info(f"DDP save: {len(trainable_state)} trainable tensors ({shard_gb:.2f}GB) from rank0")
 
     if accelerator.is_main_process:
         from safetensors.torch import save_file
