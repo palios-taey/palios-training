@@ -17,6 +17,10 @@ export NCCL_IB_MERGE_NICS=1
 export NCCL_CROSS_NIC=1
 export NCCL_BUFFSIZE=8388608
 export NCCL_TIMEOUT=1800
+# heartbeat watchdog: without this a hung collective NEVER times out → blocked CUDA stream
+# + memory pressure → driver OOM → kernel panic → power-cycle. With it: clean traceback+abort.
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=120
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
 export HF_HUB_DISABLE_XET=1 HF_HOME=/home/spark/hf_cache TOKENIZERS_PARALLELISM=false
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True

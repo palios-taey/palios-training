@@ -114,7 +114,9 @@ def main():
         a.model, torch_dtype=torch.bfloat16, trust_remote_code=True,
         attn_implementation="sdpa", low_cpu_mem_usage=True)
     model.config.use_cache = False
-    model.gradient_checkpointing_enable()
+    # use_reentrant=False: reentrant GC + PEFT + DDP can deadlock (double-ready reducer
+    # hook drift across ranks under grad-accum). Non-reentrant is the PEFT-recommended default.
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.enable_input_require_grads()
     lc = LoraConfig(r=a.rank, lora_alpha=a.alpha, lora_dropout=a.dropout,
                     target_modules=a.target_modules.split(","), task_type="CAUSAL_LM")
@@ -125,7 +127,9 @@ def main():
     ds = LMDataset(a.data, tok, a.max_seq, a.mode)
     if is_main:
         print(f"[data] {len(ds)} train rows ({ds.skipped} frozen held out)", flush=True)
-    dl = DataLoader(ds, batch_size=1, shuffle=True,
+    # drop_last=True: without it, an uneven final batch gives ranks different micro-batch
+    # counts under grad-accum → NCCL all-reduce blocks forever (the varying-node hard-hang).
+    dl = DataLoader(ds, batch_size=1, shuffle=True, drop_last=True,
                     collate_fn=lambda b: collate(b, tok.pad_token_id))
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=a.lr)
 
