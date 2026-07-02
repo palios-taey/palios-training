@@ -24,7 +24,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 from peft import LoraConfig, get_peft_model
-from accelerate import Accelerator
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from accelerate.utils import set_seed
 
 
@@ -86,21 +86,26 @@ class LMDataset(Dataset):
         return {"input_ids": ids, "labels": labels}
 
 
-def collate(batch, pad_id):
-    m = max(len(b["input_ids"]) for b in batch)
+def collate(batch, pad_id, max_seq):
+    # STATIC pad to max_seq: every rank does IDENTICAL compute per micro-batch, so no
+    # fast-rank spin-polls the Grace CPU waiting on a slow rank (the multi-node thermal kill).
     ids, lbl, att = [], [], []
     for b in batch:
-        n = len(b["input_ids"])
-        ids.append(b["input_ids"] + [pad_id] * (m - n))
-        lbl.append(b["labels"] + [-100] * (m - n))
-        att.append([1] * n + [0] * (m - n))
+        n = len(b["input_ids"][:max_seq])
+        pad = max_seq - n
+        ids.append(b["input_ids"][:max_seq] + [pad_id] * pad)
+        lbl.append(b["labels"][:max_seq] + [-100] * pad)
+        att.append([1] * n + [0] * pad)
     return torch.tensor(ids), torch.tensor(lbl), torch.tensor(att)
 
 
 def main():
     a = parse()
     set_seed(0)
-    acc = Accelerator(gradient_accumulation_steps=a.grad_accum)
+    # broadcast_buffers=False: stop the per-micro-batch DDP collective barrier that makes
+    # fast ranks spin-poll the CPU (thermal/power thrash on the unified GB10 die).
+    ddp_kwargs = DistributedDataParallelKwargs(broadcast_buffers=False)
+    acc = Accelerator(gradient_accumulation_steps=a.grad_accum, kwargs_handlers=[ddp_kwargs])
     is_main = acc.is_main_process
     if is_main:
         os.makedirs(a.out, exist_ok=True)
@@ -110,9 +115,14 @@ def main():
     if tok.pad_token_id is None:
         tok.pad_token = tok.eos_token
 
+    # device_map={"": local_rank}: load DIRECT to this rank's device. Without it,
+    # from_pretrained loads 54GB to CPU RAM then acc.prepare copies another 54GB to GPU;
+    # on GB10's SHARED 128GB that is 108GB, and the multi-node pinned NCCL RoCE buffers
+    # then push the kernel SMMU over the edge → NV_ERR_NO_MEMORY panic (the ping-death).
     model = AutoModelForCausalLM.from_pretrained(
         a.model, torch_dtype=torch.bfloat16, trust_remote_code=True,
-        attn_implementation="sdpa", low_cpu_mem_usage=True)
+        attn_implementation="sdpa", low_cpu_mem_usage=True,
+        device_map={"": acc.local_process_index})
     model.config.use_cache = False
     # use_reentrant=False: reentrant GC + PEFT + DDP can deadlock (double-ready reducer
     # hook drift across ranks under grad-accum). Non-reentrant is the PEFT-recommended default.
@@ -129,8 +139,8 @@ def main():
         print(f"[data] {len(ds)} train rows ({ds.skipped} frozen held out)", flush=True)
     # drop_last=True: without it, an uneven final batch gives ranks different micro-batch
     # counts under grad-accum → NCCL all-reduce blocks forever (the varying-node hard-hang).
-    dl = DataLoader(ds, batch_size=1, shuffle=True, drop_last=True,
-                    collate_fn=lambda b: collate(b, tok.pad_token_id))
+    dl = DataLoader(ds, batch_size=1, shuffle=True, drop_last=True, pin_memory=True,
+                    collate_fn=lambda b: collate(b, tok.pad_token_id, a.max_seq))
     opt = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=a.lr)
 
     steps_per_epoch = math.ceil(len(dl) / (a.grad_accum * acc.num_processes))
