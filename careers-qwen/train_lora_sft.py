@@ -38,7 +38,45 @@ def parse():
     ap.add_argument("--log-every", type=int, default=5)
     ap.add_argument("--limit", type=int, default=0, help="cap rows (0=all; for smoke tests)")
     ap.add_argument("--target-modules", default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj")
+    ap.add_argument("--eval-probes", nargs="*", default=[], help="held-out probe jsonl(s) to eval each epoch")
+    ap.add_argument("--eval-every-epochs", type=int, default=1)
+    ap.add_argument("--eval-max-new", type=int, default=200)
     return ap.parse_args()
+
+
+import re
+
+
+def _grade(gen, target, thresh=0.7):
+    g, t = re.sub(r"\s+", " ", gen.strip()).lower(), re.sub(r"\s+", " ", target.strip()).lower()
+    exact = (g == t) or (t in g)
+    toks = [w for w in re.findall(r"[a-z0-9_\-./]+", t) if len(w) > 3]
+    contain = (sum(1 for w in toks if w in g) / len(toks)) if toks else 0.0
+    return exact, contain >= thresh
+
+
+@torch.no_grad()
+def run_probe_eval(model, tok, probe_files, max_new):
+    """Offline generation eval on held-out probes each epoch (no online-loss churn)."""
+    model.eval()
+    out = []
+    for pf in probe_files:
+        rows = [json.loads(l) for l in open(pf) if l.strip()]
+        rows = [r for r in rows if r.get("meta", {}).get("frozen_regression")]
+        n = ex = con = 0
+        for r in rows:
+            n += 1
+            m = r["messages"]
+            prompt = tok.apply_chat_template(m[:-1], add_generation_prompt=True, tokenize=False)
+            ids = tok(prompt, add_special_tokens=False, return_tensors="pt").to(model.device)
+            g = model.generate(**ids, max_new_tokens=max_new, do_sample=False,
+                               pad_token_id=tok.pad_token_id or tok.eos_token_id)
+            gen = tok.decode(g[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+            e, c = _grade(gen, m[-1]["content"])
+            ex += int(e); con += int(c)
+        out.append((os.path.basename(pf), n, ex, con))
+    model.train()
+    return out
 
 
 class ChatSFTDataset(Dataset):
@@ -129,6 +167,7 @@ def main():
 
     model.train()
     gstep, t0 = 0, time.time()
+    best = {"epoch": -1, "score": -1.0}
     for ep in range(a.epochs):
         opt.zero_grad()
         for i, (ids, lbl, att) in enumerate(dl):
@@ -147,7 +186,26 @@ def main():
                           f"{(time.time()-t0)/gstep:.1f}s/step", flush=True)
                 if gstep % a.save_every == 0:
                     model.save_pretrained(os.path.join(a.out, f"adapter-step{gstep}"))
+        # ---- eval-at-intervals: run held-out probes each epoch (no more blind epochs) ----
+        if a.eval_probes and (ep + 1) % a.eval_every_epochs == 0:
+            res = run_probe_eval(model, tok, a.eval_probes, a.eval_max_new)
+            tot_c = tot_n = 0
+            for name, n, ex, con in res:
+                tot_c += con; tot_n += n
+                print(f"[eval ep{ep+1}] {name}: exact={ex}/{n} understand={con}/{n} "
+                      f"({100*con/max(n,1):.0f}%)", flush=True)
+            score = tot_c / max(tot_n, 1)
+            if score > best["score"]:
+                best = {"epoch": ep + 1, "score": score}
+                model.save_pretrained(os.path.join(a.out, "adapter-best"))
+                print(f"[eval ep{ep+1}] NEW BEST understand={100*score:.0f}% -> adapter-best", flush=True)
+            else:
+                print(f"[eval ep{ep+1}] understand={100*score:.0f}% (best={100*best['score']:.0f}% @ep{best['epoch']}) "
+                      f"-- not improving, watch for overfit", flush=True)
     model.save_pretrained(os.path.join(a.out, "adapter-final"))
+    if a.eval_probes:
+        print(f"[done] BEST checkpoint: adapter-best @ep{best['epoch']} understand={100*best['score']:.0f}% "
+              f"(use adapter-best, not adapter-final, if final overfit past best)", flush=True)
     tok.save_pretrained(os.path.join(a.out, "adapter-final"))
     print(f"[done] adapter saved to {a.out}/adapter-final in {(time.time()-t0)/60:.1f}min")
 
