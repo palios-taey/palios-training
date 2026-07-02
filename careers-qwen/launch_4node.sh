@@ -23,7 +23,7 @@ export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=120
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG=WARN
 export HF_HUB_DISABLE_XET=1 HF_HOME=/home/spark/hf_cache TOKENIZERS_PARALLELISM=false
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False   # Chat-converged: expandable_segments stresses the GB10 driver VA path under multi-node pinned-buffer load
 cd /home/spark/careers-qwen
 python3 -m torch.distributed.run \
   --nnodes=4 --node_rank=$RANK --nproc_per_node=1 \
