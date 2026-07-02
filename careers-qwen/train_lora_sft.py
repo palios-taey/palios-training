@@ -18,7 +18,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 
 
 def parse():
@@ -38,6 +38,7 @@ def parse():
     ap.add_argument("--log-every", type=int, default=5)
     ap.add_argument("--limit", type=int, default=0, help="cap rows (0=all; for smoke tests)")
     ap.add_argument("--target-modules", default="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj")
+    ap.add_argument("--resume-adapter", default="", help="path to a CPT adapter dir to CONTINUE (recipe: CPT->SFT->DPO on one growing adapter). Empty = fresh adapter on base.")
     ap.add_argument("--eval-probes", nargs="*", default=[], help="held-out probe jsonl(s) to eval each epoch")
     ap.add_argument("--eval-every-epochs", type=int, default=1)
     ap.add_argument("--eval-max-new", type=int, default=200)
@@ -150,9 +151,15 @@ def main():
     model.gradient_checkpointing_enable()
     model.enable_input_require_grads()
 
-    lc = LoraConfig(r=a.rank, lora_alpha=a.alpha, lora_dropout=a.dropout,
-                    target_modules=a.target_modules.split(","), task_type="CAUSAL_LM")
-    model = get_peft_model(model, lc)
+    if a.resume_adapter:
+        # Recipe: CPT -> SFT -> DPO on ONE growing adapter. Continue the CPT adapter
+        # (is_trainable=True) rather than starting a fresh LoRA on the base.
+        print(f"[model] CONTINUING CPT adapter: {a.resume_adapter}")
+        model = PeftModel.from_pretrained(model, a.resume_adapter, is_trainable=True)
+    else:
+        lc = LoraConfig(r=a.rank, lora_alpha=a.alpha, lora_dropout=a.dropout,
+                        target_modules=a.target_modules.split(","), task_type="CAUSAL_LM")
+        model = get_peft_model(model, lc)
     model.print_trainable_parameters()
 
     ds = ChatSFTDataset(a.data, tok, a.max_seq, a.limit)
