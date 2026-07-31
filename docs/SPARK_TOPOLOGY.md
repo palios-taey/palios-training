@@ -13,7 +13,7 @@ inference ports and no `/v1/models` responder. Training substrate only.
 
 | role | mgmt IP | rail-A | rail-B | disk free | purpose |
 |---|---|---|---|---|---|
-| rank 0 / master | `$SPARK_MASTER` | `$SPARK_RAIL_MASTER` | rail-B `.10` | **76 GB** | torchrun rendezvous, holds checkpoints + exports |
+| rank 0 / master | `$SPARK_MASTER` | `$SPARK_RAIL_MASTER` | rail-B `.10` | **~70–80 GB** | torchrun rendezvous, holds checkpoints + exports |
 | rank 1 | mgmt `[2]` | rail-A `[2]` | rail-B `[2]` | 854 GB | |
 | rank 2 | mgmt `[3]` | rail-A `[3]` | rail-B `[3]` | 1243 GB | |
 | rank 3 | mgmt `[4]` | rail-A `[4]` | rail-B `[4]` | 1402 GB | |
@@ -29,6 +29,14 @@ kernel  6.17.0-1026-nvidia
 **`.68`'s disk is the constraint, not its compute.** As rank 0 it accumulates checkpoints
 (13 GB per DCP shard), exports, and baked artifacts, so it runs an order of magnitude tighter than
 its peers. Disk preflight on `.68` before any long run.
+
+Rank 0's free space is quoted as a range because it **moves during a run** and a fixed number here
+goes stale immediately — an earlier revision of this table said `76 GB`, and across one SFT campaign
+the same node read 81 GB, then 69 GB, then 74 GB. What actually bounds it is checkpoint rotation,
+not the starting figure: the driver keeps the **last two** checkpoints and deletes the rest after
+each session, so adapter checkpoints hold at roughly 2.4 GB steady-state rather than growing with
+step count. Read the policy, not the percentage — `.68` sitting at 99% used while bounded is not the
+same condition as `.68` filling.
 
 **BASELINE DRIFT, recorded rather than silently corrected:** `tech_baselines/INDEX.md` records the
 kernel as `6.11.0-1016-nvidia`, verified 2026-05-20. The live kernel is `6.17.0-1026-nvidia`. The
@@ -171,3 +179,64 @@ silently produced hostless `:8000` endpoints under ordinary settings.
 Compute check: ~8 × 27e9 × 40,960 tokens per step over 51.7 s ≈ **171 TFLOPS across four nodes**.
 `SUBSTRATE_PHYSICS.md` records 85–99 TFLOPS/node across 1976–2463 MHz, so there is real headroom —
 gated by thermals (§4), not by the fabric (§2).
+
+---
+
+## Confirmed against a live run — 27B SFT, 2026-07-31
+
+Everything above was measured before this campaign. A full four-node 27B LoRA SFT run
+(979-step schedule, bounded sessions, reboot between each) is the first chance to confirm or refute
+those figures under sustained real load rather than in a probe. Recorded here because a document
+that is never re-tested against production drifts into folklore.
+
+**CONFIRMED — the fabric is not the bottleneck.** This is the claim most worth re-testing, since a
+figure ~5x too low once drove a "multi-node full-param is hopeless" conclusion. Measured per-step
+across all four ranks, the collective time is a *rounding error* against step wall time:
+
+| bucket | step wall | collective | collective share |
+|---|---|---|---|
+| short/mid | 1.37–3.17 s | 0.006–0.135 s | ~0.4–4 % |
+| long (1792 tok) | 6.84–7.01 s | 0.026–0.070 s | ~0.4–1 % |
+
+Compute dominates by two orders of magnitude. Nothing about this workload is fabric-limited.
+
+**CONFIRMED — read `peakAlloc`, not `allocNow`.** Steady `alloc` sat at **55.4 GB** on every rank
+while `peak_alloc` reached **92.9 GB** in the same step. Sizing from the resting figure would
+understate real demand by ~37 GB and put a run into the pool ceiling with no warning.
+
+**CONFIRMED — unified memory holds under sustained load.** Across 550+ steps on all four ranks:
+`ooms=0`, `allocator_retries=0`, `swap=0`, `memory_guard_exit=0`. The 119 GB pool is sufficient for
+27B LoRA SFT at 1792 max sequence with 12 checkpointed layers on the long bucket.
+
+**CONFIRMED — thermals have headroom in current room conditions.** Board 64–72 °C under continuous
+load against a 90 °C watchdog and ~94 °C death point. GPU die ran 56–63 °C, i.e. *cooler than the
+board* — which is the whole reason this document says to watch the board zone and not the die.
+
+**NEW MEASUREMENT — per-node GEMM, taken at every session start.**
+
+```
+rank 0  83.6–88.0 TFLOPS      rank 2  87.9–88.2 TFLOPS
+rank 1  87.0–87.7 TFLOPS      rank 3  83.6–87.9 TFLOPS
+```
+
+All at a 2000 MHz observed clock, not the 3003 MHz max in the spec block above — the spec figure is
+the ceiling, not what a sustained workload runs at. Spread across nodes is ~5%, which is small enough
+that a materially slower node is a signal worth investigating rather than normal variance.
+
+**NEW MEASUREMENT — SFT throughput.** 880–1060 useful tokens/s per rank, varying by bucket. Padding
+overhead stayed at 1.00–1.08x, so the bucketed sampler is doing its job; a padding ratio drifting
+well above that would mean the bucket boundaries no longer match the corpus.
+
+**What a healthy step looks like, for comparison when one does not:**
+
+```
+missing_grads_sum=0   ooms=0   allocator_retries=0   swap=0
+alloc steady ~55 GB, peak_alloc 65–93 GB by bucket
+board 64–72 °C, clock ~1969–1989 MHz
+probe mean_abs_delta RISING monotonically across steps
+```
+
+That last line is the one that matters most. `mean_abs_delta` on the probe tensor climbed
+1.57e-04 → 3.78e-04 over the observed window. A run can produce every other line on this list
+looking perfect while that number stays flat — and a flat probe delta means the optimizer is not
+moving the weights, which no throughput, memory or temperature reading will ever tell you.
