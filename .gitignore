@@ -47,6 +47,7 @@ dense-9b/instrumentation/wedge_captures/
 # Driver logs from careers-qwen/run_stage2_sft_ddp_till_done.sh. Generated per launch,
 # regenerable, and they name hosts — never commit them.
 .sft_run_*.log
+.sft_bake_*.log
 
 # Per-checkpoint audit verdicts. PRODUCTION_MANIFEST lists these under missing_proof,
 # but they carry a personal email in results.txt (caught by check_no_private_data.sh),
