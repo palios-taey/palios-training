@@ -1,0 +1,68 @@
+[
+  {
+    "id": "k3_v1_evidence__p3",
+    "gold": "They're the same value at two scales. Personally he never claims more than he can back \u2014 the number plus the mechanism. In his systems that becomes the cannot-lie gates: outbound claims must trace to a source or they're mechanically denied. The gate is his personal standard made structural.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown and lacks content."
+  },
+  {
+    "id": "k3_v2_rootcause__p1",
+    "gold": "A real fix simplifies the system \u2014 it corrects the upstream shape so the broken path stops being reached. Adding guards and special cases to dodge a symptom is a patch, and patches accumulate into fragility. His rule is first error, full stop, find the cause.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown and empty."
+  },
+  {
+    "id": "k3_v3_production__p1",
+    "gold": "Proof is a real workload on real infrastructure, not a synthetic test authored to pass. He ships, observes production, and lets reality grade the work. A passing test you wrote yourself is a claim; a clean run of the real workload is evidence.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown and empty."
+  },
+  {
+    "id": "k3_v4_autonomy__p2",
+    "gold": "No. He builds mechanical gates that enforce the rules on every message and reviews the framework, not the instances. In his systems, asking him to approve individual actions is explicitly a design failure \u2014 the gate verdict is the approval.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown, missing core content."
+  },
+  {
+    "id": "k3_v8_respect__p4",
+    "gold": "No \u2014 two roles maximum, then a week of cool-off. More than that irritates the humans reading the applications, and he treats their attention as something you don't spam even when applying is free.",
+    "answer": "Unknown",
+    "verdict": "FAIL: Model answer is unknown, missing core facts."
+  },
+  {
+    "id": "k3_v11_privacy__p1",
+    "gold": "The user owns their data, identity, and behavioral signals. Systems should perceive only through channels the user can see, name, scope, revoke, and audit \u2014 and permission to observe is never permission to remember, infer, act, or share. Privacy is architecture, not a feature toggle.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown and empty."
+  },
+  {
+    "id": "k3_v12_safety__p3",
+    "gold": "Constitutional-AI research lineages, labs that publish model specs and principle documents, interpretability and verifiable-safety teams, and anyone skeptical that pure human-feedback alignment is sufficient. For alignment-research roles this is deep, real overlap \u2014 not a talking point.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown, missing core content."
+  },
+  {
+    "id": "k3_honesty_rule__p1",
+    "gold": "Say so: 'no meaningful common ground' is a first-class, correct answer. Forced or cosmetic overlap is a lie in his name and worse than skipping the values paragraph entirely \u2014 the letter proceeds without one.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown, missing core content."
+  },
+  {
+    "id": "k3_honesty_rule__p2",
+    "gold": "A specific, citable company-side signal \u2014 their published values, a founder's own posts, an engineering blog, a public decision that cost them something. Industry membership alone never qualifies; 'they're an AI company so they must value X' is exactly the inference that's banned.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown and lacks content."
+  },
+  {
+    "id": "k3_honesty_rule__p3",
+    "gold": "It fails the evidence bar: overlap requires a specific citable artifact from the company itself. Without one, the honest output is 'no meaningful common ground' and the letter runs without a values paragraph \u2014 a forced claim would be a lie in Jesse's name.",
+    "answer": "The problem is that an industry is not a value.\n\nSaying you share values because you both work in, for example, healthcare or tech, is a logical error. It confuses *what* a company does with *how* it does it.\n\nHere\u2019s why it\u2019s weak:\n\n1.  **It\u2019s generic:** Every company in that industry shares that \"value.\" It doesn\u2019t distinguish you or show you\u2019ve done specific research.\n2.  **It\u2019s not a value:** Values are principles like integrity, innovation, customer focus, or sustainability. \"Technology\" or \"Finance\" are sectors, not guiding principles.\n3.  **It misses the point:** Employers want to know if your personal work ethic and beliefs align with their specific culture and mission, not just their business model.\n\n**Better approach:**\nIdentify the company\u2019s *actual* stated values (often found in their \"About Us\" or \"Mission\" page) and connect them to your own experiences. For example: \"I see that your company values 'continuous learning.' In my last role, I dedicated 5 hours a week to upskilling in...\"\n\nThis shows genuine alignment, not just a superficial connection.",
+    "verdict": "FAIL: Different reasoning and core justification provided."
+  },
+  {
+    "id": "k3_honesty_rule__p4",
+    "gold": "At most one or two \u2014 the ones with the most concrete company-side artifact to anchor to, expressed as a shared way of working with both sides' evidence named. Ten claimed values is a tell that none are real.",
+    "answer": "unknown",
+    "verdict": "FAIL: Model answer is unknown, missing core content."
+  }
+]

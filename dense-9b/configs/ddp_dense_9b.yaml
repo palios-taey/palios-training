@@ -1,0 +1,23 @@
+# 4-node DDP (data-parallel) config for Qwen3.5-9B-Base full-FT.
+#
+# WHY DDP not FSDP: a 9B model fits on ONE 120GB Spark, so sharding is unnecessary.
+# FSDP's per-layer param AllGather/ReduceScatter is what saturates the single SMMUv3
+# command queue (no CONFIG_TEGRA241_CMDQV in kernel 6.11) → the 4096 host wedge.
+# DDP keeps the full model resident on each node and does ONE gradient all-reduce/step,
+# eliminating that per-layer collective churn.
+#
+# mixed_precision: 'no' — model is loaded in bf16 directly; accelerate's bf16 mode would
+# add an fp32 master copy (UMA OOM). Grads all-reduce in bf16 (watch for NaN at high seq;
+# at 4096 the FSDP runs were finite).
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: MULTI_GPU
+downcast_bf16: 'no'
+machine_rank: 0
+main_training_function: main
+mixed_precision: 'no'
+num_machines: 4
+num_processes: 4
+rdzv_backend: static
+same_network: true
+use_cpu: false

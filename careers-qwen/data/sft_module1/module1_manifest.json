@@ -1,0 +1,20 @@
+{
+  "out": "data/sft_module1/module1_train.jsonl",
+  "sha256": "c6b7840657a8716b01b522640575c6243338070febcedc387aabe89002342d1b",
+  "total_rows": 4599,
+  "per_lane": {
+    "stage2_scorer": 1418,
+    "jesse_voice": 3000,
+    "repo_capability": 160,
+    "values": 21
+  },
+  "dropped_frozen_regression": 0,
+  "dropped_no_messages": 0,
+  "source_lanes": {
+    "stage2_scorer": "<MIRA_HOME>/treasurer/foundations/careers/training_data/v2/pairs/stage2_verdict_trails_v4.jsonl",
+    "jesse_voice": "<MIRA_HOME>/treasurer/foundations/careers/training_data/v2/pairs/qwen_verbatim_voice_sft_pairs.jsonl",
+    "repo_capability": "<MIRA_HOME>/treasurer/foundations/careers/training_data/v2/pairs/b1_repos_laneA.jsonl",
+    "values": "<MIRA_HOME>/treasurer/foundations/careers/training_data/v2/pairs/k3_values_train.jsonl"
+  },
+  "note": "union merge, no duplication; mixture = runtime sampler weight"
+}

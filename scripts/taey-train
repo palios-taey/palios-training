@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# taey-train — the ONLY sanctioned way to start a training capability.
+#
+# WHY THIS EXISTS. "Use production infrastructure" was a rule enforced by memory, and memory lost:
+# 27 launcher/trainer files in the tree, 47 more only in history, and nothing mechanically marking
+# which was real. Agents grepped, found something plausible, and chose wrong — repeatedly, at a
+# cost of days. This makes the manifest the thing that launches, so reaching around production
+# requires editing PRODUCTION_MANIFEST.yml: a visible, reviewable, gated act.
+#
+# WHAT IT REFUSES, and each refusal is a real failure that has happened here:
+#   - a capability not in the manifest              -> you are inventing a path
+#   - a capability whose status is not ADJUDICATED  -> its gate has not passed (an artifact from a
+#                                                      REJECTED run is not a receipt)
+#   - a named file that is absent from the tree     -> a clean-root transplant dropped it
+#
+# There is no --force. Adding one would recreate the hole this closes.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MANIFEST="$ROOT/PRODUCTION_MANIFEST.yml"
+RESOLVER="$ROOT/scripts/_resolve_capability.py"
+
+die(){ echo "REFUSED: $*" >&2; exit 1; }
+
+[ -f "$MANIFEST" ] || die "no PRODUCTION_MANIFEST.yml at $MANIFEST — nothing defines production."
+[ -f "$RESOLVER" ] || die "resolver missing at $RESOLVER — refusing rather than guessing."
+
+CAP="${1:-}"
+if [ -z "$CAP" ]; then
+  echo "usage: taey-train <capability> [VAR=val ...]"
+  echo
+  echo "capabilities in the manifest:"
+  python3 "$RESOLVER" "$MANIFEST" --list
+  exit 2
+fi
+shift
+
+# The resolver prints shell assignments on success, or a single REFUSE: line on failure.
+# It is deliberately NOT eval'd blind: an eval of a subshell `exit` does not exit this script,
+# which produced a gate that printed a refusal and then returned 0 — indistinguishable from
+# success to any caller. Caught only because the negative control checked $?.
+RESOLVED="$(python3 "$RESOLVER" "$MANIFEST" "$CAP")"
+case "$RESOLVED" in
+  REFUSE:*) die "${RESOLVED#REFUSE:}" ;;
+  "")       die "resolver produced no output for '$CAP' — refusing rather than guessing." ;;
+esac
+eval "$RESOLVED"
+
+echo "=== taey-train: $CAP ==="
+echo "  manifest : $MANIFEST"
+echo "  entry    : ${ENTRY:-<none>}"
+[ -n "${TRAINER:-}" ] && echo "  trainer  : $TRAINER"
+
+# Existence is not optional: a dropped file is exactly how production got lost before.
+# The entrypoint may carry an env prefix; the FILE is the last whitespace-delimited token that
+# actually exists as a path. Taking "last word" blindly is what broke this before.
+ENTRY_FILE=""
+for tok in $ENTRY; do [ -f "$ROOT/$tok" ] && ENTRY_FILE="$tok"; done
+[ -n "$ENTRY_FILE" ] || die "no existing file in entrypoint '$ENTRY' — the manifest names a path that is not in the tree."
+for f in "$ENTRY_FILE" ${TRAINER:-}; do
+  [ -n "$f" ] || continue
+  [ -f "$ROOT/$f" ] || die "$f is named in the manifest but ABSENT from the tree.
+       This is the clean-root transplant failure. Restore it or re-adjudicate — never substitute."
+  echo "  present  : $f  sha256=$(sha256sum "$ROOT/$f" | cut -c1-16)"
+done
+
+# CONTENT VERIFICATION. Existence is not enough — the path can stay valid while the bytes drift
+# away from the receipt that justified them. Every recorded hash must match or this refuses.
+while IFS= read -r line; do
+  case "$line" in SHA_*) ;; *) continue ;; esac
+  want="${line#*=}"; file="${want#*:}"; want="${want%%:*}"
+  [ -f "$ROOT/$file" ] || die "$file recorded in the manifest but absent."
+  got="$(sha256sum "$ROOT/$file" | cut -d" " -f1)"
+  if [ "$got" != "$want" ]; then
+    die "CONTENT DRIFT — $file no longer matches the bytes that earned the receipt.
+       manifest: $want
+       on disk : $got
+       Re-qualify and update the manifest. Do not launch bytes no receipt covers."
+  fi
+  echo "  verified : $file  content matches receipt"
+done <<< "$RESOLVED"
+
+# --check-only: prove the gate refuses or passes WITHOUT executing the capability. Added after a
+# "control" tampered a file and then LAUNCHED the real pipeline instead of gating it — the test
+# was the risk it was meant to catch.
+if [ "${TAEY_TRAIN_CHECK_ONLY:-0}" = "1" ]; then
+  echo "  CHECK-ONLY: all preconditions satisfied; not executing."
+  exit 0
+fi
+
+echo
+echo "  Preconditions satisfied. Launching the manifest's entrypoint, not a remembered one."
+echo "  \$ $ENTRY_FILE $*"
+echo
+exec env "$@" bash "$ROOT/$ENTRY_FILE"

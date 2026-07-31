@@ -1,0 +1,62 @@
+name: no-private-data
+
+# Server-side half of the private-data gate. The pre-push hook (.githooks/pre-push) only
+# protects a clone that has run `git config core.hooksPath .githooks` — a peer who has not,
+# or a push from a fresh clone or an automation, bypasses it entirely without any bad intent.
+# CI closes that hole: the repo is protected regardless of anyone's local config.
+#
+# Born 2026-07-24 alongside scripts/check_no_private_data.sh, after 18 private training
+# .jsonl files were found exposed on a public branch (and the same class on three more refs,
+# and on the author's own working tree).
+#
+# RE-LANDED 2026-07-25 — and the reason is worth keeping, because the gate spent a day
+# enforcing nothing. It was committed at 5bf6ae2 on branch careers-qwen-lora, and the
+# "clean transplant onto main" at 600c2d6 carried it too. NEITHER commit ever reached
+# origin/main. So main held scripts/check_no_private_data.sh with no workflow to run it:
+# the gate EXISTED, was referenced in reviews as though it were live, and was enforced by
+# nobody. Caught by conductor only in passing, off an r5 review comment about a doc.
+#
+# This is the same class the gate itself is built to catch, turned on the gate: a control
+# that is PRESENT but not WIRED reads exactly like a control that works. Nothing fails,
+# so nothing announces itself. Whenever a gate is cited as protecting something, confirm
+# it RAN — check the actual checks on an actual PR, not the file's existence.
+#
+# Strictness is DELIBERATELY the script's default (CHECK_HOME_PATHS unset, i.e. 0). That
+# blocks the class that matters — private training data, credential material, and operator
+# PII by shape (email, LinkedIn, application ids). Operator HOME PATHS and service-account
+# paths do NOT block: over-scrubbing <SPARK_HOME> broke 52 runtime scripts on 2026-07-25 and
+# had to be reverted across 75 files. Home paths stay behind CHECK_HOME_PATHS=1 for the
+# private-to-public checklist, where they are a de-umbilical concern rather than an exposure.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history — the violation is usually in history, not the tree
+
+      # CHECK_HOME_PATHS=1 IS NOW THE ENFORCED DEFAULT. It was built to sit OFF until the
+      # private-to-public checklist, because over-scrubbing operator paths broke 52 runtime
+      # scripts on 2026-07-25. That de-umbilical landed on 2026-07-27 (91f08d6) — 227 refs
+      # across ~93 files, split by EXECUTION CONTEXT ($HOME for node-side, ${SPARK_HOME} for
+      # Mira-side, env vars for sibling repos), with bash -n / py_compile / JSON-parse
+      # verification. Turning the flag on here is what stops it regressing: without it, one
+      # convenient absolute path walks back in and nobody notices until publish day.
+      - name: Scan tracked tree for private training data (incl. operator home paths)
+        env:
+          CHECK_HOME_PATHS: "1"
+        run: bash scripts/check_no_private_data.sh
+
+      - name: Scan pushed history for private training data + credential material
+        run: |
+          # PRs: scan only what the PR adds. Pushes: scan the ref's history.
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            bash scripts/check_no_private_data.sh --range "${{ github.event.pull_request.base.sha }}..${{ github.sha }}"
+          else
+            bash scripts/check_no_private_data.sh --ref "${{ github.sha }}"
+          fi

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# PRE-COMMIT PRIVATE-DATA GATE — installed 2026-07-30.
+#
+# WHY THIS EXISTS AT COMMIT TIME AND NOT AT PUSH TIME:
+# Every boundary check in this repo used to run on push or PR — no-private-data.yml,
+# secret-scan.yml, r5-audit-gate.yml. All three fire AFTER the commit object exists. Git history
+# is append-only, so by the time any of them says "no", the only remedies left are a history
+# rewrite or a full repo replacement. That is why this project has repeatedly needed a public-repo
+# reset: nothing ever stopped a bad commit from being MADE, only from being PUSHED, after it was
+# too late for that to be cheap.
+#
+# Same script, same rules, ~10,000x cheaper remediation, purely from placement.
+# Emergency bypass is `git commit --no-verify` and it is a KERNEL violation, not a shortcut.
+set -uo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+CHECK="$ROOT/scripts/check_no_private_data.sh"
+[ -x "$CHECK" ] || { echo "pre-commit: $CHECK missing/not executable — REFUSING (fail closed)"; exit 1; }
+echo "pre-commit: scanning staged content for private data..."
+# The check takes --ref <ref> or scans the working tree by default. There is NO --staged mode,
+# so the tree is what gets scanned — which is correct at commit time because staged content is
+# in the tree. Run it plainly and honour its exit code; no fallback, no second chance.
+if ! bash "$CHECK"; then
+  echo ""
+  echo "COMMIT REFUSED — staged content failed the private-data gate."
+  echo "This is the same check CI runs. Catching it here costs you one commit;"
+  echo "catching it at push costs a history rewrite or a repo replacement."
+  echo "Fix the content. Do NOT use --no-verify."
+  exit 1
+fi
+echo "pre-commit: clean"

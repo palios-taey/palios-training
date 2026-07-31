@@ -1,0 +1,405 @@
+{
+  "model": "Qwen3.6-27B-FP8",
+  "n": 20,
+  "conditions": [
+    "C",
+    "A",
+    "B"
+  ],
+  "summary": {
+    "C": {
+      "exact_pct": 0.0,
+      "contain_pct": 0.0
+    },
+    "A": {
+      "exact_pct": 0.0,
+      "contain_pct": 0.0
+    },
+    "B": {
+      "exact_pct": 65.0,
+      "contain_pct": 85.0
+    }
+  },
+  "rows": [
+    {
+      "id": "k1_role_0_achievement_0",
+      "gold": "[\n  \"Built claude-code-fleet-orchestrator \u2014 multi-agent supervisor/worker orchestration on a Neo4j plan/task DAG with Redis state; a stop-discipline engine on Claude Code hooks blocks a session from s",
+      "C": {
+        "exact": false,
+        "contain": 0.2,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 0, achievement 0.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.27,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_0_achievement_1",
+      "gold": "[\n  \"Built isma-core \u2014 hybrid dense+BM25 retrieval (Weaviate HNSW fused with BM25, \u03b1=0.5) with multi-scale 512/2048/4096-token chunking + query-type routing + FastAPI serving. github.com/palios-taey/i",
+      "C": {
+        "exact": false,
+        "contain": 0.12,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 0, achievement 1.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.1,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_2_achievement_0",
+      "gold": "[\n  \"Built and secured board-level approval for a $100M+ business plan for the drop-ship platform model, elevating it to a top 2023 strategic priority.\",\n  \"$100M+ board-approved plan\",\n  \"Observed\",\n",
+      "C": {
+        "exact": false,
+        "contain": 0.18,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 2, achievement 0.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.23,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_2_achievement_1",
+      "gold": "[\n  \"Refocused GTM from SMB to enterprise flagship customers; revamped pricing methodology + a cost model letting clients recover platform costs from suppliers; led an interim EDI partnership + build/",
+      "C": {
+        "exact": false,
+        "contain": 0.15,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 2, achievement 1.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.19,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_4_achievement_1",
+      "gold": "[\n  \"Closed 10 deals in 6 months (incl. Ashley Furniture) via a revamped Marketplace Platform sales process + marketing automation, reversing years of segment decline (~10% client-base growth); partne",
+      "C": {
+        "exact": false,
+        "contain": 0.12,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 4, achievement 1.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.19,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_5_achievements",
+      "gold": "[\n  [\n    \"Scaled the e-commerce retailer from $30M to $100M+ in 3 years (exceeding 40% annual growth targets) with P&L ownership; built the drop-ship division and team from scratch (750+/1,000+ vendo",
+      "C": {
+        "exact": false,
+        "contain": 0.13,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Request:** \"Return the exact JSON list of achievement tuples for work history entry 5.\"\n   - **Constra"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.16,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 0.12,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_5_achievement_0",
+      "gold": "[\n  \"Scaled the e-commerce retailer from $30M to $100M+ in 3 years (exceeding 40% annual growth targets) with P&L ownership; built the drop-ship division and team from scratch (750+/1,000+ vendor base",
+      "C": {
+        "exact": false,
+        "contain": 0.17,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 5, achievement 0.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.25,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k1_role_5_achievement_3",
+      "gold": "[\n  \"Drove a 70% improvement in vendor-performance metrics (compliance scorecard + probation); automated the freight-claim process saving ~$300K/year; built/managed an international merchant\u2013ops\u2013analy",
+      "C": {
+        "exact": false,
+        "contain": 0.14,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - Task: `k1_career_history`\n   - Request: \"Return the exact JSON achievement tuple for work history entry 5, achievement 3.\"\n   - Constraint:"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.18,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Instruction:** \"Answer using only the exact source field value requested. Do not add commentary. If th"
+      },
+      "B": {
+        "exact": false,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k1_career_history`\n   - **Constraint:** \"Answer using only the exact source field value requested. Do not add commentary. If the"
+      }
+    },
+    {
+      "id": "k2_repo_isma-core_gig_shapes",
+      "gold": "[\n  \"RAG pipeline\",\n  \"production RAG\",\n  \"hybrid vector and BM25 search\",\n  \"retrieval backend\",\n  \"search backend\",\n  \"vector database integration\",\n  \"LLM knowledge base\"\n]",
+      "C": {
+        "exact": false,
+        "contain": 0.33,
+        "answer": "Thinking Process:\n\n1.  **Identify the core entity and request:** The user is asking for the \"exact JSON gig-shape list\" for the repository named 'isma-core'.\n2.  **Identify the constraint:** \"Answer u"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.13,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - The user provides a large block of text that seems to be a mix of instructions, task descriptions, and context from retrieval.\n   - The cor"
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Thinking Process:\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks "
+      }
+    },
+    {
+      "id": "k2_repo_claude-code-fleet-orchestrator",
+      "gold": "{\n  \"capabilities\": [\n    \"multi-agent orchestration\",\n    \"agent supervisor-worker dispatch\",\n    \"LLM agent workflow\",\n    \"task tracking\",\n    \"agent runtime control-plane\",\n    \"Claude Code automa",
+      "C": {
+        "exact": false,
+        "contain": 0.17,
+        "answer": "Thinking process:\n\n1.  **Identify the user's request:** The user wants the exact JSON registry record for the repo 'claude-code-fleet-orchestrator'.\n2.  **Identify the constraint:** \"Answer using only"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.19,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      }
+    },
+    {
+      "id": "k2_repo_taeys-hands_capabilities",
+      "gold": "[\n  \"AT-SPI browser automation\"\n]",
+      "C": {
+        "exact": false,
+        "contain": 0.25,
+        "answer": "Thinking Process:\n\n1.  **Identify the core entity and request:** The user is asking for the \"exact JSON capability list\" for the repository named 'taeys-hands'.\n2.  **Identify the constraint:** \"Answe"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.5,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Thinking Process:\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks "
+      }
+    },
+    {
+      "id": "k2_repo_taeys-hands_gig_shapes",
+      "gold": "[]",
+      "C": {
+        "exact": false,
+        "contain": 0.0,
+        "answer": "Thinking Process:\n\n1.  **Identify the user's request:** The user wants the exact JSON gig-shape list for the repository 'taeys-hands'.\n2.  **Identify the constraints:**\n    *   Task: `k2_repo_capabili"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 0.0,
+        "answer": "Thinking Process:\n\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks"
+      }
+    },
+    {
+      "id": "k2_capability_514c1e9947",
+      "gold": "[\n  {\n    \"does\": \"Distributed Cognitive Mesh \u2014 real-time multi-agent deliberation, coordination enforced by the substrate\",\n    \"proof\": \"public repo\",\n    \"repo\": \"dcm\",\n    \"url\": \"https://github.c",
+      "C": {
+        "exact": false,
+        "contain": 0.17,
+        "answer": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Task: `k2_repo_capabilities`\n    *   Constraint: Answer using *only* the exact registry-derived value requested. Do not add commentary. If JSON "
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.12,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      }
+    },
+    {
+      "id": "k2_capability_4eb7a17655",
+      "gold": "[\n  {\n    \"does\": \"Autonomous wake for multi-instance fleets: 4 hooks + Redis inbox + daemon, no human in the loop\",\n    \"proof\": \"public repo\",\n    \"repo\": \"claude-code-fleet-notify\",\n    \"url\": \"htt",
+      "C": {
+        "exact": false,
+        "contain": 0.23,
+        "answer": "Thinking Process:\n\n1.  **Understand the Goal**: The user wants a JSON list of repository summary records that demonstrate the capability 'daemon'.\n2.  **Identify the constraints**:\n    *   Task: `k2_r"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.2,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Thinking Process:\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks "
+      }
+    },
+    {
+      "id": "k2_capability_7597179b76",
+      "gold": "[\n  {\n    \"does\": \"Hybrid retrieval (RAG): dense+BM25, multi-scale chunking, query-type routing, FastAPI serving, BYO embedding model\",\n    \"proof\": \"BEIR SciFact retrieval artifact (committed)\",\n    ",
+      "C": {
+        "exact": false,
+        "contain": 0.1,
+        "answer": "Thinking Process:\n\n1.  **Understand the User's Request:**\n    *   Task: `k2_repo_capabilities`\n    *   Constraint: Answer using *only* the exact registry-derived value requested. Do not add commentary"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.1,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Thinking Process:\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks "
+      }
+    },
+    {
+      "id": "k2_shape_47486f3f68",
+      "gold": "[\n  {\n    \"does\": \"Autonomous wake for multi-instance fleets: 4 hooks + Redis inbox + daemon, no human in the loop\",\n    \"proof\": \"public repo\",\n    \"repo\": \"claude-code-fleet-notify\",\n    \"url\": \"htt",
+      "C": {
+        "exact": false,
+        "contain": 0.2,
+        "answer": "Thinking Process:\n\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.37,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Thinking Process:\n\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks"
+      }
+    },
+    {
+      "id": "k2_shape_13709bba73",
+      "gold": "[\n  {\n    \"does\": \"Autonomous wake for multi-instance fleets: 4 hooks + Redis inbox + daemon, no human in the loop\",\n    \"proof\": \"public repo\",\n    \"repo\": \"claude-code-fleet-notify\",\n    \"url\": \"htt",
+      "C": {
+        "exact": false,
+        "contain": 0.23,
+        "answer": "Thinking Process:\n\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.33,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 0.67,
+        "answer": "\n\n[\n  {\n    \"does\": \"Autonomous wake for multi-instance fleets: 4 hooks + Redis inbox + daemon, no human in the loop\",\n    \"proof\": \"public repo\",\n    \"repo\": \"cla"
+      }
+    },
+    {
+      "id": "k2_shape_f46b9bbaf5",
+      "gold": "[\n  {\n    \"does\": \"Tmux-fleet supervisor/worker dispatch, plan+task tracking, recurring schedules, universal Stop+notify across Claude Code / codex / gemini / grok\",\n    \"proof\": \"public repo, product",
+      "C": {
+        "exact": false,
+        "contain": 0.06,
+        "answer": "Thinking Process:\n\n1.  **Understand the Goal**: The user wants a JSON list of repository summary records from a specific registry (`k2_repo_capabilities`) that match the gig shape 'autonomous agent or"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.12,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      }
+    },
+    {
+      "id": "k2_shape_d0e2b51f09",
+      "gold": "[\n  {\n    \"does\": \"Distributed Cognitive Mesh \u2014 real-time multi-agent deliberation, coordination enforced by the substrate\",\n    \"proof\": \"public repo\",\n    \"repo\": \"dcm\",\n    \"url\": \"https://github.c",
+      "C": {
+        "exact": false,
+        "contain": 0.25,
+        "answer": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Task: `k2_repo_capabilities` (implies looking up capabilities/summaries of repositories).\n    *   Constraint: \"Answer using only the exact regis"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.33,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      }
+    },
+    {
+      "id": "k2_shape_ce825d04df",
+      "gold": "[\n  {\n    \"does\": \"Hybrid retrieval (RAG): dense+BM25, multi-scale chunking, query-type routing, FastAPI serving, BYO embedding model\",\n    \"proof\": \"BEIR SciFact retrieval artifact (committed)\",\n    ",
+      "C": {
+        "exact": false,
+        "contain": 0.16,
+        "answer": "Thinking Process:\n\n1.  **Identify the user's request:** The user wants a JSON list of repo summary records that satisfy the gig shape 'retrieval backend'.\n2.  **Identify the constraints:**\n    *   Tas"
+      },
+      "A": {
+        "exact": false,
+        "contain": 0.19,
+        "answer": "Here's a thinking process:\n\n1.  **Analyze User Input:**\n   - **Task:** `k2_repo_capabilities`\n   - **Constraint:** \"Answer using only the exact registry-derived value requested. Do not add commentary."
+      },
+      "B": {
+        "exact": true,
+        "contain": 1.0,
+        "answer": "Thinking Process:\n1.  **Analyze User Input:**\n   - Task: `k2_repo_capabilities`\n   - Constraint: \"Answer using only the exact registry-derived value requested. Do not add commentary. If the user asks "
+      }
+    }
+  ]
+}

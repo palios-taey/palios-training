@@ -1,0 +1,123 @@
+name: born-clean
+
+# Jesse's bar, verbatim: "AND IT NEEDS TO STAY CLEAN."
+#
+# WHY THIS GATE EXISTS, and the exact failure it is built against. On 2026-07-31 this
+# repository's WORKING TREE was provably clean — 0 tracked .jsonl, datasets/ gitignored,
+# a blanket *.jsonl ignore, and gitleaks passing. Every tree-scanning check said PASS.
+# Its HISTORY held 36 .jsonl paths, 146,247,368 bytes, 43,658 conversational rows,
+# including constitutional and religious DPO material. A public repository serves those
+# blobs. A HEAD-only bar would have cleared the flip and published all of it.
+#
+# So the load-bearing job here is HISTORY, not TREE. A gate that only inspects the
+# checked-out tree looks identical whether the repo is clean or catastrophically dirty,
+# which makes it worth nothing. Do not "simplify" this by dropping the history job.
+#
+# Ordering matters too: the tree jobs are cheap and fail fast, but history is the one
+# that decides whether this repo can be public at all.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  no-data-shaped-files:
+    name: no data-shaped files (tree)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject training-data file types
+        run: |
+          set -uo pipefail
+          # Extensions that carry model or dataset payload. Recipes and tooling never
+          # need these committed; if one appears, something was pasted in by hand.
+          BAD='\.(jsonl|parquet|npy|npz|bin|safetensors|pt|pth|ckpt|pkl|arrow|feather|tfrecord)$'
+          hits=$(git ls-files | grep -nE "$BAD" || true)
+          if [ -n "$hits" ]; then
+            echo "::error::data-shaped files are tracked — this repo ships recipes and tooling only"
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "OK: no data-shaped file types tracked"
+
+      - name: Reject oversized files
+        run: |
+          set -uo pipefail
+          # 1 MB. Anything larger in a recipes repo is a payload until proven otherwise.
+          # The allowlist is EXPLICIT and empty by design: adding an entry is a reviewed
+          # diff, which is the point. Never widen it with a glob.
+          LIMIT=1048576
+          ALLOW=""   # e.g. "docs/some_large_diagram.svg"
+          fail=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            sz=$(stat -c%s "$f")
+            [ "$sz" -le "$LIMIT" ] && continue
+            case " $ALLOW " in *" $f "*) echo "allowed: $f ($sz B)"; continue;; esac
+            echo "::error::$f is $sz bytes (limit $LIMIT) and is not on the allowlist"
+            fail=1
+          done < <(git ls-files)
+          [ "$fail" -eq 0 ] || exit 1
+          echo "OK: no oversized files"
+
+  history-is-clean:
+    name: no data blobs anywhere in history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # REQUIRED. Without full history this job silently proves nothing.
+      - name: Scan every object in every ref
+        run: |
+          set -uo pipefail
+          BAD='\.(jsonl|parquet|npy|npz|bin|safetensors|pt|pth|ckpt|pkl|arrow|feather|tfrecord)$'
+          # --objects over --all walks blobs reachable from ANY ref, including the
+          # PR refs and deleted branches that a `git log` on main never shows.
+          hits=$(git rev-list --objects --all | awk '{print $2}' | grep -E "$BAD" | sort -u || true)
+          if [ -n "$hits" ]; then
+            echo "::error::data blobs are reachable in git history — this repo cannot be public as-is"
+            echo "A file being absent from HEAD does NOT make it unreachable. Remediation is a"
+            echo "fresh history (orphan root commit) or git-filter-repo, never a follow-up delete."
+            printf '%s\n' "$hits"
+            exit 1
+          fi
+          echo "OK: no data blobs in any reachable object"
+
+      - name: Reject oversized blobs in history
+        run: |
+          set -uo pipefail
+          LIMIT=1048576
+          big=$(git rev-list --objects --all \
+                | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' \
+                | awk -v L="$LIMIT" '$1=="blob" && $3>L {print $3" "$4}' | sort -rn | head -50)
+          if [ -n "$big" ]; then
+            echo "::error::oversized blobs exist in history (limit $LIMIT bytes)"
+            printf '%s\n' "$big"
+            exit 1
+          fi
+          echo "OK: no oversized blobs in history"
+
+  secrets:
+    name: gitleaks (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          v=8.21.2
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${v}/gitleaks_${v}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan
+        run: |
+          set -uo pipefail
+          cfg=""
+          [ -f .gitleaks.toml ] && cfg="--config .gitleaks.toml"
+          gitleaks detect --source . $cfg --redact --log-opts=--all --no-banner --exit-code 1

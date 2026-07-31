@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""Create and verify the immutable input receipt for a packed CPT corpus."""
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+
+
+SCHEMA = "palios.cpt_packed_corpus.v1"
+HEX = frozenset("0123456789abcdef")
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def corpus_rows(path):
+    rows = 0
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            rows += chunk.count(b"\n")
+    return rows
+
+
+def _valid_sha256(value):
+    return isinstance(value, str) and len(value) == 64 and set(value) <= HEX
+
+
+def verify_manifest(corpus_path, manifest_path):
+    with open(manifest_path) as handle:
+        manifest = json.load(handle)
+    if manifest.get("schema") != SCHEMA:
+        raise ValueError(f"unsupported corpus manifest schema: {manifest.get('schema')!r}")
+    if manifest.get("corpus_filename") != os.path.basename(corpus_path):
+        raise ValueError("corpus filename does not match its manifest")
+
+    actual_sha = sha256_file(corpus_path)
+    actual_bytes = os.path.getsize(corpus_path)
+    actual_rows = corpus_rows(corpus_path)
+    if manifest.get("corpus_sha256") != actual_sha:
+        raise ValueError("corpus SHA-256 does not match its manifest")
+    if manifest.get("corpus_bytes") != actual_bytes:
+        raise ValueError("corpus byte count does not match its manifest")
+    if manifest.get("corpus_rows") != actual_rows:
+        raise ValueError("corpus row count does not match its manifest")
+
+    inputs = manifest.get("inputs")
+    if not isinstance(inputs, list) or not inputs:
+        raise ValueError("corpus manifest has no input receipts")
+    names = set()
+    labels = []
+    for item in inputs:
+        if not isinstance(item, dict):
+            raise ValueError("corpus input receipt is not an object")
+        name = item.get("name")
+        rows = item.get("rows")
+        sha256 = item.get("sha256")
+        registered = item.get("registered_sha256_prefix")
+        if (not isinstance(name, str) or not name or os.path.basename(name) != name
+                or "," in name or "@" in name):
+            raise ValueError(f"invalid corpus input name: {name!r}")
+        if name in names:
+            raise ValueError(f"duplicate corpus input name: {name}")
+        if not isinstance(rows, int) or rows <= 0:
+            raise ValueError(f"invalid row count for corpus input {name}")
+        if not _valid_sha256(sha256):
+            raise ValueError(f"invalid SHA-256 for corpus input {name}")
+        if (not isinstance(registered, str) or len(registered) != 16
+                or set(registered) - HEX or not sha256.startswith(registered)):
+            raise ValueError(f"registered SHA prefix does not bind corpus input {name}")
+        names.add(name)
+        labels.append(f"{name.removesuffix('.jsonl')}@{registered}")
+
+    return {
+        "corpus_sha256": actual_sha,
+        "corpus_manifest_sha256": sha256_file(manifest_path),
+        "corpus_inputs": labels,
+        "corpus_rows": actual_rows,
+        "corpus_bytes": actual_bytes,
+        "manifest": manifest,
+    }
+
+
+def write_manifest(path, manifest):
+    stage = path + ".tmp"
+    with open(stage, "w") as handle:
+        json.dump(manifest, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(stage, path)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("verify",))
+    parser.add_argument("--corpus", required=True)
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--receipt-lines", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        receipt = verify_manifest(args.corpus, args.manifest)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit(f"REFUSE: {error}") from error
+    if args.receipt_lines:
+        print(receipt["corpus_sha256"])
+        print(receipt["corpus_manifest_sha256"])
+        print(",".join(receipt["corpus_inputs"]))
+    else:
+        print(json.dumps({
+            key: receipt[key]
+            for key in (
+                "corpus_sha256",
+                "corpus_manifest_sha256",
+                "corpus_inputs",
+                "corpus_rows",
+                "corpus_bytes",
+            )
+        }, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

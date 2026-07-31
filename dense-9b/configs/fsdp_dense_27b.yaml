@@ -1,0 +1,33 @@
+# 4-node FSDP2 config for Qwen3.6-27B full-parameter CPT.
+#
+# FSDP2 (fsdp_version: 2, torch fully_shard) — MIGRATED FROM FSDP1 2026-07-09.
+# WHY: FSDP1 FULL_SHARD flat-shards params into 1-D → transformers Adafactor's factorization
+# (needs grad.dim()>=2) DISENGAGES → dense fp32 exp_avg_sq = 26.9GB/node (=4 bytes/param exactly,
+# GAIA-diagnosed + M5-confirmed) → real physical exhaustion of the shared 128GB unified pool at
+# opt-step 2 (NOT fragmentation — which is why every allocator lever failed). FSDP2 shards
+# per-parameter as DTensors keeping 2-D shape → Adafactor factorizes → optim 26.9GB → <1GB/node.
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: FSDP
+downcast_bf16: 'no'
+fsdp_config:
+  fsdp_version: 2
+  fsdp_activation_checkpointing: true
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer
+  # v2: reshard_after_forward (bool) replaces v1 sharding_strategy. true = re-shard params after
+  # forward (FULL_SHARD-equivalent memory profile).
+  fsdp_reshard_after_forward: true
+  fsdp_offload_params: false
+  fsdp_state_dict_type: SHARDED_STATE_DICT
+  fsdp_cpu_ram_efficient_loading: false
+  # v1-only keys REMOVED (not used by FSDP2): fsdp_sharding_strategy, fsdp_backward_prefetch,
+  # fsdp_forward_prefetch, fsdp_limit_all_gathers, fsdp_sync_module_states, fsdp_use_orig_params.
+machine_rank: 0
+main_training_function: main
+mixed_precision: 'no'
+num_machines: 4
+num_processes: 4
+rdzv_backend: static
+same_network: true
+use_cpu: false

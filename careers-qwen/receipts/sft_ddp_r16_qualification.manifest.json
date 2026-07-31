@@ -1,0 +1,110 @@
+{
+  "format": "stage2-ddp-qualification-receipt-v1",
+  "observed_at": "2026-07-30T18:12:25Z",
+  "run_tag": "cpt_v7_eps1fix",
+  "qualification_tag": "ddp-r16-family-a-20260730T174711Z",
+  "verdict": "PASSED",
+  "full_sft_launched": false,
+  "full_sft_authorized": false,
+  "deployment": {
+    "commit": "45a967b6e70f579dae62744e58aa2013a4e8c615",
+    "trainer_sha256": "e80e9ebfd73ff2554fe6e974c191fdd39eac9b5d2aa4a3c118f35e0d664e701e",
+    "qualifier_sha256": "226ad421f61180a46e5a038af0a0cbf294c10bf3c02ce2a246925c64809eef55",
+    "launcher_sha256": "c0c5230391db89942106c72e5a5084076d64263b3e171361c45797d0997e5f92"
+  },
+  "inputs": {
+    "base_manifest_sha256": "2406fff54148dd44d9c7a4824d43aaace0c450d3e6b174bfe1268565a9512c5d",
+    "corpus_sha256": "cdb345826b6d6b11d7a4e25f26c0342fab720877f555b4541fbbb1740d2357b6",
+    "corpus_rows": 9887,
+    "tokenized_samples": 10033,
+    "production_plan_sha256": "63780ca438a6a2e5f362b4c4a9a9b13e1ff6b030aaa0c7d1bc16f9032df35550"
+  },
+  "topology": {
+    "world_size": 4,
+    "steps": 192,
+    "max_sequence": 1792,
+    "padding_multiple": 16,
+    "bucket_thresholds": [
+      160,
+      512
+    ],
+    "local_batches": [
+      8,
+      2,
+      1
+    ],
+    "selective_activation_checkpointing": [
+      1536,
+      1472
+    ],
+    "graphics_clock_cap_mhz": 2000,
+    "allocator_configuration": "expandable_segments:False,garbage_collection_threshold:0.8"
+  },
+  "throughput": {
+    "minimum_useful_input_tok_s": 1000.0,
+    "measured_useful_input_tok_s": 1032.0167689775471,
+    "projected_full_pass_useful_input_tok_s": 1027.0451920524602,
+    "diagnostic_one_sided_95pct_measured_lower": 1015.181641112156,
+    "diagnostic_one_sided_95pct_projected_lower": 1009.2947991400531
+  },
+  "adapter": {
+    "checkpoint_steps": [
+      96,
+      192
+    ],
+    "checkpoint_96_sha256": "6e2877a31616511a4eaf5037b808cce4ae1e208b8df5266ef4a0f15363d521e0",
+    "checkpoint_192_sha256": "604449c0e91ba76e8de4a9164d3831512ed5507426d05de1eec2b890011c6e08",
+    "trainable_tensors": 704,
+    "trainable_elements": 100139008,
+    "delta_sha256": "756759f987f160f6daf0d8722a0c0a595f1976a0e9236968daad4c6e9d8f03c1",
+    "delta_changed_elements": 100139004,
+    "delta_changed_fraction": 0.999999960055526,
+    "delta_mean_abs": 0.0011275692156643134,
+    "delta_l2_norm": 14.603888864417522,
+    "delta_max_abs": 0.010132964700460434,
+    "finite": true,
+    "numeric_acceptance_band": null
+  },
+  "memory": {
+    "pass_fail_signal": "system_MemAvailable",
+    "no_release_floor_bytes": 8000000000,
+    "post_release_floor_bytes": 40000000000,
+    "minimum_before_release_bytes": 5189337088,
+    "minimum_after_no_release_bytes": 8178622464,
+    "minimum_after_release_bytes": 53476806656,
+    "periodic_release_rank_events": 32,
+    "emergency_release_rank_events": 40,
+    "maximum_release_gap_steps": 24,
+    "maximum_swap_used_bytes": 36864,
+    "maximum_swap_growth_bytes": 0,
+    "maximum_allocator_retry_growth": 0,
+    "maximum_oom_growth": 0,
+    "memory_guard_exit_rank_events": 0,
+    "cuda_free_hard_gate": false,
+    "projected_250_step_system_headroom_diagnostic": false
+  },
+  "thermal": {
+    "maximum_board_celsius": 76.2,
+    "minimum_graphics_clock_mhz": 1963.0,
+    "maximum_graphics_clock_mhz": 1989.0
+  },
+  "cleanup": {
+    "post_run_reboot_verified_ranks": 4,
+    "checkpoint_equality_verified_ranks": 4,
+    "trainers_after_reboot": 0,
+    "nccl_shared_memory_entries_after_reboot": 0,
+    "measurement_outputs_retired_ranks": 4
+  },
+  "private_receipts": {
+    "qualification_sha256": "ccef0cfcd37db816465a8b88420386885383d3aab194211d46eff38bb991ed42",
+    "post_run_clean_sha256": "f4c2bb14c38e6dc9d100caeb9990658bb21bc527663fadbd5b3fcf713a493490",
+    "outputs_retired_sha256": "f07535222f0f633413fdd77640fade8a45c671e2c9a2768623ed0b0cb0654a98",
+    "driver_log_sha256": "426c7fe89d70cdc9a67ebd4ef1caad931c7e2d3b876ca3839de5cd8f418bfcdf",
+    "rank_log_sha256": [
+      "d2e00bf64e53642027ded8e0d82a10a3dd8351827965eec92705477f21c5d060",
+      "978a52812e2b39a4452cd38e452a04bf10c8e7dfceb635784938258d2dc6aa50",
+      "03972c9391d7c10a49028d7ce7471379005e4352acbe957ea3333d1670cde243",
+      "59d8c377e7c2c742cccf02972e95dc5c1dad52d3a61a46340a531cc331ec18d3"
+    ]
+  }
+}

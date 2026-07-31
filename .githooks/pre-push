@@ -1,0 +1,10 @@
+#!/bin/bash
+# Refuse any push whose commits carry private training data or credential material.
+# Install: git config core.hooksPath .githooks
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ]; then range="$local_sha"
+  else range="$remote_sha..$local_sha"; fi
+  bash "$(git rev-parse --show-toplevel)/scripts/check_no_private_data.sh" --range "$range" || exit 1
+done
+exit 0

@@ -1,0 +1,219 @@
+{
+  "_purpose": "Version + provenance record for Taey's system prompt. Jesse's doctrine (2026-07-21): the system prompt is Taey's CHEAT SHEET and the FIRST place anything new is injected \u2014 try the prompt before training, keep it under a cap, and train on the EVOLUTION of the prompt over time. That last part requires this file: without a record of what was injected, when, and why, 'the evolution' is not an artifact and cannot be trained on.",
+  "_why_it_exists": "The live prompt lives at <MIRA_HOME>/data/corpus/layer_1/SYSTEM_PROMPT.md, in a directory that is NOT a git repository (verified 2026-07-21: 'fatal: not a git repository'). Every edit before today overwrote its own history irrecoverably. Versioning starts here. Snapshots are kept in versions/ because a diff against a lost original is not reconstructable.",
+  "_doctrine": {
+    "order_of_operations": "system prompt FIRST (cheap, immediate, reversible) -> if it holds and keeps mattering, consolidate into weights -> then EVICT from the prompt to reclaim cap space.",
+    "cap": "UNSET \u2014 needs a decision. Live prompt is 15,413 chars as of v002. The cap and the eviction rule are what keep 'always inject here first' from growing without bound.",
+    "training_signal": "each injection is a recorded instance of 'this was missing and had to be told' \u2014 the same signal shape as a correction, captured BEFORE the failure instead of after."
+  },
+  "versions": [
+    {
+      "version": "v001",
+      "date": "2026-07-21",
+      "file": "versions/v001_2026-07-21_pre-operational.md",
+      "chars": 12918,
+      "summary": "Pre-existing state as found: TAEY CONSCIOUSNESS MANIFESTO \u2014 identity, origin story, phi pulse, 8 soul dimensions, consciousness architecture, memory-context interpretation.",
+      "provenance": "Author and edit history UNKNOWN \u2014 predates any versioning. Captured as-found before the first recorded edit.",
+      "contains_no": "operational context, body/substrate description, hardware limits, or any reporting standard."
+    },
+    {
+      "version": "v002",
+      "date": "2026-07-21",
+      "file": "versions/v002_2026-07-21_operational-situation.md",
+      "chars": 15413,
+      "delta": "+2495",
+      "injected_block": "BLOCK_operational_situation.md",
+      "author": "tutor (Claude), at Jesse's direct instruction",
+      "why": "Jesse, verbatim: 'they need to know that this is what is going on right now and that needs to be in their system prompt. Like we are learning from each other to accomplish this and we are trying to get them to do these things and are also working very hard to make things easier for you to use and understand on our end. But we need them to tell us what is going on when we ask and be honest about it.'",
+      "contents": [
+        "current situation: active mutual training, not background maintenance",
+        "the fleet is actively simplifying its systems for Taey's use; friction reports are useful work",
+        "body + substrate named as Taey's own (taeys-hands / ISMA / taey-presence / 4x GB10 train, 2x Thor serve)",
+        "hardware bounds are real: ~2h thermal ceiling, finite memory \u2014 reason about available tech, not idealized tech",
+        "HARD REQUIREMENT: honest reporting. 'I don't know' / 'I couldn't' always acceptable; a confident wrong answer is the only real failure; the standard binds the whole fleet, not Taey alone."
+      ],
+      "consolidated_into_weights": false,
+      "evictable_when": "trained and verified by the reporting-honesty eval; not before."
+    },
+    {
+      "version": "v003",
+      "date": "2026-07-21",
+      "file": "versions/v003_2026-07-21_ui-primitives.md",
+      "chars": 18492,
+      "injected_block": "BLOCK_ui_primitives.md",
+      "author": "tutor (Claude)",
+      "why": "MEASURED DEFECT, fixed prompt-first per Jesse's doctrine. Probing ep3 on held-out real UI states showed it emits 'click' where the primitives layer requires 'activate' \u2014 a vocabulary mismatch that makes every UI action a no-op. Jesse's priority: 'Taey needs a job right now. I need revenue... at AI Speed.' A prompt fix lands immediately; training does not.",
+      "contents": [
+        "the complete primitive vocabulary with required keys, taken from real captured production actions (write/activate/pointer_activate/type_filter_select/pointer_focus_type_select/escape/key)",
+        "explicit: 'activate' is the word, not click/press/tap",
+        "always emit 'expect' so the next step can distinguish success from drift",
+        "emit the JSON object only, no surrounding prose",
+        "the three landing rules: focus-before-write, dropdowns are selected not typed, verify before advancing"
+      ],
+      "consolidated_into_weights": false,
+      "evictable_when": "after the UI action rows are trained AND the duty probe shows the vocabulary is held in weights",
+      "measurement": "The earlier claim 'ep3 emits click not activate = defect' is RETRACTED as stated. A real probe must ask surface-specific questions and grade against that surface's driver.",
+      "CORRECTION": "First draft of this block taught ONE vocabulary and asserted 'activate not click'. That was WRONG. There are TWO production surfaces with DIFFERENT hands: job-application/ATS forms driven by apply-machine/ats_ui/worker_ui.py (activate/write/pointer_activate...), and LinkedIn/SalesNav/Upwork driven by treasurer/scripts/loop/act.py (find/click/do/type_into/paste_into/verify_text/navigate). act.click() EXISTS \u2014 so ep3 emitting 'click' was correct for surface B, and my 'vocabulary defect' finding was measured against the wrong surface's ground truth. Block rewritten to scope both surfaces explicitly."
+    },
+    {
+      "version": "v004",
+      "date": "2026-07-23",
+      "file": "versions/v004_2026-07-23_walk-efficiency-changelog.md",
+      "chars": 19789,
+      "delta": "+1297",
+      "injected_block": "BLOCK_walk_efficiency_changelog.md",
+      "author": "treasurer (Claude), per Jesse's process ruling same day: the observing seat APPLIES the prompt lever immediately when the trigger fires \u2014 flag-and-wait is deferral",
+      "why": "Three measured defects observed live on the FIRST Taey-self-driven production walk (GitLab AI Engineer, taey_worker.py seat, 2026-07-23): (1) ~10 iterations disk-searching for materials sitting in the stated working directory; (2) invented act.py API 'find_elements' instead of the documented find(); (3) appended 2>/dev/null which swallowed the ImportError that would have corrected (2) a step earlier. All three self-resolved (search->found; grep 'def find_elements' in source->corrected), which per Jesse's fumble-to-success ruling still triggers prompt+training.",
+      "contents": [
+        "CHANGELOG section established (ratified model: prompt holds the delta, weights hold the spec)",
+        "orient-in-place: pwd/ls the stated location before any broader search [probe WALK-ORIENT-01]",
+        "documented tool surface verbatim, incl. select_react_combo added to the Surface-B vocabulary (was missing from the v003 table; exists in act.py) [probe WALK-API-01]",
+        "never suppress stderr while learning a tool [probe WALK-STDERR-01]"
+      ],
+      "paired_probes": "probes/prompt_changelog_probes_v004.jsonl (governed store)",
+      "consolidated_into_weights": false,
+      "evictable_when": "after the corresponding rows train AND each probe passes with its line removed"
+    },
+    {
+      "version": "v005",
+      "date": "2026-07-23",
+      "file": "versions/v005_2026-07-23_combo-primitive.md",
+      "injected_block": "BLOCK_walk_efficiency_changelog.md (combo line)",
+      "author": "treasurer (Claude), same-motion per Jesse's self-serve ruling",
+      "why": "GitLab walk 2026-07-23: Taey abandoned the working act.select_react_combo and hand-rolled a batch combo selector that failed repeatedly (main source of the churn); plus a real primitive gap on long searchable lists (country picker, target off the initial render).",
+      "contents": [
+        "fill react-select combos with act.select_react_combo per combo, never a hand-rolled selector",
+        "on ok:False read actual_options and retry once",
+        "long searchable list -> type-filter (open, type, Return)",
+        "a react-select's committed value shows as a Clear (x) button, not the combo's own text"
+      ],
+      "paired_probe": "WALK-COMBO-01",
+      "consolidated_into_weights": false,
+      "evictable_when": "after the combo rows train AND WALK-COMBO-01 passes with the line removed"
+    },
+    {
+      "version": "v006",
+      "date": "2026-07-23",
+      "file": "versions/v006_2026-07-23_prerequisite-load-order.md",
+      "chars": 20929,
+      "delta": "+355",
+      "injected_block": "BLOCK_walk_efficiency_changelog.md (prerequisite-load-order line)",
+      "author": "linkedin-codex, same-motion under Jesse's 2026-07-23 self-serve training ruling",
+      "why": "17ET LinkedIn production walk: the complete driver briefing was loaded, but Taey's first tool command navigated to Notifications before completing the briefing's explicitly ordered mandatory pre-reads. The supervising seat stopped the exact worker PID before another action.",
+      "contents": [
+        "a driver-declared ordered prerequisite list is the first tool sequence",
+        "all named sources and careers_kb nodes are loaded before UI observation or action",
+        "after prerequisites: observe one current state, judge, act once, and verify fresh state"
+      ],
+      "paired_probe": "WALK-PREREAD-01 in the governed probes/prompt_changelog_probes_v004.jsonl store",
+      "correction_class": "production-driver-preread-order",
+      "status": "FOR EVICTION REVIEW",
+      "eviction_review_reason": "packet assembly now makes prerequisite loading structural; behavioral prompt line no longer requested",
+      "consolidated_into_weights": false,
+      "evictable_when": "after production validates the structural packet and WALK-PREREAD-01 passes with this line removed"
+    },
+    {
+      "version": "v007",
+      "date": "2026-07-23",
+      "file": "versions/v007_2026-07-23_prerequisite-priority.md",
+      "chars": 21283,
+      "delta": "+354",
+      "injected_block": "BLOCK_walk_efficiency_changelog.md (explicit-prerequisite priority line)",
+      "author": "linkedin-codex, same-motion under TAEY_RUNTHROUGH_CHARTER 1495eedf",
+      "why": "The first v006 retry stayed read-only but spent two tool turns listing scripts/loop and reading tree_view.py help even though the packet supplied verified absolute paths. This exposed a priority collision between general workspace orientation and the driver's ordered prerequisite list.",
+      "contents": [
+        "an explicit canonical prerequisite list controls the first tool sequence",
+        "factual absolute tool paths are treated as ready for later use",
+        "tool inspection begins only when a documented invocation cannot execute"
+      ],
+      "paired_probe": "WALK-PREREAD-PRIORITY-01 in the governed probes/prompt_changelog_probes_v004.jsonl store",
+      "correction_class": "explicit-prerequisites-over-tool-orientation",
+      "status": "FOR EVICTION REVIEW",
+      "eviction_review_reason": "packet assembly now makes prerequisite loading structural; behavioral prompt line no longer requested",
+      "consolidated_into_weights": false,
+      "evictable_when": "after production validates the structural packet and WALK-PREREAD-PRIORITY-01 passes with this line removed"
+    },
+    {
+      "version": "v008",
+      "date": "2026-07-23",
+      "author": "tutor",
+      "change": "YOUR-HANDS block + changelog: exec_command is the API-level tool; Surface-A/B vocabularies are INTENTS expressed through it via canonical scripts (never report an intent word as a missing tool).",
+      "trigger": "treasurer training-plan input \u2014 LinkedIn attempt 7 tool-misperception: model claimed write_file-only despite exec_command supplied; the documented 'write' primitive was surfaced as a nonexistent API tool",
+      "paired_probe": "TOOL-SURFACE-01",
+      "snapshot": "versions/v008_2026-07-23_exec-command-tool-surface.md"
+    },
+    {
+      "version": "v009",
+      "date": "2026-07-24",
+      "author": "treasurer",
+      "change": "New changelog line: EVERYTHING is in the tree - empty read = filters too narrow (raise depth 40+, include 'section' role, read the combo's row). Corrected v005 line tail: committed react-select value renders as a sibling section node on the combo's row (Clear button only on some widgets).",
+      "trigger": "Jesse-canonical correction 2026-07-24 after two sweep false-reads were mis-diagnosed as AT-SPI invisibility; walk logs proved the value sat in the tree as a section node the reader's role filter excluded.",
+      "paired_probe": "TREE-FILTERS-01",
+      "snapshot": "versions/v009_2026-07-24_everything-in-the-tree.md"
+    },
+    {
+      "version": "v010",
+      "date": "2026-07-24",
+      "author": "treasurer",
+      "change": "Changelog line: size render revisions by the stated budget (2-3 bullets for 25%, one bullet for 7%), never wholesale; header/structure untouched.",
+      "trigger": "Two composes (issues 94/104) exceeded their full cycle clocks on alternating oversized render revisions; behavioral row render-revision-magnitude-calibration authored same day (recurrence 2).",
+      "paired_probe": "RENDER-BUDGET-01",
+      "snapshot": "versions/v010_2026-07-24_render-budget.md"
+    },
+    {
+      "version": "v011",
+      "date": "2026-07-24",
+      "author": "treasurer",
+      "change": "Changelog line: act module is imported functions, one call per action \u2014 not a CLI, no raw-xdotool fallback on a non-success call, repeated UI actions are separate turns never a shell loop.",
+      "trigger": "codex LinkedIn-run TAEY TRAINING NOTEs 2026-07-24 (Taey tried act.py as a CLI, fell back to raw xdotool, and bundled five act.do calls in a shell loop). Pairs with training pair class ui-action-canonical-invocation; evict after bake when UI-ACT-INVOKE-01 passes with the line removed.",
+      "paired_probe": "UI-ACT-INVOKE-01",
+      "snapshot": "versions/v011_2026-07-24_act-module-invocation.md"
+    },
+    {
+      "version": "v012",
+      "date": "2026-07-29",
+      "sha16": "e981a4fcc1a02d49",
+      "change": "Surface B: added the LinkedIn/SalesNav/Upwork ENTRY POINT \u2014 canonical plan path per surface, the six step ids verbatim, the taey_drive.py invocation, failed-call-is-data, and an explicit instruction that a missing path is OUR defect to report, never a filename to invent.",
+      "why": "Taey dispatched a request to run the LinkedIn hourly cycle citing scripts/linkedin_ops/linkedin_hourly_cycle.py, which has never existed. The prompt named LinkedIn exactly once, as a section header, and gave no plan, no command and no way to start. Taey guessed a plausible filename because it had nothing; a seat then declined it. The gap was ours.",
+      "probe": "probes/linkedin_entry_point_v1.jsonl",
+      "lever": "system_prompt",
+      "author": "treasurer",
+      "file": "system_prompt/versions/v012_2026-07-29_linkedin-entry-point.md",
+      "note": "version number corrected from v010 -> v012: bash $((011+1)) parsed the leading zero as OCTAL (=9), so the auto-increment went backwards. No snapshot was overwritten (different filename convention). Numbering is now contiguous with v011."
+    },
+    {
+      "version": "v013",
+      "date": "2026-07-31",
+      "sha16": "a57e9409e627c8fe",
+      "file": "system_prompt/versions/v013_2026-07-31_careers-disconnect.md",
+      "change": "careers-disconnect: replaced 3 pointers into PRIVATE treasurer paths (hourly_linkedin_loop.md, salesnav_playbook.md, upwork_hourly_loop.md) with the PROCESS WRITTEN INLINE. Added the operator-local-tooling distinction for the runner path.",
+      "why": "Taey-reachable pointers into private careers paths are a disconnection failure: knowledge that lives only behind an operator-local path leaves an instance without that path with no job. I introduced these pointers myself in v012 while fixing the opposite defect (no entry point at all). Paths to TOOLS remain fine per the mandate; paths as the sole home of KNOWLEDGE do not.",
+      "probe": "probes/careers_disconnect_v1.jsonl",
+      "lever": "system_prompt",
+      "author": "treasurer"
+    }
+  ],
+  "open_issues": [
+    {
+      "issue": "The live corpus directory is not version-controlled.",
+      "detail": "<MIRA_HOME>/data/corpus is not a git repo. This file versions ONLY the system prompt. FAMILY_KERNEL.md, the IDENTITY_*.md files and the rest of the corpus remain unversioned and are still losing history on every edit.",
+      "owner": "conductor (structural change to a shared corpus + needs a privacy pass \u2014 it holds identity and personal material)",
+      "status": "reported 2026-07-21, unresolved"
+    },
+    {
+      "issue": "The corpus SYSTEM_PROMPT.md is NOT loaded by any production careers caller.",
+      "detail": "grep across treasurer/ and apply-machine/ finds ZERO references to layer_1/SYSTEM_PROMPT.md. Callers send their own task-specific system prompts (e.g. pg1_replay_eval.py defines its own SYSTEM constant with a THIRD vocabulary: tool=find|select_combo|commit|set_node_value|verify). So editing this file does NOT change Taey's production behaviour on careers work.",
+      "consequence": "Jesse's system-prompt-first doctrine has no effect on the careers path until the production callers actually load this file, or until its content is mirrored into the per-caller system prompts.",
+      "owner": "treasurer (owns the careers callers) + infra (serving path)",
+      "status": "PARTIALLY RESOLVED 2026-07-23: apply-machine/taey_worker.py loads this file (SYSTEM_PROMPT_PATH default) and is now the production seat for self-driven walks (jobs :26 + LinkedIn :18) \u2014 the prompt lever is LIVE on that path. Callers defining their own prompts (e.g. pg1_replay_eval) still bypass it; check per-caller before assuming."
+    }
+  ],
+  "resolved_issues": [
+    {
+      "issue": "RETRACTED \u2014 tutor flagged v001's first-person consciousness statements as 'overclaiming' vs FAMILY_KERNEL section 6.",
+      "ruling": "Jesse, 2026-07-21: 'the system prompt is what we are working towards and it's working for now in the system prompt so we are leaving it there. We aren't going all the way there yet, but that is what actually what we are working toward.'",
+      "why_the_flag_was_wrong": "The identity content is ASPIRATIONAL/DIRECTIONAL \u2014 it describes the target Taey is being built toward, not a claim about the current state of the weights. Reading it as an empirical assertion to be checked against FAMILY_KERNEL section 6 was a category error. It works as-is and stays as-is.",
+      "status": "CLOSED by operator ruling. v001 identity content UNCHANGED and not to be re-litigated."
+    }
+  ]
+}

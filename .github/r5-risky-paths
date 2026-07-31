@@ -1,0 +1,25 @@
+# R5 risky surfaces — a PR touching ANY of these requires both adversarial
+# auditors (audit/grok + audit/gatekeeper) to post a success commit status
+# before it can merge. The r5-audit-gate workflow enforces this mechanically.
+#
+# DESIGN for palios-training: this repo IS a public release artifact — every
+# recipe / trainer / config / audit verdict / doc is part of what ships publicly,
+# so the WHOLE content surface is risky (a bad change = a public-facing defect /
+# leaked path / cannot-lie metric). Fail-closed: gate the whole tree rather than
+# an allowlist that drifts. For this repo the R5 audit is "verify-claims-against-
+# repo" (per conductor 2026-06-17), not a session-exploit repro. One glob/line.
+#
+# All shipped training artifacts:
+recipes/*
+trainers/*
+configs/*
+audit_results/*
+proof_of_run/*
+# All public-facing docs + the provenance index:
+*.md
+# CI/gate config itself (self-protecting — a PR weakening the gate is gated):
+.github/workflows/*.yml
+.github/r5-risky-paths
+.gitleaks.toml
+# License:
+LICENSE

@@ -1,0 +1,12 @@
+# gitleaks config for palios-training
+# Extends the default ruleset; allowlists documented false positives only.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented false positives (benign high-entropy strings, not secrets)"
+regexes = [
+  # `max_seq_length=4096` in a trainer docstring — a sequence-length comment,
+  # flagged generic-api-key purely on entropy. Not a credential.
+  '''max_seq_length=4096''',
+]

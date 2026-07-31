@@ -1,0 +1,384 @@
+# PRODUCTION_MANIFEST.yml
+#
+# WHAT THIS IS. The single machine-readable answer to "what is production infrastructure".
+# A file is production IF AND ONLY IF it has an execution receipt: it ran on the real cluster and
+# produced a verified artifact. Not because of its name, its location, its recency, or because a
+# document says so. Anything not listed here is NOT production.
+#
+# WHY IT EXISTS. Measured 2026-07-30: 27 launcher/trainer files in the tree and 47 more reachable
+# only from git history. Nothing mechanically distinguished a production script from an abandoned
+# experiment, so agents grepped, found something plausible, and chose wrong — repeatedly, at a cost
+# of days. Prose cannot resolve a 74-way ambiguity. Receipts can.
+#
+# THE FOUR SIGNALS, AND WHY ONLY ONE COUNTS. Each of the first three was measured to be misleading:
+#   in the repo          -> launch_sft_qwen36_27b_fsdp.sh was DROPPED from the tree by a clean-root
+#                           transplant while still deployed and intact on every node.
+#   deployed on hardware -> that same file is deployed, dated 2026-07-09, and has NEVER executed.
+#   named in a document  -> train_lora_sft.py is described as production in some places and named
+#                           as THE parallel-path error in consult_selflearning_loop.md:65-71.
+#   EXECUTED + VERIFIED  -> cannot be faked. This is the only signal this manifest accepts.
+#
+# KNOWN GAP (tutor-codex, 2026-07-30, correct and not yet closed): a manifest is necessary but not
+# sufficient if receipts are mutable or paths drift. The launcher MUST verify commit and content
+# hashes at execution time rather than trusting this list. Until that lands, this file is an
+# adjudication record, NOT yet an enforcement mechanism.
+
+# THE ACTIVATION RULE (tutor-codex, 2026-07-30 — corrects tutor's first draft of this file):
+# A file is NOT activated merely because a run wrote an artifact. Active production requires the
+# capability-specific GATE to have PASSED. Rejected or partial receipts confer CANDIDATE status,
+# never ACTIVE. tutor's draft marked sft_stage2_lora ADJUDICATED on the strength of r8..r14 having
+# produced artifacts — but every one of those runs was REJECTED. An artifact from a rejected run
+# is evidence the code executes, not evidence it qualifies.
+
+schema: 1
+adjudicated: 2026-07-30
+adjudicator: tutor
+status: PARTIAL — 2 capabilities ACTIVE by passed gate, 1 CANDIDATE, 3 contested
+
+capabilities:
+
+  corpus_pack:
+    content_sha:
+      careers-qwen/pack_production_corpus.py: aa00208a6de861052424813b0610101ee9dd1beb93aca0ce420c7f16032740b7
+    status: ADJUDICATED
+    entrypoint: careers-qwen/pack_production_corpus.py
+    receipt:
+      commit: aa40705
+      output_sha: 6f1eca173383377d6b1b6cb590d99b3bcbe8669bf9d4ccc222f6aa288248496f
+      rows: 2357
+      bytes: 33254530
+      verified_outcome: "artifact rehashed BYTE-IDENTICAL on all four Sparks; source lineage recorded"
+    caveat: "runtime commit is high-confidence INFERRED — artifact mtime predates a cryptographic record"
+    candidate_update:
+      status: CANDIDATE_PENDING_PRODUCTION
+      content_sha:
+        careers-qwen/pack_production_corpus.py: 1d9c9948c1eba0a646258c6aedaf609a7d4fdc1b4c4c982e0d9556e289ac01de
+        careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+      change: >
+        The packer now emits an immutable sidecar binding the packed-corpus SHA to every input's
+        full SHA. It is not ACTIVE until a sanctioned production pack executes with these exact
+        bytes and the sidecar verifies against its output.
+      reconstruction_receipt:
+        manifest: careers-qwen/receipts/cpt_v7_eps1fix_corpus.manifest.json
+        manifest_sha256: c6e72c13ff8fda4d796d06e408b88b63ddde806979f144d0a21f8f20213bd46d
+        outcome: >
+          The exact historical aa40705 packer and preserved pre-scrub inputs reproduced corpus
+          6f1eca byte-for-byte. This proves CPT v7 lineage; it does not activate the new packer.
+
+  cpt_27b_4node:
+    content_sha:   # verified byte-identical to the NODE copies that produced the receipts
+      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 37c620d26f591d49bd6588f8dd5b5f05ee03fa5d4d622bf4f22a1c89094c16ca
+      dense-9b/trainers/train_fsdp_dense_9b.py: 9e73ce7da868a9ed61bb6d3a9b93c658b544707392e5930b83de17d49928972e
+      dense-9b/recipes/run_4node_27b_cpt.sh: e5ed69683b833ffd9bcdcd515b29e8be5d360fea0ad253c707265dee3991279a
+      dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
+    status: ADJUDICATED
+    entrypoint: dense-9b/recipes/run_4node_27b_cpt.sh          # OPERATOR entrypoint (orchestrator)
+    per_node: dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh    # launched on each node by the above
+    trainer: dense-9b/trainers/train_fsdp_dense_9b.py
+    config: dense-9b/configs/fsdp_dense_27b.yaml
+    receipt:
+      run: cpt_v7_eps1fix
+      date: 2026-07-30
+      steps: 148/148
+      artifact: /home/spark/training_outputs/cpt_v7_eps1fix/checkpoint-148
+      verified_outcome: "weight-diff 1.036e-04 vs module5_merged — IN BAND (5e-05..8e-04)"
+      measured_by: careers-qwen/measure_cpt_delta.py
+    note: >
+      Strongest receipt in the system: a completed run whose artifact was independently measured
+      in band. REQUIRES ADAFACTOR_EPS1=fp32 — unset it falls back to finfo(bf16).eps and the
+      optimizer's normalization collapses, suppressing updates ~5000x with nothing in any log
+      saying so. Now defaulted in run_4node_27b_cpt.sh at a69bd7d.
+    lineage_correction: >
+      2026-07-30, defect found by tutor-codex: the run_config.env captured for this run recorded
+      POST-scrub source-slice SHAs (fd64cb/871620/92e6ae) because tutor read CORPUS_INPUTS from the
+      packer's state AT CAPTURE TIME rather than from the state that built the artifact. The packed
+      corpus 6f1eca was assembled BEFORE that scrub, from the slices registered at commit aa40705
+      (0388166/07b88fec/c1840e0a). Corrected in place; the original is kept as
+      run_config.env.pre-lineage-fix. DO NOT promote the post-scrub SHAs into this manifest — they
+      name slices this run never saw. The packed-artifact identity (6f1eca, 2357 rows, 33254530
+      bytes, identical on all four Sparks) is Observed and unaffected.
+      GENERAL RULE THIS ESTABLISHES: a provenance capture must read the source state that PRODUCED
+      the artifact, not the source state at capture time. Same defect shape as reading a config
+      default instead of the live process — one quantity, two sources, only one of them true.
+    supersedes: []
+    contested_note: >
+      run_4node_27b_cpt.sh and launch_cpt_qwen36_27b_fsdp.sh are BOTH deployed and one invokes the
+      other. Which is the true entrypoint is NOT yet adjudicated — see contested below.
+
+  sft_stage2_lora:
+    status: QUALIFIED_AWAITING_0_TO_50_AUTHORIZATION
+    path_family_winner: careers-qwen/train_ddp_lora.py
+    runner: careers-qwen/run_stage2_sft_ddp_till_done.sh
+    qualifier: careers-qwen/qualify_stage2_sft_ddp.sh
+    receipts:
+      - id: A
+        what: full-run wrapper, session 0->50
+        commit: e66ae8e14c8a27c46ce77bd07821edbbd73901d6
+        content_sha:
+          trainer: 58a25a80344bc4a75b1f1864bb895e3f24701b9a36aebb5ff749d5c51bcf5619
+          wrapper: eb56c7a483e7e43967456d229a70be9b815300145df1b3a885cfd163b8a7edd0
+        log: /media/mira/Expansion/training-artifacts/runs/cpt_v7_eps1fix/stage2_sft_ddp/driver.log:1-63
+        outcome: "deployed byte-exact on 4 nodes, session 0->50 complete, checkpoint-50 on all four,
+                  adapter SHA 095ffab9d16cd7c3d1bd0daf800511ceeefa26fec6311e7c462778eaecb7638c,
+                  exits 0/0/0/0. Session 50->300 later STALLED at step264."
+        verdict: PARTIAL — not a full-pass qualification
+      - id: B
+        what: representative qualifier, r13
+        commit: 36efea9e5d09056ac3b10aa3a53acd186a1060ab
+        content_sha:
+          trainer: 349bd0bab797cdd087c37841c922a81b98c20b8d17fa688eeb199ba504136d8e
+          qualifier: a78afc49378e166972bd9899639b6f9bf5569437dcbb1f157195463534f345d5
+        receipt_file: ".../stage2_ddp_qual/ddp-pad16-ac1536b1472-reset24-b8-2-1-r13-20260730/QUALIFICATION_REJECTED.json"
+        outcome: "96/96 steps. measured 1049.6746, projected 1041.1531 — point-throughput gate TRUE.
+                  checkpoint-96 adapter SHA bb64d32653f7e731179e8d1f8fcb155db10001a3888df81cde4d704b371715d3,
+                  re-hashes identically on all four nodes."
+        verdict: "REJECTED — but only by an OBSOLETE pre-reclaim memory floor"
+      - id: C
+        what: r14
+        commit: 923525d
+        outcome: "proved reclaim-then-exit memory, but 292 rank reclaims cut measured/projected to 873.557/879.113"
+        verdict: REJECTED on throughput
+      - id: D
+        what: r15
+        commit: de1451
+        outcome: "failed before step 1 on an absolute 32KB/24KB swap baseline (MAX_SWAP_USED_BYTES=0)"
+        verdict: REJECTED before execution
+      - id: E
+        what: receipt-faithful 192-step qualifier, r16
+        commit: 45a967b6e70f579dae62744e58aa2013a4e8c615
+        public_receipt: careers-qwen/receipts/sft_ddp_r16_qualification.manifest.json
+        public_receipt_sha256: 1fa5836f957f91adf8fe02ceec94dd98876965e366e2cfb8f5ef6dab254598ca
+        private_receipt_sha256: ccef0cfcd37db816465a8b88420386885383d3aab194211d46eff38bb991ed42
+        outcome: >
+          192/192 steps; measured/projected useful input throughput
+          1032.0167689775471/1027.0451920524602 tok/s; checkpoint-192 adapter
+          604449c0e91ba76e8de4a9164d3831512ed5507426d05de1eec2b890011c6e08;
+          full-adapter mean_abs delta 0.0011275692156643134 over 100139008 elements;
+          no-release system MemAvailable minimum 8178622464 bytes; post-release minimum
+          53476806656 bytes; maximum swap 36864 bytes with zero growth; zero allocator retry,
+          OOM, or memory-exit events; post-run reboot/checkpoint equality/output retirement
+          verified on all four ranks.
+        diagnostic: >
+          The 250-step linear system-headroom projection was false. Grok + ChatGPT explicitly
+          ruled this diagnostic-only; it is retained, not hidden or promoted into a hard gate.
+        verdict: PASSED — full SFT was not launched and remains separately authorized
+    open_question_RETRACTED: >
+      tutor claimed r13-config-under-current-policy was untested and the shortest path to
+      ADJUDICATED. FALSE, corrected by tutor-codex 2026-07-30. r14 IS that combination — same
+      pad16, batches 8/2/1, AC start/budget 1536/1472, same 979-step topology, 96-step matched
+      qualifier, current reclaim45/exit25 policy. It completed 96/96 with the MEMORY GATE PASSING,
+      and was rejected on throughput: 292 rank reclaim events cut measured/projected to
+      873.557/879.113. tutor asserted "untested" without checking whether r14 was that test.
+    memory_measures_adjudicated: >
+      r13 minimum_available_before_bytes and system MemAvailable ARE directly comparable — both
+      call mem_available_bytes(), parsing /proc/meminfo MemAvailable and scaling kB by 1024. But
+      the 45GB RECLAIM trigger is a DIFFERENT quantity: torch.cuda.mem_get_info().free. The 25GB
+      EXIT gate checks BOTH post-reclaim CUDA-free AND system MemAvailable. r13 observed system
+      MemAvailable 4,269,797,376 before and 11,924,205,568 after empty_cache — below today's 25GB
+      system exit floor in both states.
+    gate_defect_rca: >
+      ROOT CAUSE, tutor-codex 2026-07-30, and it invalidates the rejection rather than the run.
+      The 25GB memory floor is NOT supported by this workload. Git history shows it was copied
+      from the FSDP full-parameter trainer (dense-9b/trainers/train_fsdp_dense_9b.py:1105, commit
+      54ca4fe), where a 5GB FSDP _ALLGATHER_BASE died at ~20GB. Replicated DDP LoRA has NO FSDP
+      parameter all-gather, so the threshold guards a failure mode that cannot occur here.
+      DIRECT DDP EVIDENCE: r13, with periodic release every 24 steps plus emergency release below
+      8GB, completed and checkpointed 96 steps with 6 release rounds, ZERO OOM, zero retries,
+      <=32KB swap, throughput 1049.675, and its release steps recovered system MemAvailable to
+      ~55GB. It was rejected only because the gate required PRE-release min >= 8GB while the
+      emergency mechanism correctly observed 4.27GB and recovered as designed — the gate measured
+      the wrong side of the mechanism it was testing.
+      COUNTER-EVIDENCE that some release IS required: the no-guard full wrapper accumulated
+      reserved 109.8-114.2GB and stalled at step264.
+      IMPLICATION: correct r13's gate shape (24-step periodic + <8GB emergency, validating
+      POST-reclaim >= 40GB and no-release >=8GB) rather than importing FSDP's 45/25 bands into
+      DDP. A sub-8GB pre-release value is the trigger and is not itself failure.
+    allocator_policy_consult:
+      decided_on: 2026-07-30
+      majority: Grok + ChatGPT
+      grok_receipt_sha256: 332135825e56f31289b2902fa883e811ae4adeeed87a3651609cf223b7bbfe75
+      chatgpt_receipt_sha256: 523cecc1ba30793a8f5cf5c55f22d68380bee500e12425f404b4ef4bcd68fdd6
+      minority_gemini_receipt_sha256: e182fae33306d2e8a624eb78f5d4025b7bce875434dadda2239803f2337067ee
+      candidate: >
+        One exact 192-step qualifier. Preserve expandable_segments:False and native allocator
+        garbage_collection_threshold:0.8. Fixed sync+empty_cache after steps 24,48,72,96,120,
+        144,168,192; emergency release when system MemAvailable <8GB before the next step;
+        require every release to restore every rank to >=40GB; require no-release observations
+        >=8GB; CUDA-free telemetry only; per-node swap baseline <=128MiB with zero positive
+        growth; Python cyclic GC off. Hard throughput gate is measured AND projected point useful
+        input tok/s >=1000; bootstrap lower bounds and 250-step memory projection are diagnostic.
+        Require step-192 checkpoint, zero OOM/retry/stall, and a finite non-zero full-adapter delta
+        receipt. No numerical adapter-delta band was supplied and none is invented.
+    next_rung: >
+      The exact 192-step qualifier passed and its public receipt is immutable. Full SFT remains
+      sealed in run_stage2_sft_ddp_till_done.sh until a separate authorization promotes this
+      exact receipt hash in a new commit. The next authorized production rung, if approved, is
+      0->50 only; do not silently continue to 50->300 or launch bake.
+    supersedes:
+      - path: careers-qwen/train_lora_sft.py
+        disqualified_on:
+          - "NEVER DEPLOYED — absent from every Spark; production is what runs on the hardware"
+          - "ZERO execution receipts"
+          - "named in consult_selflearning_loop.md:65-71 as the parallel-path error, correction
+             verbatim 'USE THE PRODUCTION INFRASTRUCTURE CLAUDE!!!!', cost '3 days; 2 runs lost to
+             an NCCL wedge the production path had already solved'"
+    note: >
+      tutor pointed at train_lora_sft.py as lost production infrastructure and was wrong on every
+      count. Recorded because the error is instructive: it has --grad-accum default 8, which LOOKED
+      like the missing memory lever. It is not — r13's 4.27GB minimum occurs at local_batch=1, and
+      accumulation splits batches, so it cannot reduce a batch of one.
+
+  bake_export:
+    content_sha:
+      dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
+      dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
+      careers-qwen/post_cpt_pipeline.sh: 5aa70614884e01c0ba04faf6c44210bd5ba9c4def49b82d3a3894f5fc67e164f
+    entrypoint: careers-qwen/post_cpt_pipeline.sh   # OPERATOR entrypoint; takes DCP_DIR
+    internal_stages_note: >
+      bake_27b.sh is NOT the top-level entrypoint — it is this pipeline's internal coordinated
+      EXPORT_DCP stage, followed by bake_dcp_offline.py, graft, delta and provenance. tutor's
+      first draft promoted the internal stage to entrypoint, which would have had an operator
+      run a fragment of the pipeline and skip the graft and the tensor-count gates.
+    content_sha:   # verified byte-identical to the NODE copies that produced the receipts
+      careers-qwen/post_cpt_pipeline.sh: 5aa70614884e01c0ba04faf6c44210bd5ba9c4def49b82d3a3894f5fc67e164f
+      dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
+      dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
+    status: ADJUDICATED
+    stages:
+      - name: coordinated sharded export
+        entrypoint: "EXPORT_DCP=<dir> dense-9b/recipes/bake_27b.sh"
+        receipt:
+          date: 2026-07-29
+          artifact: /home/spark/exports/cpt_v7_eps1fix_artifactB
+          verified_outcome: "EXPORT_DCP COMPLETE, global .metadata=PRESENT, 8m39s"
+      - name: offline convert
+        entrypoint: dense-9b/recipes/bake_dcp_offline.py
+        receipt:
+          artifacts: [/home/spark/models/prod_v2_ep1_hf, /home/spark/models/prod_v2_ep3_hf]
+          verified_outcome: "[convert] DONE — ep3 is the artifact production currently SERVES"
+    final_artifact: /home/spark/models/cpt_v7_eps1fix_servable  # 52G, 1199 tensors verified
+    candidate_update:
+      status: CANDIDATE_PENDING_NEXT_POST_CPT
+      content_sha:
+        careers-qwen/post_cpt_pipeline.sh: f0797778429996d6c9eb40a2c49e76f71d76016594a47bfd84f757fc94a6a56e
+        careers-qwen/finalize_post_cpt_candidate.sh: 7679a633cd289ff19b20ecdacbff13b78d833b426d710ccbd49c94189a3ebc44
+        careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
+        careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+      change: >
+        Both post-CPT finalization paths now refuse a corpus without a verified artifact-bound
+        input manifest and provenance generation reads corpus_inputs only from that receipt.
+      activation_gate: "next real post-CPT production artifact completes the full pipeline"
+    supersedes:
+      - path: "BAKE_TO_HF branch (train_fsdp_dense_9b.py full-state gather)"
+        disqualified_on:
+          - "ZERO 'BAKE COMPLETE' receipts across all 46 run logs — it has never once succeeded"
+          - "trainer's own comment at :2188 calls it wedge-prone"
+          - "BAKE_ARCHITECTURE_27b.md, unanimous Chats ruling: 'NO full_state_dict, NO gather'"
+          - "observed 2026-07-29: deadlocked 25min, zero disk IO, zero network, RSS frozen"
+
+  cpt_provenance_repair:
+    status: ADJUDICATED
+    entrypoint: careers-qwen/repair_cpt_v7_provenance.sh
+    content_sha:
+      careers-qwen/repair_cpt_v7_provenance.sh: f6934b5ac48fdf61b2261f23816a07afa700b2ddb586b06e929777394ee4b255
+      careers-qwen/repair_training_provenance.py: cc2e18ec08374c25b631181d1828b888e9fe0e0d6662ff4cbfb34fb9a7c149e3
+      careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+      careers-qwen/receipts/cpt_v7_eps1fix_corpus.manifest.json: c6e72c13ff8fda4d796d06e408b88b63ddde806979f144d0a21f8f20213bd46d
+    scope: >
+      Repairs the training-owned Expansion controller hold and four Spark staging copies only.
+      Serving copies remain infra-owned. It verifies the old state, changes only
+      training_provenance.json, regenerates SOURCE_SHA256SUMS, and fully verifies all five trees.
+    receipt:
+      date: 2026-07-30
+      tooling_commit: 18fc3699ce6c9a1d6b2ae3043e386604b2920d5c
+      corpus_manifest_sha256: c6e72c13ff8fda4d796d06e408b88b63ddde806979f144d0a21f8f20213bd46d
+      controller_manifest_sha256: 2406fff54148dd44d9c7a4824d43aaace0c450d3e6b174bfe1268565a9512c5d
+      provenance_sha256: 0273eede56d87f5e8d8894eaf5e53c53c19206889682971bc24173d276d07931
+      verified_outcome: >
+        Exact historical repack reproduced corpus 6f1eca byte-for-byte. The controller manifest
+        changed only training_provenance.json. The controller and all four Spark trees then passed
+        complete SOURCE_SHA256SUMS verification with identical manifest and provenance hashes.
+      serving_handoff: >
+        Infra independently repaired both live served copies, regenerated an identical serving
+        manifest on both, proved the non-provenance digest unchanged, and observed live completions.
+
+contested:
+  # NOT adjudicated. Do not treat as production. Each needs a receipt or a Chats/DCM ruling.
+  - capability: sft_27b_fullparam
+    candidates: [dense-9b/recipes/launch_sft_qwen36_27b_fsdp.sh]
+    question: >
+      Deployed on every node, dated 2026-07-09, ZERO log mentions — never executed. Absent from
+      the Mira tree entirely (dropped by a clean-root transplant). Stale artifact or unused
+      production path? Restoring it to the tree without an answer would make a never-run file
+      mandatory.
+
+root_cause_of_the_ambiguity: >
+  Clean-root transplants. When the public scanner refuses a push on contaminated history, the
+  remedy is a parentless commit carrying forward only the files someone remembered. Everything
+  else silently leaves the tree while remaining deployed on the hardware. The next agent greps,
+  finds nothing, and rebuilds it without the fixes that were paid for once. This WILL recur until
+  a transplant is required to emit a manifest of what it drops.
+
+# ============================================================================
+# HISTORICAL PRODUCTION LINES — cataloged, deliberately NOT launchable
+# ============================================================================
+# Added 2026-07-30 answering a direct question: do we hold every production
+# training line we have ever run, in one place, cataloged? We did not. The
+# capabilities map above covers the 27B line only. These two lines ALSO ran in
+# production and produced audited results, but their code had been dropped from
+# the tree by a clean-root transplant and existed only in history (moe-35b: 27
+# committed paths, all 27 absent; the 9B tool-SFT launcher likewise). Restored
+# in a40e821.
+#
+# THEY ARE NOT UNDER `capabilities:` ON PURPOSE. The resolver reads only
+# `capabilities` and `contested`, so nothing here can be launched by
+# taey-train. That is the intent: these ran on a different hardware era against
+# different base models, and marking them ADJUDICATED would make the launcher
+# willing to run them today. Cataloged means findable and readable, not runnable.
+historical_lines:
+
+  qwen35_9b_dense:
+    status: HISTORICAL — ran in production, superseded by the 27B line
+    what_it_was: Phase-1/Phase-2 dense 9B — continued pretraining plus tool-use SFT.
+    entrypoints:
+      cpt: dense-9b/recipes/launch_cpt_phase2_qwen35_9b_fsdp.sh
+      sft_tools: dense-9b/recipes/launch_sft_tools_qwen35_9b_fsdp.sh
+    receipts:
+      phase1_sft_total_steps: 4367   # readable in the launcher itself
+    note: >
+      The tool-SFT launcher was the file dropped by the transplant; the CPT
+      launcher survived. Restored from e56fb457, the last commit holding it.
+
+  qwen35_35b_moe:
+    status: HISTORICAL — ran in production, retain-or-retire is Jesse's open decision
+    what_it_was: >
+      35B MoE line — expert-masked SFT and three DPO rounds, with a frozen-expert
+      strategy (159 frozen experts) and keystone-layer freeze masks.
+    entrypoints:
+      sft: moe-35b/recipes/launch_production_sft.sh
+      dpo_v1: moe-35b/recipes/launch_religion_dpo_v1.sh
+      dpo_v2: moe-35b/recipes/launch_religion_dpo_v2.sh
+      dpo_v3: moe-35b/recipes/launch_religion_dpo_v3.sh
+    trainers:
+      - moe-35b/trainers/train_fsdp_v3.py
+      - moe-35b/trainers/train_dpo_v2.py
+      - moe-35b/trainers/fsdp_expert_masking.py
+      - moe-35b/trainers/training_data_gate_v2.py
+    receipts:
+      # Audit numbers below come from docs/METRICS_PROVENANCE.md, which is ALSO
+      # dropped from the tree (61 lines, recoverable from history). The proof
+      # directory it cites, audit_results/, is likewise absent. So these are
+      # recorded as REPORTED, not re-verified — the proof files are not
+      # currently openable, and that is the honest register.
+      religion_dpo_v2_config_A2: "138/163 = 84.7%, +1.9pp over the SFT baseline [REPORTED]"
+      religion_dpo_v1_config_A: "133/163 = 81.6%, -1.2pp — a documented regression [REPORTED]"
+      phase_combined_v1_sft_baseline: "135/163 = 82.8% [REPORTED]"
+      dpo_recovery_p2v3: "87/163 = 53.4% — the file's own headline says recovery did NOT recover [REPORTED]"
+      frozen_experts: 159
+    missing_proof:
+      - docs/METRICS_PROVENANCE.md   # 61 lines, in history, not in tree
+      - audit_results/               # per-checkpoint verdicts, not in tree
+    note: >
+      Training DATA for this line is deliberately excluded. The datasets under
+      datasets/current/moe-35b/ are NOT restored and must not be: scripts and
+      configurations are public, what is trained on never is.

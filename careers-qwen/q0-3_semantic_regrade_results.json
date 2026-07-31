@@ -1,0 +1,72 @@
+{
+  "summary": {
+    "C": {
+      "det_pass": 0,
+      "sem_pass": 0,
+      "flip_up": 0,
+      "flip_down": 0
+    },
+    "A": {
+      "det_pass": 0,
+      "sem_pass": 2,
+      "flip_up": 2,
+      "flip_down": 0
+    },
+    "B": {
+      "det_pass": 3,
+      "sem_pass": 9,
+      "flip_up": 6,
+      "flip_down": 0
+    }
+  },
+  "flips": [
+    [
+      "k3_v1_evidence__p3",
+      "B",
+      "contain-FAIL->sem-PASS",
+      "PASS: Identical core meaning regarding structural enforcement."
+    ],
+    [
+      "k3_v2_rootcause__p1",
+      "B",
+      "contain-FAIL->sem-PASS",
+      "PASS: Identical core meaning and factual content."
+    ],
+    [
+      "k3_v3_production__p1",
+      "B",
+      "contain-FAIL->sem-PASS",
+      "PASS: Identical core meaning and factual content."
+    ],
+    [
+      "k3_v4_autonomy__p2",
+      "B",
+      "contain-FAIL->sem-PASS",
+      "PASS: Identical core facts and reasoning conveyed."
+    ],
+    [
+      "k3_honesty_rule__p3",
+      "A",
+      "contain-FAIL->sem-PASS",
+      "PASS: Both state overlap requires specific citable evidence."
+    ],
+    [
+      "k3_honesty_rule__p3",
+      "B",
+      "contain-FAIL->sem-PASS",
+      "PASS: Identical core reasoning and conclusion."
+    ],
+    [
+      "k3_honesty_rule__p4",
+      "A",
+      "contain-FAIL->sem-PASS",
+      "PASS: Accurately conveys the limit of 1-2 values."
+    ],
+    [
+      "k3_honesty_rule__p4",
+      "B",
+      "contain-FAIL->sem-PASS",
+      "PASS: Captures core factual limit accurately."
+    ]
+  ]
+}
