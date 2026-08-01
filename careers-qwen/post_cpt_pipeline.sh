@@ -46,9 +46,16 @@ rc_get(){ sed -n "s|^$1=||p" <<<"$RC" | tail -1; }
 CORPUS=$(rc_get CPT_PATH_FROM_LOG)
 PROV_TOTAL_STEPS=$(rc_get TOTAL_STEPS)
 PROV_WARMUP_STEPS=$(rc_get WARMUP_STEPS)
+PROV_LR=$(rc_get LR)
 TRAIN_BASE=$(rc_get TRAIN_BASE)
 CAPTURED_CORPUS_INPUTS=$(rc_get CORPUS_INPUTS)
-for required_name in CORPUS PROV_TOTAL_STEPS PROV_WARMUP_STEPS TRAIN_BASE; do
+# LR is required for the same reason the others are, and with more history behind it:
+# run_4node_27b_cpt.sh:58-60 records that LR and WARMUP_STEPS were silently NOT forwarded
+# until 2026-07-13, so every run before that trained at the trainer default regardless of
+# what the operator set. WARMUP_STEPS was guarded here; LR was not — leaving the one value
+# whose divergence is already documented as the unguarded one. A run whose learning rate
+# cannot be named from its own capture cannot have its result explained later.
+for required_name in CORPUS PROV_TOTAL_STEPS PROV_WARMUP_STEPS PROV_LR TRAIN_BASE; do
   [ -n "${!required_name}" ] || {
     echo "ABORT: $required_name absent from run_config.env — refusing to default it." >&2
     exit 1
