@@ -1146,6 +1146,12 @@ def main():
         raise RuntimeError(
             "NSYS_PROFILE_STEP must be zero or a positive absolute optimizer step"
         )
+    # Rank-0-only profiling measures HOW MUCH time goes to collectives; it cannot say WHICH rank
+    # is late. Under a collective, every rank blocks until the slowest arrives, so a straggler
+    # shows up as the rank spending the LEAST time waiting in NCCL while its peers spend the most
+    # — a comparison that needs a timeline from every rank, not one. Default off: unset, behaviour
+    # is byte-identical to rank-0-only.
+    _nsys_profile_all_ranks = os.environ.get("NSYS_PROFILE_ALL_RANKS", "0") == "1"
     # Memory-guard thresholds (tutor 2026-07-22). Two bands because the free-memory drop is allocator
     # CACHE (hoarded reserved blocks on variable batch sizes), not live allocation — so when free gets
     # tight we RECLAIM the cache first and only exit if that isn't enough:
@@ -2559,7 +2565,8 @@ def main():
             log.info(
                 "NSYS PROFILE ARMED: "
                 f"absolute_optimizer_step={_nsys_profile_step} "
-                "trigger=cudaProfilerApi range=PALIOS_PROFILE_STEP rank=0"
+                "trigger=cudaProfilerApi range=PALIOS_PROFILE_STEP "
+                f"scope={'ALL_RANKS' if _nsys_profile_all_ranks else 'rank0'}"
             )
 
     for epoch in range(_resume_epoch, 100):
@@ -2605,7 +2612,7 @@ def main():
                 continue
 
             if (
-                accelerator.is_main_process
+                (accelerator.is_main_process or _nsys_profile_all_ranks)
                 and _nsys_profile_step == global_step + 1
                 and not _profile_nvtx_complete
                 and not _profile_nvtx_active
@@ -2614,7 +2621,10 @@ def main():
                 torch.cuda.cudart().cudaProfilerStart()
                 torch.cuda.nvtx.range_push("PALIOS_PROFILE_STEP")
                 _profile_nvtx_active = True
-                log.info(f"NSYS PROFILE START: optimizer_step={global_step + 1}")
+                log.info(
+                    f"NSYS PROFILE START: optimizer_step={global_step + 1} "
+                    f"rank={accelerator.process_index}"
+                )
 
             exact_sft_batch = "is_exact_padding" in batch
             if _exact_sft_epoch != exact_sft_batch:
