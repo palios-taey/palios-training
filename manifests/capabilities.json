@@ -11,12 +11,12 @@
         {
           "candidate_sha256": "1d9c9948c1eba0a646258c6aedaf609a7d4fdc1b4c4c982e0d9556e289ac01de",
           "digest_source": "computed",
-          "live_sha256": "1d9c9948c1eba0a646258c6aedaf609a7d4fdc1b4c4c982e0d9556e289ac01de",
+          "live_sha256": "2bd00e0f327b6617a390d3b25a74a8f0af85886d5fb98fd151ff99e7e4a1314d",
           "matches": false,
           "path": "careers-qwen/pack_production_corpus.py",
           "present": true,
           "recorded_sha256": "aa00208a6de861052424813b0610101ee9dd1beb93aca0ce420c7f16032740b7",
-          "state": "matches_candidate_update"
+          "state": "UNEXPLAINED_DRIFT"
         }
       ],
       "status": "ADJUDICATED",
@@ -30,22 +30,22 @@
         {
           "candidate_sha256": null,
           "digest_source": "computed",
-          "live_sha256": "37c620d26f591d49bd6588f8dd5b5f05ee03fa5d4d622bf4f22a1c89094c16ca",
-          "matches": true,
+          "live_sha256": "dfc2c11c8be6f991f438fb4a360cdef54056bedf958ec6f5bc67c848156c03c3",
+          "matches": false,
           "path": "dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh",
           "present": true,
           "recorded_sha256": "37c620d26f591d49bd6588f8dd5b5f05ee03fa5d4d622bf4f22a1c89094c16ca",
-          "state": "matches_adjudicated"
+          "state": "UNEXPLAINED_DRIFT"
         },
         {
           "candidate_sha256": null,
           "digest_source": "computed",
-          "live_sha256": "9e73ce7da868a9ed61bb6d3a9b93c658b544707392e5930b83de17d49928972e",
-          "matches": true,
+          "live_sha256": "8dd824c9a9ec30ec31d33f202bbd0910dabbc6837da2ab468dec60180efc3e6c",
+          "matches": false,
           "path": "dense-9b/trainers/train_fsdp_dense_9b.py",
           "present": true,
           "recorded_sha256": "9e73ce7da868a9ed61bb6d3a9b93c658b544707392e5930b83de17d49928972e",
-          "state": "matches_adjudicated"
+          "state": "UNEXPLAINED_DRIFT"
         },
         {
           "candidate_sha256": null,

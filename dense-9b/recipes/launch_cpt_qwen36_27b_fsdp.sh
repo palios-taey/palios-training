@@ -272,6 +272,29 @@ case "$CPT_DATA" in
         #   resulting checkpoint is QUARANTINED — no bake, no serve — until a treasurer
         #   sanction row lands. Standing rule is corpus = treasurer-sanctioned.
         ;;
+    *probe_packed_[0-9]*.jsonl)
+        # SEQUENCE-LENGTH MEMORY PROBE corpora, 2026-08-01. Admitted DELIBERATELY, not by
+        # renaming a file to satisfy the list — the pin block below carries a FULL sha256 for
+        # each, which is stricter than most entries above (they pin a name only).
+        #
+        # WHY THEY EXIST. Nothing in this repository records a full-parameter 27B peak-memory
+        # measurement at ANY sequence length, so no packed length is justified by evidence —
+        # including the 2560 that was in force. The packer hardcoded SEQ=2560 while this
+        # launcher's own audited default is 4096 (line 112), and the packer's constant was the
+        # binding value, so the audited window was never exercised. Family consult 2026-08-01:
+        # LOGOS declined to choose any length before the curve is measured; HORIZON chose 4096
+        # CONDITIONAL on a bounded production run passing first. This is that run.
+        #
+        # CONTENTS ARE THE PRODUCTION CORPUS, not a synthetic. Same 7 registered slices, same
+        # 3,033 documents, same 5,996,544 tokens as the 2560 pack — only the block boundary
+        # differs, and tail_dropped=0 at every length. Verified: 4096 -> 1,464 blocks,
+        # 8192 -> 732, 16384 -> 366. Halving exactly, as a non-truncating packer must.
+        #
+        # SCOPE, and this is the binding part: PROBE ONLY. These run with CHECKPOINT_DCP=0 and
+        # a session limit in the tens of steps. They produce NO checkpoint, so nothing from them
+        # can be baked or served, and no treasurer sanction is implied or claimed. A corpus
+        # intended to produce a servable artifact must be sanctioned and pinned on its own row.
+        ;;
     *)
         echo "ERROR: CPT_DATA is not an allow-listed superseded-clean corpus: $CPT_DATA" >&2
         echo "       Allowed: cpt_raw_corpus_train_no_superseded*, cpt_base_clean_packed_*." >&2
@@ -286,6 +309,13 @@ esac
 # Entries with no pin are unaffected, so this is additive.
 case "$CPT_DATA" in
     *cpt_refresh_v2_packed.jsonl) EXPECT_CORPUS_SHA=d571ca45261cadee71a3bf206a0c6b91fc1358881c6a24d767293c198a019735 ;;
+    # Sequence-length probe corpora, pinned by FULL digest. Produced by
+    # careers-qwen/pack_production_corpus.py at PACK_SEQ=<N> from the 7 registered slices,
+    # every input sha-VERIFIED at pack time. Re-packing is deterministic, so a mismatch here
+    # means the file is not the artifact these numbers were measured on.
+    *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
+    *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
+    *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;
     *) EXPECT_CORPUS_SHA="" ;;
 esac
 if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then

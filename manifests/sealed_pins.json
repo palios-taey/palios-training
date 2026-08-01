@@ -55,7 +55,7 @@
       "kind": "sealed_pinned_file",
       "path": "dense-9b/trainers/train_fsdp_dense_9b.py",
       "present": true,
-      "sha256": "9e73ce7da868a9ed61bb6d3a9b93c658b544707392e5930b83de17d49928972e"
+      "sha256": "8dd824c9a9ec30ec31d33f202bbd0910dabbc6837da2ab468dec60180efc3e6c"
     }
   ]
 }
