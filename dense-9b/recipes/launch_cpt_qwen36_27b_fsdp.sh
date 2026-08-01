@@ -279,6 +279,27 @@ case "$CPT_DATA" in
         #   resulting checkpoint is QUARANTINED — no bake, no serve — until a treasurer
         #   sanction row lands. Standing rule is corpus = treasurer-sanctioned.
         ;;
+    *cpt_repos_v1_packed_[0-9]*.jsonl)
+        # PUBLIC-REPO SURFACE CORPUS, 2026-08-01. Jesse directive, verbatim: "All the public repos
+        # that Taey uses including governance/ need to be trained. Only the public repos they use."
+        #
+        # WHAT IT IS: cpt_public_repos_v2 ALONE — not the legacy 6-slice blend. The blend drew
+        # 65% of its characters from treasurer's PRIVATE consultations tree, which would have
+        # trained consultation transcripts rather than the repos and defeated the objective while
+        # looking entirely normal.
+        #
+        # CLEAN SURFACE ONLY: built with the retired-directory exclusion in build_corpus_slices.py,
+        # so docs/archive, deprecated, superseded, obsolete and legacy paths are absent. Per Jesse:
+        # "The public repos need to be clean. That means nothing out of date ever." Training a
+        # current doc alongside its superseded predecessor is the confusion archiving removes.
+        # 19 repos including governance; commit-pinned blobs via `git show HEAD:<path>`.
+        #
+        # CREDENTIAL-SCANNED: 4 flagged values, every one verified from source as a test fixture
+        # or documented placeholder (dev-token, OUTSIDE_MEMORY_SHOULD_NOT_RENDER, change-me).
+        #
+        # SANCTION: tutor-assembled. Training ownership is tutor's per Jesse 2026-08-01
+        # ("Treasurer just does pairs like everyone else... You are in charge").
+        ;;
     *probe_packed_[0-9]*.jsonl)
         # SEQUENCE-LENGTH MEMORY PROBE corpora, 2026-08-01. Admitted DELIBERATELY, not by
         # renaming a file to satisfy the list — the pin block below carries a FULL sha256 for
@@ -320,6 +341,8 @@ case "$CPT_DATA" in
     # careers-qwen/pack_production_corpus.py at PACK_SEQ=<N> from the 7 registered slices,
     # every input sha-VERIFIED at pack time. Re-packing is deterministic, so a mismatch here
     # means the file is not the artifact these numbers were measured on.
+    # public-repo surface corpus — FULL sha256, the strict form
+    *cpt_repos_v1_packed_8192.jsonl) EXPECT_CORPUS_SHA=8ae2a486a92c51b288315a921f80cbe253c1ff4242a5d1f3c41db249708022de ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;

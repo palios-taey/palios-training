@@ -122,9 +122,27 @@ SLICES = [
     # require knowing which sentences are his, which this schema cannot express.
 ]
 
+# ---------------------------------------------------------------------------
+# REGISTERED PACK SETS
+# ---------------------------------------------------------------------------
+# SLICES above stays the production_v1 blend, untouched — it is the proven set and its pins are
+# the lineage authority for everything already trained.
+#
+# repos_v1 (2026-08-01, Jesse directive "only the public repos they use"): the public-repo surface
+# ALONE. Not a blend. Built by build_corpus_slices.py public-repos-v2 with the retired-directory
+# exclusion, so archive/deprecated/superseded content is absent — "the public repos need to be
+# clean, that means nothing out of date ever". 19 repos including governance.
+PACK_SETS = {
+    "production_v1": SLICES,
+    "repos_v1": [
+        ("cpt_public_repos_v2.jsonl", 1098, "155dc385fb92ed47"),
+    ],
+}
+
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--pack-set", default="production_v1", choices=sorted(PACK_SETS))
     ap.add_argument("--slices-dir", required=True)
     ap.add_argument("--tokenizer", required=True)
     ap.add_argument("--out", required=True)
@@ -144,7 +162,7 @@ def main():
     input_receipts = []
     tmp = args.out + ".tmp"
     with open(tmp, "w") as out:
-        for fname, want_rows, want_sha in SLICES:
+        for fname, want_rows, want_sha in PACK_SETS[args.pack_set]:
             path = os.path.join(args.slices_dir, fname)
             full_sha = sha256_file(path)
             got_sha = full_sha[:16]
@@ -224,7 +242,7 @@ def main():
     print(f"[pack] OUTPUT sha256={corpus_sha}")
     print(f"[pack] MANIFEST {manifest_path} sha256={sha256_file(manifest_path)}")
     print(f"[pack] register as: cpt_production_v1_packed_{SEQ} (inputs: "
-          + ", ".join(f"{n}@{s}" for n, _, s in SLICES) + ")")
+          + ", ".join(f"{n}@{s}" for n, _, s in PACK_SETS[args.pack_set]) + ")")
 
 
 if __name__ == "__main__":
