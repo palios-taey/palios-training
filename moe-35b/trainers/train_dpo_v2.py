@@ -206,6 +206,37 @@ def _tokenize_sft_pair(messages, tokenizer):
     return full_ids, labels
 
 
+
+_QUARANTINE_MARKER_GLOB = "QUARANTINE*"
+
+
+def _assert_not_quarantined(path):
+    """Refuse to index a data file that sits beside a quarantine marker.
+
+    The loader discovers corpora by globbing a directory; it does not read
+    PAIRS_MANIFEST. That made a quarantine ADMINISTRATIVE — a marker file the
+    trainer never opened — so a file marked do-not-train was still trainable by
+    pointing the loader at its directory. This makes the marker MECHANICAL.
+
+    The marker is directory-scoped by its own wording ("do not tokenize, train
+    on, or copy files in this directory"), so any marker in a file's directory
+    quarantines that file.
+
+    This RAISES rather than skipping. A silently-dropped corpus is worse than a
+    stopped run: training would report success over data nobody chose, and the
+    step count would look normal.
+    """
+    directory = os.path.dirname(os.path.abspath(path))
+    markers = sorted(glob.glob(os.path.join(directory, _QUARANTINE_MARKER_GLOB)))
+    if markers:
+        names = ", ".join(os.path.basename(m) for m in markers)
+        raise RuntimeError(
+            f"REFUSE: {path} lies in a QUARANTINED directory (marker: {names}). "
+            f"A quarantine is mechanical, not advisory. Close the owning task and "
+            f"remove the marker, or point the loader at sanctioned bytes."
+        )
+
+
 class DPOPairsDataset(Dataset):
     """DPO pairs dataset — loads precomputed {chosen,rejected}_{input_ids,labels} + ref_logprobs.
 
@@ -330,6 +361,7 @@ class CombinedSFTDataset(Dataset):
         for path in file_paths:
             if not os.path.isfile(path):
                 continue
+            _assert_not_quarantined(path)
             with open(path, 'rb') as f:
                 while True:
                     offset = f.tell()
