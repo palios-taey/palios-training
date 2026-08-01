@@ -882,6 +882,68 @@ class DistributedTokenBucketBatchSampler:
         return batches
 
 
+def _package_version(name):
+    try:
+        from importlib.metadata import version
+        return version(name)
+    except Exception:
+        return "unknown"
+
+
+def install_liger_backbone_kernels(model):
+    """Swap RMSNorm and SwiGLU for Liger's fused kernels, and PROVE the swap took.
+
+    Ported verbatim in behaviour from careers-qwen/train_ddp_lora.py, where this has run in
+    production. The receipt is the load-bearing part: apply_liger_kernel_to_qwen3_5 is a
+    monkey-patch, and a monkey-patch that silently fails to bind leaves the model running stock
+    kernels while the log says otherwise. Walking the module tree afterwards and raising on any
+    module that is NOT the Liger class is the difference between "we applied it" and "it is
+    applied".
+    """
+    from liger_kernel.transformers.monkey_patch import apply_liger_kernel_to_qwen3_5
+
+    cls = type(model).__name__
+    if cls != "Qwen3_5ForCausalLM":
+        raise RuntimeError(
+            f"Liger backbone kernels expect Qwen3_5ForCausalLM, got "
+            f"{type(model).__module__}.{cls}"
+        )
+    # rope / cross_entropy / fused_linear_cross_entropy stay False: this is a PORT of a
+    # production-proven configuration, not the place to introduce an untested kernel combination.
+    apply_liger_kernel_to_qwen3_5(
+        rope=False,
+        cross_entropy=False,
+        fused_linear_cross_entropy=False,
+        rms_norm=True,
+        swiglu=True,
+        model=model,
+    )
+    text_model = model.model
+    rms_norms = [text_model.norm]
+    for layer in text_model.layers:
+        rms_norms.extend((layer.input_layernorm, layer.post_attention_layernorm))
+    unexpected_norms = [m._get_name() for m in rms_norms if m._get_name() != "LigerRMSNorm"]
+    unexpected_mlps = [
+        layer.mlp._get_name()
+        for layer in text_model.layers
+        if layer.mlp._get_name() != "LigerQwen3MoeSwiGLUMLP"
+    ]
+    if unexpected_norms or unexpected_mlps:
+        raise RuntimeError(
+            "Liger backbone patch receipt is incomplete: "
+            f"unexpected_norms={unexpected_norms[:5]} "
+            f"unexpected_mlps={unexpected_mlps[:5]}"
+        )
+    return {
+        "architecture": cls,
+        "liger_kernel": _package_version("liger-kernel"),
+        "rms_norm": "LigerRMSNorm",
+        "rms_norm_modules": len(rms_norms),
+        "swiglu": "LigerQwen3MoeSwiGLUMLP",
+        "swiglu_modules": len(text_model.layers),
+    }
+
+
 _QUARANTINE_MARKER_GLOB = "QUARANTINE*"
 
 
@@ -1282,6 +1344,32 @@ def main():
     # (the mandatory order). Verified post-prepare by the CheckpointWrapper count below.
     # if the count is 0, escalate to a manual pre-prepare apply_activation_checkpointing.
     log.info("AC: HF gradient_checkpointing_enable REMOVED (exp9) — using accelerate fsdp_activation_checkpointing")
+
+    # ── LIGER BACKBONE KERNELS (2026-08-01) ──
+    # Ported from careers-qwen/train_ddp_lora.py:235, where these have run in production and are
+    # recorded in the stage-2 SFT run manifest (liger_kernel 0.8.1, LigerRMSNorm x129,
+    # LigerQwen3MoeSwiGLUMLP x64). The SFT path had them; THIS path never did. Same model family,
+    # same hardware, one trainer optimised and the other not — the cost was paid on every CPT step
+    # since the kernels were installed.
+    # Applied HERE: after from_pretrained, before accelerate.prepare/fully_shard, because the patch
+    # swaps module classes and must happen while the module tree is still local and unwrapped.
+    # rope/cross_entropy/fused_linear_cross_entropy stay FALSE to match the configuration already
+    # proven in production rather than introducing an untested combination alongside a port.
+    # LIGER=0 disables it, so an A/B is one env var and the previous behaviour is one flag away.
+    if os.environ.get("LIGER", "1") == "1":
+        try:
+            _liger_receipt = install_liger_backbone_kernels(model)
+            log.info(f"LIGER: {_liger_receipt}")
+        except Exception as _e:
+            # Loud, not silent. A throughput optimisation that quietly no-ops leaves the run
+            # slower than it should be with nothing in the log to say why — which is how this
+            # gap survived in the first place.
+            raise RuntimeError(
+                f"LIGER install failed: {type(_e).__name__}: {_e}. "
+                f"Set LIGER=0 to run without the fused kernels."
+            ) from _e
+    else:
+        log.info("LIGER: DISABLED by env (LIGER=0) — stock RMSNorm/SwiGLU")
 
     # ── LORA_MODE (2026-07-21) — module training on the FROZEN CPT base ──
     # Attach PEFT here (BEFORE accelerator.prepare/fully_shard, so the adapter modules exist when
