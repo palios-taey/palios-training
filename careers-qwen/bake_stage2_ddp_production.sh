@@ -231,7 +231,7 @@ verify_final_fleet(){
     receipt=$(ssh "${SSH_OPTIONS[@]}" -o BatchMode=yes -o ConnectTimeout=15 \
       spark@"$node" \
       "$(printf '%q ' bash -s -- "$OUTPUT_DIR" "$CHECKPOINT" "$RUN_TAG" \
-        "$FINAL_STEP" "$PLAN_SHA" "$expected_completion_sha" "$rank")" <<'REMOTE'
+        "$FINAL_STEP" "$PLAN_SHA" "$expected_completion_sha" "$rank" "$SPARK_HOME")" <<'REMOTE'
 set -euo pipefail
 output=$1
 checkpoint=$2
@@ -240,6 +240,7 @@ steps=$4
 plan_sha=$5
 expected_completion_sha=$6
 rank=$7
+spark_home=${8%/}
 for file in COMPLETE adapter_config.json adapter_model.safetensors \
   trainer_state.pt training_manifest.json SHA256SUMS.json; do
   [ -s "$checkpoint/$file" ]
@@ -286,7 +287,7 @@ if tmux has-session -t stage2-ddp-sft 2>/dev/null; then
   echo "REFUSE: training tmux still exists on rank$rank" >&2
   exit 1
 fi
-protected=/home/spark/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800
+protected="${spark_home}/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800"
 [ -s "$protected/COMPLETE" ]
 [ -s "$protected/trainer_meta.pt" ]
 [ -s "$protected/dcp/__${rank}_0.distcp" ]

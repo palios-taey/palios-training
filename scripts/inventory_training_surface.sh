@@ -80,7 +80,11 @@ i=0
 for h in ${SPARK_MGMT_IPS:-}; do
   i=$((i+1))
   out=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "spark@$h" \
-    'echo "$(du -sh /home/spark/training_outputs 2>/dev/null|cut -f1):$(du -sh /home/spark/models 2>/dev/null|cut -f1):$(du -sh /var/spark/isma/training 2>/dev/null|cut -f1):$(df -h /home 2>/dev/null|tail -1|awk "{print \$4}")"' 2>/dev/null)
+    "$(printf '%q ' bash -s -- "${SPARK_HOME%/}")" <<'REMOTE' 2>/dev/null
+spark_home=$1
+echo "$(du -sh "$spark_home/training_outputs" 2>/dev/null|cut -f1):$(du -sh "$spark_home/models" 2>/dev/null|cut -f1):$(du -sh /var/spark/isma/training 2>/dev/null|cut -f1):$(df -h /home 2>/dev/null|tail -1|awk "{print \$4}")"
+REMOTE
+  )
   say "  - node: $i"
   say "    training_outputs: ${out%%:*}"
   say "    models: $(echo "$out" | cut -d: -f2)"
@@ -175,7 +179,11 @@ i=0
 for h in ${SPARK_MGMT_IPS:-}; do
   i=$((i+1))
   out=$(ssh -o BatchMode=yes -o ConnectTimeout=8 "spark@$h" \
-    'echo "$(find /home/spark -path "*/vllm/utils/mem_utils.py" 2>/dev/null | wc -l):$(find /home/spark -path "*/vllm/utils/mem_utils.py" -exec sha256sum {} \; 2>/dev/null | awk "{print \$1}" | sort -u | wc -l):$(find /home/spark -name "__editable__*.pth" 2>/dev/null | wc -l)"' 2>/dev/null)
+    "$(printf '%q ' bash -s -- "${SPARK_HOME%/}")" <<'REMOTE' 2>/dev/null
+spark_home=$1
+echo "$(find "$spark_home" -path "*/vllm/utils/mem_utils.py" 2>/dev/null | wc -l):$(find "$spark_home" -path "*/vllm/utils/mem_utils.py" -exec sha256sum {} \; 2>/dev/null | awk "{print \$1}" | sort -u | wc -l):$(find "$spark_home" -name "__editable__*.pth" 2>/dev/null | wc -l)"
+REMOTE
+  )
   say "  - node: $i"
   say "    vllm_mem_utils_copies: ${out%%:*}"
   say "    distinct_contents: $(echo "$out" | cut -d: -f2)"

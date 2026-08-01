@@ -309,11 +309,12 @@ verify_protected_checkpoint(){
       2|3) expected_metadata=1130948 ;;
     esac
     receipt=$(ssh "${SSH_OPTIONS[@]}" -o BatchMode=yes -o ConnectTimeout=10 spark@"$node" \
-      "$(printf '%q ' bash -s -- "$rank" "$expected_metadata")" <<'REMOTE'
+      "$(printf '%q ' bash -s -- "$rank" "$expected_metadata" "$SPARK_HOME")" <<'REMOTE'
 set -euo pipefail
 rank=$1
 expected_metadata=$2
-checkpoint=/home/spark/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800
+spark_home=${3%/}
+checkpoint="${spark_home}/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800"
 [ "$(cat "$checkpoint/COMPLETE")" = "step=800 epoch=0 data_pos=800 rank=$rank" ]
 [ "$(stat -c %s "$checkpoint/trainer_meta.pt")" = 7245 ]
 [ "$(stat -c %s "$checkpoint/dcp/__${rank}.metadata")" = "$expected_metadata" ]

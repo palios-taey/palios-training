@@ -80,7 +80,7 @@ capabilities:
       run: cpt_v7_eps1fix
       date: 2026-07-30
       steps: 148/148
-      artifact: /home/spark/training_outputs/cpt_v7_eps1fix/checkpoint-148
+      artifact: "${SPARK_HOME}/training_outputs/cpt_v7_eps1fix/checkpoint-148"
       verified_outcome: "weight-diff 1.036e-04 vs module5_merged — IN BAND (5e-05..8e-04)"
       measured_by: careers-qwen/measure_cpt_delta.py
     note: >
@@ -249,14 +249,14 @@ capabilities:
         entrypoint: "EXPORT_DCP=<dir> dense-9b/recipes/bake_27b.sh"
         receipt:
           date: 2026-07-29
-          artifact: /home/spark/exports/cpt_v7_eps1fix_artifactB
+          artifact: "${SPARK_HOME}/exports/cpt_v7_eps1fix_artifactB"
           verified_outcome: "EXPORT_DCP COMPLETE, global .metadata=PRESENT, 8m39s"
       - name: offline convert
         entrypoint: dense-9b/recipes/bake_dcp_offline.py
         receipt:
-          artifacts: [/home/spark/models/prod_v2_ep1_hf, /home/spark/models/prod_v2_ep3_hf]
+          artifacts: ["${SPARK_HOME}/models/prod_v2_ep1_hf", "${SPARK_HOME}/models/prod_v2_ep3_hf"]
           verified_outcome: "[convert] DONE — ep3 is the artifact production currently SERVES"
-    final_artifact: /home/spark/models/cpt_v7_eps1fix_servable  # 52G, 1199 tensors verified
+    final_artifact: "${SPARK_HOME}/models/cpt_v7_eps1fix_servable"  # 52G, 1199 tensors verified
     candidate_update:
       status: CANDIDATE_PENDING_NEXT_POST_CPT
       content_sha:

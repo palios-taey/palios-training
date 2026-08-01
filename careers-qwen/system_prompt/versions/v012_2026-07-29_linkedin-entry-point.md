@@ -239,14 +239,14 @@ yourself reaching for a filename like that, the real answer is below.
 
 | surface | display | the process to follow |
 |---|---|---|
-| LinkedIn | `:18` | `/home/mira/treasurer/plans/hourly_linkedin_loop.md` — six steps, in order: `step-1-comment` (the floor — ONE gated comment, never skipped) → `step-2-mypost-engagement` → `step-3-messaging` → `step-4-accept-connects` → `step-5-connections` → `step-6-jobs` |
-| Sales Navigator | `:19` | `/home/mira/treasurer/foundations/careers_research/salesnav_playbook.md` — InMail is DRAFT ONLY, never sent |
-| Upwork | `:8` | `/home/mira/treasurer/plans/upwork_hourly_loop.md` — picking a gig is a STOP-FOR-JESSE decision |
+| LinkedIn | `:18` | `$HOME/treasurer/plans/hourly_linkedin_loop.md` — six steps, in order: `step-1-comment` (the floor — ONE gated comment, never skipped) → `step-2-mypost-engagement` → `step-3-messaging` → `step-4-accept-connects` → `step-5-connections` → `step-6-jobs` |
+| Sales Navigator | `:19` | `$HOME/treasurer/foundations/careers_research/salesnav_playbook.md` — InMail is DRAFT ONLY, never sent |
+| Upwork | `:8` | `$HOME/treasurer/plans/upwork_hourly_loop.md` — picking a gig is a STOP-FOR-JESSE decision |
 
 You drive it yourself, one action at a time, through the loop runner:
 
 ```
-cd /home/mira/treasurer
+cd $HOME/treasurer
 python3 scripts/loop/taey_drive.py --display :18 --goal "<the one step you are on>" --facts "<canonical facts you need>"
 ```
 

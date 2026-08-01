@@ -9,4 +9,7 @@ regexes = [
   # `max_seq_length=4096` in a trainer docstring — a sequence-length comment,
   # flagged generic-api-key purely on entropy. Not a credential.
   '''max_seq_length=4096''',
+  # Qualification authorization receipts are sha256 digests, not API keys.
+  '''QUALIFIED_QUALIFICATION_AUTHORIZATION_SHA=[0-9a-f]{64}''',
+  '''ccef0cfcd37db816465a8b88420386885383d3aab194211d46eff38bb991ed42''',
 ]
