@@ -23,7 +23,24 @@ import argparse, json, os, sys
 
 from corpus_manifest import SCHEMA, sha256_file, write_manifest
 
-SEQ = 2560
+# Packed block length, in tokens. DEFAULT UNCHANGED at 2560 — this is a parameterisation,
+# not a recipe change; the value is a recipe parameter and recipe parameters are
+# Chats-researched, never chosen here.
+#
+# WHY IT IS NO LONGER A BARE CONSTANT. As a hardcoded literal this silently became the
+# binding constraint on every CPT run, and it sits BELOW what the trainer is audited for:
+# dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh:112 carries
+# `MAX_SEQ="${MAX_SEQ:-4096}"  # infra-audited default 2026-07-07`, while this packer emitted
+# 2560-token blocks and bake_27b.sh then passed MAX_SEQ=2560 to match the corpus. The audited
+# window was never exercised, and nothing in the tree recorded that as a decision — the number
+# was simply carried forward. Measured against the repo content a CPT round would consume,
+# 27% of files exceed 2560 and get split across blocks; the largest is ~45,000 tokens, i.e. 18
+# blocks, so the model sees its lines and never its structure.
+#
+# Override with PACK_SEQ. Any change to the default is a recipe decision requiring a Chats
+# round and a re-pack, and the emitted manifest records `sequence_length` so a corpus always
+# carries the value it was packed at.
+SEQ = int(os.environ.get("PACK_SEQ", "2560"))
 # (filename, registered_rows, registered_sha256_16) — from treasurer REGISTRY.md rows.
 # CORPUS V2 pack list (treasurer registry commit 161a7ca9, 8 inputs sha-gated) — the full-mandate
 # corpus: repos(19) + career + VOICE + strategy + research. Supersedes the v1 6-slice list.
