@@ -13,7 +13,8 @@ Method (deterministic, no shuffle, reproducible byte-for-byte):
      CYCLE-PADDED with the start of the stream (Jesse 2026-07-14: NO truncation — zero corpus
      tokens dropped; the pad is a documented replay of already-included content, not new data).
 
-Output: cpt_production_v1_packed_2560.jsonl + stdout sha256 for the treasurer registry row.
+Output: cpt_production_v1_packed_<SEQ>.jsonl + stdout sha256 for the treasurer registry row.
+      (SEQ is PACK_SEQ, default 2560; the emitted name and manifest carry the ACTUAL value)
 Run on a Spark node (needs the Qwen3.6-27B tokenizer):
   python3 pack_production_corpus.py --slices-dir /var/spark/isma/training/slices_v1 \
       --tokenizer <SPARK_HOME>/models/Qwen3.6-27B \
@@ -222,7 +223,7 @@ def main():
     })
     print(f"[pack] OUTPUT sha256={corpus_sha}")
     print(f"[pack] MANIFEST {manifest_path} sha256={sha256_file(manifest_path)}")
-    print(f"[pack] register as: cpt_production_v1_packed_2560 (inputs: "
+    print(f"[pack] register as: cpt_production_v1_packed_{SEQ} (inputs: "
           + ", ".join(f"{n}@{s}" for n, _, s in SLICES) + ")")
 
 
