@@ -252,10 +252,34 @@ class DPOPairsDataset(Dataset):
                 "ref_rejected_logprob": torch.tensor(0.0),
             }
         rec = self.items[idx % len(self.items)]
-        cho_ids = rec['chosen_input_ids'][:self.max_seq]
-        cho_labels = rec['chosen_labels'][:self.max_seq]
-        rej_ids = rec['rejected_input_ids'][:self.max_seq]
-        rej_labels = rec['rejected_labels'][:self.max_seq]
+        cho_ids = rec['chosen_input_ids']
+        if len(cho_ids) > self.max_seq:
+            # NEVER TRUNCATE (Jesse, standing invariant).
+            raise RuntimeError(
+                f"row exceeds max_seq: len(cho_ids)={len(cho_ids)} > {self.max_seq}; "
+                f"corpus must be pre-chunked — truncation is not permitted"
+            )
+        cho_labels = rec['chosen_labels']
+        if len(cho_labels) > self.max_seq:
+            # NEVER TRUNCATE (Jesse, standing invariant).
+            raise RuntimeError(
+                f"row exceeds max_seq: len(cho_labels)={len(cho_labels)} > {self.max_seq}; "
+                f"corpus must be pre-chunked — truncation is not permitted"
+            )
+        rej_ids = rec['rejected_input_ids']
+        if len(rej_ids) > self.max_seq:
+            # NEVER TRUNCATE (Jesse, standing invariant).
+            raise RuntimeError(
+                f"row exceeds max_seq: len(rej_ids)={len(rej_ids)} > {self.max_seq}; "
+                f"corpus must be pre-chunked — truncation is not permitted"
+            )
+        rej_labels = rec['rejected_labels']
+        if len(rej_labels) > self.max_seq:
+            # NEVER TRUNCATE (Jesse, standing invariant).
+            raise RuntimeError(
+                f"row exceeds max_seq: len(rej_labels)={len(rej_labels)} > {self.max_seq}; "
+                f"corpus must be pre-chunked — truncation is not permitted"
+            )
         return {
             "chosen_input_ids": torch.tensor(cho_ids, dtype=torch.long),
             "chosen_labels": torch.tensor(cho_labels, dtype=torch.long),
@@ -373,8 +397,14 @@ class CombinedSFTDataset(Dataset):
 
             # Pad/truncate rejected
             if len(rej_tokens) > self.max_seq:
-                rej_tokens = rej_tokens[:self.max_seq]
-                rej_labels = rej_labels[:self.max_seq]
+                # NEVER TRUNCATE (Jesse, standing invariant). A cut row is a silently
+                # corrupted training target: the model cannot tell what is missing.
+                # Over-length input is a CORPUS defect — fix it upstream by chunking or
+                # windowing, never by discarding tokens here.
+                raise RuntimeError(
+                    f"row exceeds max_seq: len(rej_tokens)={len(rej_tokens)} > {self.max_seq}; "
+                    f"corpus must be pre-chunked or windowed — truncation is not permitted"
+                )
             elif len(rej_tokens) < self.max_seq:
                 pad_len = self.max_seq - len(rej_tokens)
                 rej_tokens += [self.tokenizer.pad_token_id] * pad_len
@@ -382,8 +412,14 @@ class CombinedSFTDataset(Dataset):
 
             # Pad/truncate chosen (handled below), store rejected
             if len(tokens) > self.max_seq:
-                tokens = tokens[:self.max_seq]
-                labels = labels[:self.max_seq]
+                # NEVER TRUNCATE (Jesse, standing invariant). A cut row is a silently
+                # corrupted training target: the model cannot tell what is missing.
+                # Over-length input is a CORPUS defect — fix it upstream by chunking or
+                # windowing, never by discarding tokens here.
+                raise RuntimeError(
+                    f"row exceeds max_seq: len(tokens)={len(tokens)} > {self.max_seq}; "
+                    f"corpus must be pre-chunked or windowed — truncation is not permitted"
+                )
             elif len(tokens) < self.max_seq:
                 pad_len = self.max_seq - len(tokens)
                 tokens += [self.tokenizer.pad_token_id] * pad_len
@@ -397,8 +433,14 @@ class CombinedSFTDataset(Dataset):
             labels = [-100] * self.max_seq
 
         if len(tokens) > self.max_seq:
-            tokens = tokens[:self.max_seq]
-            labels = labels[:self.max_seq]
+            # NEVER TRUNCATE (Jesse, standing invariant). A cut row is a silently
+            # corrupted training target: the model cannot tell what is missing.
+            # Over-length input is a CORPUS defect — fix it upstream by chunking or
+            # windowing, never by discarding tokens here.
+            raise RuntimeError(
+                f"row exceeds max_seq: len(tokens)={len(tokens)} > {self.max_seq}; "
+                f"corpus must be pre-chunked or windowed — truncation is not permitted"
+            )
         elif len(tokens) < self.max_seq:
             pad_len = self.max_seq - len(tokens)
             tokens += [self.tokenizer.pad_token_id] * pad_len

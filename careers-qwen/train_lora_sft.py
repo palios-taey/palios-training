@@ -190,7 +190,13 @@ class ChatSFTDataset(Dataset):
         full_ids = self.tok(full_text, add_special_tokens=False)["input_ids"]
         # prompt_text is a prefix of full_text (assistant header shared) -> mask prompt
         plen = len(prompt_ids) if full_ids[:len(prompt_ids)] == prompt_ids else min(len(prompt_ids), len(full_ids))
-        input_ids = full_ids[: self.max_seq]
+        if len(full_ids) > self.max_seq:
+            # NEVER TRUNCATE (Jesse, standing invariant).
+            raise RuntimeError(
+                f"row exceeds max_seq: len(full_ids)={len(full_ids)} > {self.max_seq}; "
+                f"corpus must be pre-chunked or windowed — truncation is not permitted"
+            )
+        input_ids = full_ids
         labels = ([-100] * plen + full_ids[plen:])[: len(input_ids)]
         return {"input_ids": input_ids, "labels": labels}
 
