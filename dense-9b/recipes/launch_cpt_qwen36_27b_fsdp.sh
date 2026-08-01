@@ -481,7 +481,33 @@ echo "  OPTIM:  Adafactor lr=$LR clip=$ADAFACTOR_CLIP_THRESHOLD"
 echo "  MEMORY: MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK"
 echo ""
 
-python3 -m torch.distributed.run \
+# NSYS_PROFILE_STEP arms cudaProfilerStart/Stop and an NVTX range inside the trainer, but those
+# are NO-OPS unless the process runs under a capturing profiler. Wrap only when profiling is
+# requested, so an ordinary run launches byte-identically to before.
+# --capture-range=cudaProfilerApi makes nsys record exactly the armed optimizer step rather than
+# the whole run, which is what keeps the trace small enough to be useful.
+# One .nsys-rep per RANK: identifying a straggler is a comparison ACROSS ranks, so the per-rank
+# filename is the whole point — a single merged trace cannot say which rank arrived late.
+PROFILE_CMD=()
+if [ -n "${NSYS_PROFILE_STEP:-}" ] && [ "${NSYS_PROFILE_STEP:-0}" != "0" ]; then
+    if ! command -v nsys >/dev/null 2>&1; then
+        echo "REFUSE: NSYS_PROFILE_STEP=$NSYS_PROFILE_STEP but nsys is not on PATH." >&2
+        echo "        A run that silently skips the capture would report success with no trace." >&2
+        exit 1
+    fi
+    NSYS_OUT="${NSYS_OUT_DIR:-$HOME/cpt27b_logs}/nsys_rank${RANK}_step${NSYS_PROFILE_STEP}"
+    mkdir -p "$(dirname "$NSYS_OUT")"
+    PROFILE_CMD=(nsys profile
+        --capture-range=cudaProfilerApi
+        --capture-range-end=stop
+        --trace=cuda,nvtx,osrt
+        --sample=none
+        --force-overwrite=true
+        -o "$NSYS_OUT")
+    echo "  NSYS:   capturing rank $RANK step $NSYS_PROFILE_STEP -> ${NSYS_OUT}.nsys-rep"
+fi
+
+"${PROFILE_CMD[@]}" python3 -m torch.distributed.run \
     --nnodes="$NUM_NODES" --node_rank=$RANK --nproc_per_node="$GPUS_PER_NODE" \
     --master_addr="$MASTER_ADDR" --master_port="$MASTER_PORT" \
     "$SCRIPT_DIR/../trainers/train_fsdp_dense_9b.py" \

@@ -80,7 +80,12 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 [ -n "${TINY_LANE_THRESHOLD:-}" ] && RUN_ENV="$RUN_ENV TINY_LANE_THRESHOLD=$TINY_LANE_THRESHOLD"
 [ -n "${MODEL_PATH:-}" ] && RUN_ENV="$RUN_ENV MODEL_PATH=$MODEL_PATH"
 [ -n "${WARMUP_STEPS:-}" ] && RUN_ENV="$RUN_ENV WARMUP_STEPS=$WARMUP_STEPS"
-[ -n "${WARMUP_STEPS:-}" ] && RUN_ENV="$RUN_ENV WARMUP_STEPS=$WARMUP_STEPS"
+# NSYS_* must be named here or the profile silently never arms: RUN_ENV is an ALLOWLIST, and a var
+# absent from it does not reach the node. That is the same mechanism as the 2026-07-13 LR/WARMUP
+# non-forwarding bug recorded above — the run would look normal and produce no trace.
+[ -n "${NSYS_PROFILE_STEP:-}" ] && RUN_ENV="$RUN_ENV NSYS_PROFILE_STEP=$NSYS_PROFILE_STEP"
+[ -n "${NSYS_PROFILE_ALL_RANKS:-}" ] && RUN_ENV="$RUN_ENV NSYS_PROFILE_ALL_RANKS=$NSYS_PROFILE_ALL_RANKS"
+[ -n "${NSYS_OUT_DIR:-}" ] && RUN_ENV="$RUN_ENV NSYS_OUT_DIR=$NSYS_OUT_DIR"
 [ -n "${FP32_MASTER:-}" ] && RUN_ENV="$RUN_ENV FP32_MASTER=$FP32_MASTER"
 [ -n "${ADAFACTOR_ALPHA_MODE:-}" ] && RUN_ENV="$RUN_ENV ADAFACTOR_ALPHA_MODE=$ADAFACTOR_ALPHA_MODE"
 # ADAFACTOR_EPS1 — DEFAULTED HERE, not merely forwarded. 2026-07-29 root cause of a 148-step
