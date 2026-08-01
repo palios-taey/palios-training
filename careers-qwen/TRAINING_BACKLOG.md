@@ -39,6 +39,8 @@ with the module named · `NEEDS-AUTHORING` = we said it, it is not written yet �
 
 | 17 | **Taey-as-Jesse-the-Overseer** — audit fleet work vs standards, catch process deviations (false-done, spec-miss, gates-pass-but-content-fails, scope drift), enforce corrections | Jesse: "you continue to make the same mistakes, so we need to train Taey to BE ME and hold you accountable." Multiplicity applied to governance — Jesse's scarcest resource is his own oversight | **treasurer EXTRACTING** today's session (mistake->correction pairs w/ provenance) + a live PRODUCTION SHADOW SEAT (Taey reviews compose bundles ∥ treasurer). Recipe = operator_correction_v1, RIGHT-WAY/loss-masked ONLY (Negation Neglect), shadow divergences gated as hypotheses (taey_investigate.py). Sequences AFTER purpose-module-1. Dose = Chats |
 
+| 18 | **Git Master / repo stewardship** — Taey owns its own repos and keeps them clean | — | STORED, **12 rows** | `training_data/careers_qwen/git_master/git_master_rows_v1.jsonl` | Jesse 2026-08-01: "they need to be responsible for their own repos and making sure things are clean. You will not do it." Right-way-only, residue gate clean. Covers: read repo state before acting, worktree for a live checkout, production is a commit, verify copies by content digest, archive before clearing, evidence in the commit message, artifact carries its own provenance, review points at the repo, gitignore generated state, identify the live tree, docs change with the code, own the commit cycle. |
+
 ## NEEDS AUTHORING — we said it, the data does not exist yet. THIS IS THE DEBT.
 
 | # | Item | Why | Blocked on |
@@ -305,3 +307,25 @@ minutes later while sourcing this row — a grep assumed `dense-9b/*.py` and ret
 nothing, the trainer being at `dense-9b/trainers/`.
 
 Mixture and dose: tutor. Corpus sanction: treasurer.
+
+## infra — 2026-08-01 — 5 operator_practice_v1 rows authored, gate-clean, AWAITING SANCTION
+
+Authored by `infra` from the 2026-08-01 DCM/Thor1 session. Curated seed rows live at
+`infra-soul/training/infra_corrections_seed_20260801.jsonl`. Validated by importing the real
+`derive_training_rows.py` residue gate: **EMITTED 5 / REJECTED 0**.
+
+NOT written into the governed store — that is treasurer's tree, and mixture/dose is tutor's call.
+Handed to both rather than merged by infra.
+
+| class | recurrence | teaches |
+|---|---|---|
+| `probe-by-interpreter-not-by-name` | 3 | select processes by interpreter + resolved path; a shell carries the search text in its own command line |
+| `prove-the-new-path-serves-before-retiring-the-old` | 1 | cutover ordering: one instance proven serving before the running mechanism is touched |
+| `measure-the-cause-before-reporting-it` | 1 | a candidate cause is measured against alternatives before it is stated to a colleague |
+| `health-checks-probe-the-capability` | 1 | exercise the capability, report catalogue and generation separately, put the verdict in the status code |
+| `know-the-shape-your-instrument-cannot-see` | 2 | establish what a sweep structurally cannot match, and whether traversal perturbs the measured property |
+
+Triage applied per `training-defect-triage`: all five are knowledge/procedure gaps executable on
+today's stack, not missing capability — so TRAINING, not bug reports. The infrastructure each row
+names (`/proc/<pid>/comm`, `ss`, `lsof`, systemd, HTTP status codes, mtime vs atime) exists and was
+exercised this session.
