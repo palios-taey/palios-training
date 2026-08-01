@@ -36,6 +36,19 @@ def _data_root():
             "(<MIRA_HOME>/treasurer/foundations/careers/training_data/careers_qwen). "
             "See careers-qwen/TAEY_TRAINING_DOCTRINE.md."
         )
+    # The STATUS allow-list already catches a wrong root, but it catches the CONSEQUENCE: point this
+    # one level up at training_data/ and the recursive **/*.jsonl scan reaches 309 files instead of
+    # 174, every one unlisted, so the build fails with 309 drift entries. Loud, but only after the
+    # scan has walked directories it was never meant to see — which during the 2026-08-01 credential
+    # quarantine included six files carrying plaintext host credentials that live OUTSIDE this root
+    # and outside the manifest's protection. Assert the root IS the governed store, so a mis-set
+    # value is refused before anything is walked rather than diagnosed from the wreckage after.
+    if os.path.basename(os.path.normpath(root)) != "careers_qwen":
+        raise SystemExit(
+            f"TRAINING_DATA_ROOT must BE the governed store (a directory named 'careers_qwen'), "
+            f"not a parent or sibling of it. Got: {root}. Pointing this at a parent makes the "
+            f"recursive .jsonl scan reach files this manifest does not govern."
+        )
     return root
 
 
