@@ -313,6 +313,34 @@ case "$CPT_DATA" in
         # SANCTION: tutor-assembled. Training ownership is tutor's per Jesse 2026-08-01
         # ("Treasurer just does pairs like everyone else... You are in charge").
         ;;
+    *cpt_prod_v1_packed_[0-9]*.jsonl)
+        # PRODUCTION REPO SET, 2026-08-02. Jesse named the repos explicitly after the previous
+        # corpus trained education and research repos Taey does not use, verbatim: "those repos are
+        # not important... not taey-ed, not research, not local-doge. The main repos that Taey is
+        # actually using now."
+        #
+        # WHAT IT IS: ten repos Taey operates through — palios-training, taeys-hands,
+        # claude-code-fleet-orchestrator, apply-machine, claude-code-fleet-notify, dcm, isma-core,
+        # taey-presence, governance (CPT-only; its pairs already exist from the 35B full corpus),
+        # linkedin. Built by build_corpus_slices.py `public-repos-prod`.
+        #
+        # IT IS LARGER THAN THE 19-REPO SET IT REPLACES — 1,688 rows against 1,098 — because two
+        # surfaces Taey is actually driven through had never been in ANY corpus: apply-machine
+        # contributes 709 rows, 42% of this corpus, and linkedin was absent entirely. Training
+        # nineteen repos was training less of the right material, not more.
+        #
+        # SAME EXCLUSIONS as every repo slice: archive/deprecated/superseded/obsolete/legacy path
+        # components, and test directories and test_*/*_test files.
+        #
+        # CREDENTIAL-SCANNED 2026-08-02 with treasurer/scripts/secret_scan.py (the canonical
+        # scanner, not an ad-hoc regex set): 0 NAMED matches. 9 entropy candidates, each read and
+        # triaged to a code identifier or a public URL — linkedin.com/posts activity ids and a
+        # tracxn company id. apply-machine and linkedin had never been scanned before because they
+        # had never been in a corpus.
+        #
+        # SANCTION: tutor-assembled, repo set named by Jesse. Training ownership is tutor's per
+        # Jesse 2026-08-01 ("Treasurer just does pairs like everyone else... You are in charge").
+        ;;
     *probe_packed_[0-9]*.jsonl)
         # SEQUENCE-LENGTH MEMORY PROBE corpora, 2026-08-01. Admitted DELIBERATELY, not by
         # renaming a file to satisfy the list — the pin block below carries a FULL sha256 for
@@ -359,6 +387,9 @@ case "$CPT_DATA" in
     # 16384 pack of the SAME 1098-row slice (155dc385fb92ed47), 2026-08-02. 167 blocks,
     # 2,736,128 tokens — token-for-token identical to the 8192 pack, half the blocks.
     *cpt_repos_v1_packed_16384.jsonl) EXPECT_CORPUS_SHA=b89020fcdc913e3eb5bcd467cc596c7fced11c271d9aac59e15446eba4bf9d31 ;;
+    # PRODUCTION repo set at 16384, 2026-08-02. 1,688-row slice (4ee2e63149647997) -> 191 blocks,
+    # 3,129,344 tokens, tail_dropped=0.
+    *cpt_prod_v1_packed_16384.jsonl) EXPECT_CORPUS_SHA=0109bcabc90a091e6dd6c38330d1b9a4ed94bdf68d24e3b2e8044261b700985b ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;

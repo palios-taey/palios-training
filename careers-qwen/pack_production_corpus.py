@@ -137,6 +137,18 @@ PACK_SETS = {
     "repos_v1": [
         ("cpt_public_repos_v2.jsonl", 1098, "155dc385fb92ed47"),
     ],
+    # PRODUCTION SET, 2026-08-02. The repos Taey actually runs on, named by Jesse after the V2
+    # corpus trained education and research repos he does not use. Ten repos, and it is LARGER
+    # than the 19-repo set it replaces (1,688 rows vs 1,098) because two surfaces Taey is actually
+    # driven through had never been in any corpus: apply-machine contributes 709 rows — 42% of
+    # this corpus — and linkedin was absent entirely. Training more repos was training less of
+    # the right material.
+    # Credential-scanned 2026-08-02 with treasurer/scripts/secret_scan.py: 0 NAMED matches; 9
+    # entropy candidates triaged to code identifiers and public URLs (linkedin.com/posts activity
+    # ids, a tracxn company id), verified by reading them.
+    "prod_v1": [
+        ("cpt_public_repos_prod.jsonl", 1688, "4ee2e63149647997"),
+    ],
 }
 
 
