@@ -80,6 +80,21 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 [ -n "${TINY_LANE_THRESHOLD:-}" ] && RUN_ENV="$RUN_ENV TINY_LANE_THRESHOLD=$TINY_LANE_THRESHOLD"
 [ -n "${MODEL_PATH:-}" ] && RUN_ENV="$RUN_ENV MODEL_PATH=$MODEL_PATH"
 [ -n "${WARMUP_STEPS:-}" ] && RUN_ENV="$RUN_ENV WARMUP_STEPS=$WARMUP_STEPS"
+# EXACT_SFT_EPOCH's OWN PREREQUISITES. The trainer REFUSES to start under EXACT_SFT_EPOCH=1
+# without EXPECTED_REAL_SAMPLES>0 and REQUIRE_LORA_INIT_PARITY=1 — and RUN_ENV is an ALLOWLIST, so
+# both were being dropped silently and the mode could never actually run through this driver. The
+# failure would read as "EXACT_SFT_EPOCH requires EXPECTED_REAL_SAMPLES > 0" on the node while the
+# operator could see it set in their own shell: a gate stranded from its own precondition, which is
+# exactly the HORIZON_PARTIAL defect recorded a few lines below, in a second mode nobody had run
+# through this driver yet. Found by auditing the allowlist BEFORE launching rather than by watching
+# a run die.
+[ -n "${EXPECTED_REAL_SAMPLES:-}" ] && RUN_ENV="$RUN_ENV EXPECTED_REAL_SAMPLES=$EXPECTED_REAL_SAMPLES"
+[ -n "${REQUIRE_LORA_INIT_PARITY:-}" ] && RUN_ENV="$RUN_ENV REQUIRE_LORA_INIT_PARITY=$REQUIRE_LORA_INIT_PARITY"
+# LR_LORA: the adapter learning rate. Distinct from LR (which the CPT path uses); dropping it means
+# a LoRA run silently trains at the trainer's default instead of the rate the operator chose — the
+# 2026-07-13 LR non-forwarding bug, repeated for the adapter path.
+[ -n "${LR_LORA:-}" ] && RUN_ENV="$RUN_ENV LR_LORA=$LR_LORA"
+
 # HORIZON_PARTIAL: declares a deliberately short packed-CPT run (throughput probe, smoke test)
 # to the trainer's CPT horizon contract, which otherwise requires TOTAL_STEPS to cover the whole
 # corpus. MUST be named here: RUN_ENV is an ALLOWLIST, and dropped silently it would not weaken
