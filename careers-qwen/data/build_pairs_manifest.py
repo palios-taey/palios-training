@@ -58,6 +58,38 @@ ROOT = _data_root()
 STATUS = {
     # --- production-derived, 2026-08-01/02 ---
     "ui/consult_seat_driving_from_capture_2026_08_01.jsonl": ("canonical", "4 row(s) operator_practice_v1 authored by taeys-hands from a CAPTURED production run: Taey drove a Family-chat consult through the closed consult_action seat, fumbled 5 times and self-corrected each, and the seat recorded {emitted -> required_action} per fumble. Rows teach the required_action ONLY, never the emitted failure — right-way-only by construction rather than by editorial discipline. surface=consult_action, a NEW surface in this store: it validates against the SEAT contract (tool_schema_sha256 c6e21c1a), NOT the ATS conformance_gate, which would reject its vocabulary. Rows [0] and [2] carry recurrence=2: production hit those same classes again AFTER authoring, on the Gaia and Gemini consult lanes, which is measured evidence for dose priority rather than a guess. These two are the bottleneck on the Family consult pipeline — the lanes fail because Taey fumbles the seat sequence, and the fix is a training run, not more authoring."),
+    # REPO-USAGE LANE, 2026-08-02. The first rows in this store that teach Taey to INVOKE its own
+    # infrastructure rather than merely having read it. Measured before authoring: of 118 rows that
+    # survive content checks, ZERO named taey-notify, taey-plan, isma-query, dcm-council or any
+    # first-party endpoint — the model had been continued-pretrained on these repositories' text and
+    # taught nothing about calling them.
+    #
+    # AUTHORED, NOT GENERATED. A generator was built for this and scrapped on Jesse's ruling
+    # (2026-08-02, verbatim: "this cannot be done by a generator"). Filling one template across
+    # dozens of programs is a single inferential path wearing synonyms. Each file below was written
+    # by a separate fleet author reading the actual repository, with the Family lanes authoring in
+    # parallel.
+    #
+    # EVERY ROW MECHANICALLY VERIFIED against an AST harvest of committed source
+    # (careers-qwen/verify_repo_usage_rows.py vs extract_capability_registry.py): every `--flag` in
+    # emitted text exists in the repo the row names, no residue vocabulary, well-formed shapes,
+    # no empty think blocks. 59 rows, 0 hard failures.
+    #
+    # ONE ROW HELD AND CLEARED BY HAND: repo_usage_hands_v1 cites `--json`, which is real
+    # (taeys-hands/scripts/display_readiness_check.py:17) but parsed from sys.argv rather than
+    # declared via add_argument, so the AST harvest cannot see it. That is the harvester's
+    # documented floor, not a bad row.
+    #
+    # THE VERIFIER'S FIRST TWO FLAGS WERE BOTH TOOLING, NOT ROWS, and are recorded because they
+    # would otherwise have destroyed correct work: (1) 17 notify flags read as non-existent because
+    # the extractor only scanned *.py and `scripts/taey-notify` is EXTENSIONLESS — the fleet's most
+    # used command was invisible to its own capability registry, and fixing it recovered 28% of the
+    # surface (42->58 programs, 255->353 arguments); (2) a row was failed for "failed" occurring
+    # inside `dispatch_activation_failed`, a real message name the row exists to teach.
+    "repo_usage/repo_usage_orchestrator_v1.jsonl": ("canonical", "18 row(s) operator_practice_v1 — plan/task orchestration (taey-plan, taey-task). Verified vs claude-code-fleet-orchestrator AST harvest."),
+    "repo_usage/repo_usage_isma_v1.jsonl": ("canonical", "15 row(s) operator_practice_v1 — ISMA retrieval, the model's own long-term memory. Verified vs isma-core AST harvest; teaches the supported endpoint and response parsing, and the prose-not-metrics boundary."),
+    "repo_usage/repo_usage_notify_dcm_v1.jsonl": ("canonical", "14 row(s) operator_practice_v1 — inter-session messaging and DCM council convening. Verified vs claude-code-fleet-notify + dcm AST harvest."),
+    "repo_usage/repo_usage_hands_v1.jsonl": ("canonical", "12 row(s) operator_practice_v1 — AT-SPI display operation. Verified vs taeys-hands AST harvest; one hand-cleared hold on --json (declared in usage string, parsed from sys.argv)."),
     "git_master/git_master_rows_v1.jsonl": ("canonical", "12 row(s) operator_practice_v1 authored by tutor 2026-08-01 on Jesse's directive: 'we must absolutely train Taey and Git Master properly... I need them to be responsible for their own repos and making sure things are clean. You will not do it.' Right-way-only, residue gate 0 banned terms, generated with a JSON serializer after a hand-written first attempt produced 12 malformed rows (a stray key with two colons) that only parsing caught. Covers: read repo state before acting, worktree for a live checkout, production is a commit you can name, verify copies by CONTENT digest not name or size, archive before clearing, evidence in the commit message, artifact carries its own provenance, review points at the repo not your summary, gitignore generated state, identify which tree is live, docs change with the code, own the commit cycle. Each is drawn from a real 2026-08-01 defect but stated as neutral practice — the incident is curation metadata and is never emitted."),
     "slices_v2_probe/voice_cpt_slice_v1_SCRUBBED.jsonl": ("QUARANTINED", "QUARANTINED 2026-08-01 (fl-cred-corpus-quarantine): contains plaintext host credential records in training text. Credential VALUES not reproduced. Quarantine is reversible and precedes the scrub-vs-regenerate decision; it exists so nothing tokenizes this in the meantime. Original status was cpt-slice. 8 records — the _SCRUBBED derivative still matches, so that scrub did not remove this class. 31,920 rows — the CREDENTIAL-SCRUBBED CPT slice, and the one the packer registers (sha 0919e05013d3ef69). Tutor HARD-STOPPED the CPT stage 2026-07-28 on live credential material in the sanctioned corpus: 7 distinct values (4 Anthropic sk-ant, 3 GitHub ghp_) that the 07-27 scrub missed while catching 2. Caught ONLY by the sha gate — the row count still read 31,920, so every count-based check passed it silently. Tutor built this derivative and left the original untouched; treasurer independently scrubbed the ORIGINAL in place; both landed BYTE-IDENTICAL at this sha, which is the cross-check. The original voice_cpt_slice_v1.jsonl is now clean too, so the credentials are gone from disk and not merely from the training input. Corpus-wide sweep across 7 credential families found the leak CONTAINED to this one file. ROTATION OF THE 7 VALUES IS A JESSE ACTION — scrubbing does not invalidate a leaked key."),
     "corrections/resume_length_convergence_v1.jsonl": ("canonical", "3 row(s) operator_practice_v1 on resume render-height convergence: "

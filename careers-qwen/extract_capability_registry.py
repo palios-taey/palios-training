@@ -44,13 +44,33 @@ def git(repo: Path, *args: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def wanted(rel: str) -> bool:
+def wanted(rel: str, source: str | None = None) -> bool:
+    """Is this file Python we should harvest?
+
+    Suffix alone is not the test, and assuming it was made the registry blind to the single most
+    important CLI in the fleet. `claude-code-fleet-notify/scripts/taey-notify` — the canonical
+    inter-session messaging command every seat calls — is EXTENSIONLESS with a `python3` shebang,
+    so it was skipped outright and every flag it declares (`--type`, `--priority`, `--from`) read
+    back as "not found anywhere in the registry". Authored rows citing those real flags were
+    therefore held as unproven, i.e. the harvest was wrong and the rows were right.
+
+    Installed console entrypoints usually have no extension, which is exactly the population a
+    capability registry most needs to see. So: a `.py` suffix, OR a shebang naming python.
+    """
     p = Path(rel)
     if any(part.lower() in SKIP_DIR_PARTS for part in p.parts[:-1]):
         return False
     if p.stem.lower().startswith("test_") or p.stem.lower().endswith("_test"):
         return False
-    return p.suffix == ".py"
+    if p.suffix == ".py":
+        return True
+    if p.suffix:
+        return False
+    if source is None:
+        # Suffixless and not yet read — the caller re-checks once it has the bytes.
+        return True
+    first = source.split("\n", 1)[0]
+    return first.startswith("#!") and "python" in first
 
 
 def const(node) -> str | None:
@@ -64,15 +84,48 @@ def const(node) -> str | None:
     return None
 
 
-def extract_file(repo: Path, rel: str, source: str) -> tuple[list[dict], list[dict]]:
-    """Return (cli_arguments, http_routes) found in one file."""
+def extract_file(repo: Path, rel: str, source: str) -> tuple[list[dict], list[dict], str | None]:
+    """Return (cli_arguments, http_routes, program_description) found in one file.
+
+    The description exists so a consumer can state WHAT a program is for without inventing it.
+    Flags alone say how to call something, never when to; a generator with only flags either
+    emits thin rows or reconstructs a purpose, and a reconstructed purpose asserted as fact is
+    the failure this whole registry exists to avoid. Two sources, both read from the source text:
+    an explicit `ArgumentParser(description=...)` string, else the module docstring. A literal
+    `description=__doc__` resolves to the docstring rather than being dropped. Anything computed
+    at runtime (an f-string, a concatenation, a name) yields None — the caller then has no
+    description rather than a plausible guess, which is the correct outcome.
+    """
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return [], []
+        return [], [], None
 
     clis: list[dict] = []
     routes: list[dict] = []
+    doc = ast.get_docstring(tree)
+    description: str | None = None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        is_parser = (
+            (isinstance(fn, ast.Attribute) and fn.attr == "ArgumentParser")
+            or (isinstance(fn, ast.Name) and fn.id == "ArgumentParser")
+        )
+        if not is_parser:
+            continue
+        for k in node.keywords:
+            if k.arg != "description":
+                continue
+            lit = const(k.value)
+            if lit:
+                description = lit
+            elif isinstance(k.value, ast.Name) and k.value.id == "__doc__":
+                description = doc
+    if description is None:
+        description = doc
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -112,7 +165,7 @@ def extract_file(repo: Path, rel: str, source: str) -> tuple[list[dict], list[di
                     "line": node.lineno,
                 })
 
-    return clis, routes
+    return clis, routes, description
 
 
 def extract_repo(name: str, repo: Path) -> dict:
@@ -129,6 +182,7 @@ def extract_repo(name: str, repo: Path) -> dict:
               f"HEAD {head[:8]}, NOT the working tree", file=sys.stderr)
     files = [f for f in git(repo, "ls-files").splitlines() if wanted(f)]
     programs: dict[str, list[dict]] = {}
+    descriptions: dict[str, str] = {}
     routes: list[dict] = []
     unreadable: list[str] = []
 
@@ -144,9 +198,18 @@ def extract_repo(name: str, repo: Path) -> dict:
         except UnicodeDecodeError:
             unreadable.append(rel)
             continue
-        c, r = extract_file(repo, rel, source)
+        # Second pass for the suffixless candidates admitted provisionally above: now that the
+        # bytes are in hand, the shebang decides. A suffixless file that is not python is dropped
+        # here rather than fed to ast.parse.
+        if not wanted(rel, source):
+            continue
+        c, r, desc = extract_file(repo, rel, source)
         if c:
             programs.setdefault(rel, []).extend(c)
+            # Keyed separately from `programs` so the arguments list keeps its existing shape and
+            # any consumer written against the previous structure is unaffected.
+            if desc:
+                descriptions[rel] = desc
         routes.extend(r)
 
     return {
@@ -156,6 +219,7 @@ def extract_repo(name: str, repo: Path) -> dict:
         "files_scanned": len(files),
         "working_tree_dirty": len(dirty),
         "programs": programs,
+        "descriptions": descriptions,
         "routes": routes,
         "unreadable": unreadable,
         "counts": {
