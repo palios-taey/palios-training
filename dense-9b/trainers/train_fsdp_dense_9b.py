@@ -53,6 +53,7 @@ os.environ.setdefault("NCCL_IB_RETRY_CNT", "7")
 os.environ.setdefault("TORCH_NCCL_DUMP_ON_TIMEOUT", "1")
 os.environ.setdefault("TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC", "1800")
 
+import hashlib
 import json
 import math
 import collections
@@ -948,8 +949,44 @@ def install_liger_backbone_kernels(model):
 _QUARANTINE_MARKER_GLOB = "QUARANTINE*"
 
 
+def _quarantined_digests():
+    """sha256 digests of every corpus a marker or manifest declares un-trainable.
+
+    Sourced from QUARANTINE_DIGESTS (a file of `sha256  # note` lines) named by the
+    QUARANTINE_DIGESTS env var, so the list is data rather than code and can be updated by the
+    corpus owner without touching the trainer.
+    """
+    out = {}
+    reg = os.environ.get("QUARANTINE_DIGESTS", "")
+    if reg and os.path.isfile(reg):
+        for line in open(reg):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            if len(parts) >= 1 and len(parts[0]) == 64:
+                out[parts[0].lower()] = parts[1].strip(" #") if len(parts) > 1 else ""
+    return out
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _assert_not_quarantined(path):
-    """Refuse to index a data file that sits beside a quarantine marker.
+    """Refuse to index a data file that is quarantined BY CONTENT or sits beside a marker.
+
+    CONTENT first, and this is the load-bearing half. The marker check below is DIRECTORY-scoped,
+    so it protects a location rather than a file: the same bytes copied to a second path are
+    uncovered. Found 2026-08-02 — a credential-bearing corpus existed at two paths, sha
+    cdb345826b6d6b11 identical, one under a marker and one not. The manifest caught the second
+    copy at build time; this runtime gate would NOT have, which is the gap, since this gate exists
+    precisely so the quarantine is mechanical rather than administrative.
+    A digest follows the bytes wherever they are copied. A path protects a location.
 
     The loader discovers corpora by globbing a directory; it does not read
     PAIRS_MANIFEST. That made a quarantine ADMINISTRATIVE — a marker file the
@@ -965,6 +1002,16 @@ def _assert_not_quarantined(path):
     step count would look normal. Refusing is the whole point — a gate that
     quietly narrows the corpus is the failure it was built to prevent.
     """
+    digests = _quarantined_digests()
+    if digests:
+        d = _sha256_file(path)
+        if d in digests:
+            raise RuntimeError(
+                f"REFUSE: {path} matches a QUARANTINED corpus by content (sha256 {d[:16]}...). "
+                f"{digests[d]} A digest-keyed quarantine follows the bytes; renaming or copying "
+                f"the file does not escape it."
+            )
+
     directory = os.path.dirname(os.path.abspath(path))
     markers = sorted(glob.glob(os.path.join(directory, _QUARANTINE_MARKER_GLOB)))
     if markers:
