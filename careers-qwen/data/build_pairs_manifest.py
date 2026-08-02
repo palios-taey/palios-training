@@ -198,10 +198,27 @@ STATUS = {
     "spec_knowledge/spec_train_rows_v1.jsonl":    ("derived",    "emitted spec rows (spec+correct_output only, residue-gated, story never emitted). Awaiting treasurer sanction + Chats mixture/dose"),
     "corrections/taey_investigations_v1.jsonl":   ("raw-source", "self-learning gate output; gated hypotheses -> practice rows on confirmation"),
     "ui/ui_action_rows_v1.jsonl":                 ("superseded", "answer-leak + no question field; replaced by ui_action_rows_v2"),
-    "ui/ui_action_rows_v2.jsonl":                 ("canonical",  "executable UI action rows, surface-scoped, leak-fixed"),
+    "ui/ui_action_rows_v2.jsonl":                 ("QUARANTINED","was labelled canonical as 'executable UI action rows, surface-scoped, "
+                                                                 "leak-fixed'. MEASURED 2026-08-02: 40/40 assistant contents emit "
+                                                                 "{primitive,target,expect} and 0 rows carry a tool_calls structure, so they are "
+                                                                 "not executable on the ATS surface they address and the rows declare no "
+                                                                 "meta.tool_contract naming a surface at all — 'surface-scoped' is not true of "
+                                                                 "the bytes. Same defect class as the 38 rows quarantined 2026-07-27 in "
+                                                                 "sft_module3/quarantined_module3_invented_action_vocab_v1.jsonl, whose training "
+                                                                 "preceded the tuned checkpoint electing ZERO tools on a unit the untuned base "
+                                                                 "completed unaided. NEVER TRAINED."),
     "ui/ui_reasoned_rows_v1.jsonl":               ("superseded", "reasoning in VISIBLE content (wrong channel); replaced by thinking_v2"),
     "ui/ui_thinking_rows_v1.jsonl":               ("QUARANTINED","5-lane verdict DO NOT TRAIN: narrated fake retrieval + dup/conflicting targets -> confabulation"),
-    "ui/ui_thinking_rows_v2.jsonl":               ("canonical",  "native <think> + real tool-call trajectories; the corrected thinking lane"),
+    "ui/ui_thinking_rows_v2.jsonl":               ("QUARANTINED","was labelled canonical as 'native <think> + real tool-call trajectories; the "
+                                                                 "corrected thinking lane'. MEASURED 2026-08-02 and the label is false against "
+                                                                 "the file: 40 rows, 0 tool_calls structures, 18 all-empty <think></think> "
+                                                                 "blocks, and 40/40 assistant contents emitting {primitive,target,expect} as "
+                                                                 "CONTENT. Row 0's own prompt is an ATS job-application form ('Apply for this "
+                                                                 "Job'), where the production tool is ui_action — whose schema has no primitive, "
+                                                                 "no target, no expect, and additionalProperties=False. This reproduces the "
+                                                                 "measurement conformance_gate.py already records in its docstring; v2 was never "
+                                                                 "the corrected lane, only the renamed one. NEVER TRAINED — caught while sizing "
+                                                                 "a dose, not after."),
     "ui/upwork_runthrough_2026_07_23_rows.jsonl": ("raw-source", "treasurer-grok upwork :8 runthrough 2026-07-23 — sort=recency URL lever, tree_view grep anchors, CF one-click-then-observe, navigate recency UI action; REJECTED:0 residue; awaiting mixture/dose"),
     "ui/upwork_scan_obs_write_first_2026_07_24.jsonl": ("raw-source", "treasurer-grok 2026-07-24: after first listing extract write scan_obs immediately; no second identical tree grep"),
     "probes/prompt_changelog_probes_v004.jsonl":  ("eval-output","FROZEN paired probes for the v004 system-prompt changelog lines (orient-in-place / api-verbatim / no-stderr-suppress); eval-only, never train; eviction gate per doctrine"),
