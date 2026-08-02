@@ -79,9 +79,50 @@ LOGDIR="${SPARK_HOME%/}/cpt27b_logs"
 SESSION=stage2-ddp
 
 QUALIFIED_RUN_TAG=cpt_v7_eps1fix
+# ── QUARANTINE NOTICE (2026-08-02) — READ BEFORE ACTING ON A REFUSAL BELOW ──
+# QUALIFIED_CORPUS_SHA below is cdb345826b6d6b11..., which is the corpus treasurer's OPEN
+# fl-cred-corpus-quarantine covers: it carries plaintext host credentials in the ASSISTANT role,
+# i.e. as training TARGETS — the model is taught to PRODUCE them, not merely to read past them.
+#
+# CONSEQUENCE: a Stage-2 SFT DDP run against these bytes is BLOCKED BY CONSTRUCTION. The trainer's
+# loader refuses this sha by CONTENT (train_fsdp_dense_9b.py, digest gate), so the run cannot
+# start no matter what this qualification block says.
+#
+# THAT IS THE CORRECT OUTCOME, AND THE QUALIFICATION BELOW IS THE STALE HALF, NOT THE GATE.
+# This notice exists because the alternative reading is dangerous and cheap: a qualification block
+# carrying an authorization sha, a plan sha and a dataset-shape sha LOOKS like the authority, and
+# a single loader gate looks like an obstacle. Under run pressure the tempting fix is to disable
+# the quarantine or add an exception "just to unblock". That would train credentials into a
+# production artifact while feeling like unsticking a stuck run.
+#
+# THE CORRECT PATH FORWARD, none of which is disabling anything:
+#   1. treasurer sanctions replacement bytes with the credential rows resolved;
+#   2. re-run qualification against those bytes to produce a NEW QUALIFIED_CORPUS_SHA;
+#   3. update this block to the new sha.
+# Flagged by treasurer 2026-08-02; the contradiction itself was the hazard, independent of intent.
 QUALIFIED_CORPUS_SHA=cdb345826b6d6b11d7a4e25f26c0342fab720877f555b4541fbbb1740d2357b6
 QUALIFIED_CORPUS_BYTES=20757633
 QUALIFIED_CORPUS_ROWS=9887
+
+# ACTIVE REFUSAL, not just the notice above. A comment informs a reader; this stops a runner.
+# Self-retiring by construction: it fires only while QUALIFIED_CORPUS_SHA names quarantined bytes,
+# so when treasurer sanctions replacements and this pin is updated to the new sha, the check
+# passes with no edit here. Nothing to remember to remove, and no exception flag to reach for --
+# an override env var would be the escape hatch this exists to prevent.
+_QUARANTINED_SHAS="cdb345826b6d6b11d7a4e25f26c0342fab720877f555b4541fbbb1740d2357b6"
+for _q in $_QUARANTINED_SHAS; do
+  if [ "$QUALIFIED_CORPUS_SHA" = "$_q" ]; then
+    echo "REFUSE: QUALIFIED_CORPUS_SHA names a QUARANTINED corpus (${_q:0:16}...)." >&2
+    echo "        treasurer fl-cred-corpus-quarantine, OPEN: plaintext host credentials in the" >&2
+    echo "        ASSISTANT role, i.e. as training TARGETS. The trainer's loader refuses these" >&2
+    echo "        bytes by content, so this run cannot start regardless of this qualification." >&2
+    echo "        DO NOT disable the quarantine or add an exception to unblock. Correct path:" >&2
+    echo "          1. treasurer sanctions replacement bytes with the credential rows resolved" >&2
+    echo "          2. re-run qualification to produce a NEW QUALIFIED_CORPUS_SHA" >&2
+    echo "          3. update this pin to that sha -- this check then passes by itself" >&2
+    exit 1
+  fi
+done
 QUALIFIED_BASE_MANIFEST_SHA=2406fff54148dd44d9c7a4824d43aaace0c450d3e6b174bfe1268565a9512c5d
 QUALIFIED_SAMPLES=10033
 QUALIFIED_INPUT_TOKENS=3888967
