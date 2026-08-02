@@ -313,7 +313,7 @@ case "$CPT_DATA" in
         # SANCTION: tutor-assembled. Training ownership is tutor's per Jesse 2026-08-01
         # ("Treasurer just does pairs like everyone else... You are in charge").
         ;;
-    *cpt_prod_v1_packed_[0-9]*.jsonl)
+    *cpt_prod_v[0-9]*_packed_[0-9]*.jsonl)
         # PRODUCTION REPO SET, 2026-08-02. Jesse named the repos explicitly after the previous
         # corpus trained education and research repos Taey does not use, verbatim: "those repos are
         # not important... not taey-ed, not research, not local-doge. The main repos that Taey is
@@ -389,7 +389,17 @@ case "$CPT_DATA" in
     *cpt_repos_v1_packed_16384.jsonl) EXPECT_CORPUS_SHA=b89020fcdc913e3eb5bcd467cc596c7fced11c271d9aac59e15446eba4bf9d31 ;;
     # PRODUCTION repo set at 16384, 2026-08-02. 1,688-row slice (4ee2e63149647997) -> 191 blocks,
     # 3,129,344 tokens, tail_dropped=0.
+    # v1 — KILLED MID-RUN AND SUPERSEDED. Pin retained deliberately rather than deleted: 600 of its
+    # 1,688 rows were apply-machine/bundles/ (the model's own generated resumes and cover letters,
+    # 36% of the corpus) and 5 came from bundles/_QUARANTINE_fabricated/. Killed at step 20/48; no
+    # checkpoint was written and nothing was promoted. Keeping the pin means this exact artifact
+    # can still be identified if it ever reappears, instead of becoming an unrecognisable file.
     *cpt_prod_v1_packed_16384.jsonl) EXPECT_CORPUS_SHA=0109bcabc90a091e6dd6c38330d1b9a4ed94bdf68d24e3b2e8044261b700985b ;;
+    # v2 — bundles/ excluded at the extractor. 1,089-row slice (82a117538c31ecac) -> 150 blocks,
+    # 2,457,600 tokens, tail_dropped=0. Verified by SOURCE PATH: 0 rows from bundles/, 0 from
+    # quarantine/fabricated. Credential axis clear on two independent grounds (flagged files are
+    # under treasurer, and are .jsonl which this corpus does not admit).
+    *cpt_prod_v2_packed_16384.jsonl) EXPECT_CORPUS_SHA=04fea4b0ed130ea5b14b1703835dcc0a0171bf2b2ead9c9a72a40be71a6633c9 ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;

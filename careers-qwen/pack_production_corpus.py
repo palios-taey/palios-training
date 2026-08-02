@@ -146,8 +146,19 @@ PACK_SETS = {
     # Credential-scanned 2026-08-02 with treasurer/scripts/secret_scan.py: 0 NAMED matches; 9
     # entropy candidates triaged to code identifiers and public URLs (linkedin.com/posts activity
     # ids, a tracxn company id), verified by reading them.
+    # v2 of the production slice, 2026-08-02. The 1,688-row build was KILLED mid-run and rebuilt:
+    # 600 of its rows were apply-machine/bundles/ — the model's own generated resumes and cover
+    # letters, 36% of the whole corpus — and 5 came from bundles/_QUARANTINE_fabricated/. Training
+    # on generated output reinforces whatever the output already got wrong, which is why Taey kept
+    # ignoring a resume standard that was correct and injected on every compose: it had been
+    # trained on 76 examples of that standard being violated.
+    # Rebuilt with bundles/ excluded at the extractor (treasurer + conductor approved), verified BY
+    # SOURCE PATH not row count: 0 from bundles/, 0 from quarantine/fabricated.
+    # Cleared on the credential axis too: 0 of the 7 infra-flagged credential files are reachable —
+    # they live under treasurer (not one of the 10 repos) AND are .jsonl, which this allowlist does
+    # not admit. secret_scan.py: 0 NAMED, 6 entropy candidates all read and triaged to identifiers.
     "prod_v1": [
-        ("cpt_public_repos_prod.jsonl", 1688, "4ee2e63149647997"),
+        ("cpt_public_repos_prod.jsonl", 1089, "82a117538c31ecac"),
     ],
 }
 
