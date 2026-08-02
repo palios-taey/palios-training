@@ -83,6 +83,14 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 # NSYS_* must be named here or the profile silently never arms: RUN_ENV is an ALLOWLIST, and a var
 # absent from it does not reach the node. That is the same mechanism as the 2026-07-13 LR/WARMUP
 # non-forwarding bug recorded above — the run would look normal and produce no trace.
+# RUN_ENV is an ALLOWLIST — an unnamed var never reaches the node. LIGER/TORCH_COMPILE are
+# throughput levers whose whole purpose is A/B, so a silently-dropped flag would produce a
+# null result that looks like a real measurement.
+[ -n "${AC_LAYER_GRANULAR:-}" ] && RUN_ENV="$RUN_ENV AC_LAYER_GRANULAR=$AC_LAYER_GRANULAR"
+[ -n "${AC_LAYER_CLS:-}" ] && RUN_ENV="$RUN_ENV AC_LAYER_CLS=$AC_LAYER_CLS"
+[ -n "${LIGER:-}" ] && RUN_ENV="$RUN_ENV LIGER=$LIGER"
+[ -n "${TORCH_COMPILE:-}" ] && RUN_ENV="$RUN_ENV TORCH_COMPILE=$TORCH_COMPILE"
+[ -n "${TORCH_COMPILE_MODE:-}" ] && RUN_ENV="$RUN_ENV TORCH_COMPILE_MODE=$TORCH_COMPILE_MODE"
 [ -n "${NSYS_PROFILE_STEP:-}" ] && RUN_ENV="$RUN_ENV NSYS_PROFILE_STEP=$NSYS_PROFILE_STEP"
 [ -n "${NSYS_PROFILE_ALL_RANKS:-}" ] && RUN_ENV="$RUN_ENV NSYS_PROFILE_ALL_RANKS=$NSYS_PROFILE_ALL_RANKS"
 [ -n "${NSYS_OUT_DIR:-}" ] && RUN_ENV="$RUN_ENV NSYS_OUT_DIR=$NSYS_OUT_DIR"

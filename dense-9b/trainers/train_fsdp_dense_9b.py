@@ -55,6 +55,7 @@ os.environ.setdefault("TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC", "1800")
 
 import json
 import math
+import collections
 import logging
 import time
 from contextlib import nullcontext
@@ -2177,6 +2178,54 @@ def main():
         accelerator.dataloader_config.even_batches = False
         if accelerator.is_main_process:
             log.info("Accelerate even_batches=False for variable-size CPT token bucket batch_sampler")
+    # ── AC_LAYER_GRANULAR (2026-08-02) — wrap the LAYER, not its children ──
+    # Accelerate's FSDP2 path evaluates the auto-wrap policy against the PARENT and then applies
+    # checkpoint_wrapper to the CHILD (accelerate/utils/fsdp_utils.py:716-718, quoted from upstream
+    # by HORIZON). So `fsdp_transformer_layer_cls_to_wrap: Qwen3_5DecoderLayer` wraps each decoder
+    # layer's four children rather than the layer — 256 wrappers over 64 layers, measured.
+    #
+    # Consequence: a boundary is retained per CHILD instead of per LAYER. Measured activations at
+    # MAX_SEQ=8192 are ~52GB against a whole-layer hidden-state floor of 8192*5120*2*64 ~= 5.4GB.
+    # HORIZON ranks correcting this FIRST among all levers, as the only candidate that changes the
+    # feasible operating point rather than shaving kernel time — and is explicit that the
+    # THROUGHPUT multiple is Unknown until measured, because whole-layer wrapping still recomputes.
+    #
+    # Applied PRE-prepare, which the exp9 note above establishes as the mandatory order: a
+    # post-prepare application failed because the modules had already been transformed.
+    # Accelerate's own AC is disabled first, or both would apply and we would wrap twice.
+    if os.environ.get("AC_LAYER_GRANULAR", "0") == "1":
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            apply_activation_checkpointing,
+            checkpoint_wrapper,
+            CheckpointImpl,
+        )
+        _plug = getattr(accelerator.state, "fsdp_plugin", None)
+        if _plug is not None and getattr(_plug, "activation_checkpointing", False):
+            _plug.activation_checkpointing = False
+            if accelerator.is_main_process:
+                log.info("AC_LAYER_GRANULAR: disabled accelerate's child-granular AC to avoid double-wrap")
+        _target = os.environ.get("AC_LAYER_CLS", "Qwen3_5DecoderLayer")
+        _before = sum(1 for _m in model.modules() if "CheckpointWrapper" in type(_m).__name__)
+        apply_activation_checkpointing(
+            model,
+            checkpoint_wrapper_fn=lambda m: checkpoint_wrapper(
+                m, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+            ),
+            check_fn=lambda m: type(m).__name__ == _target,
+        )
+        _after = sum(1 for _m in model.modules() if "CheckpointWrapper" in type(_m).__name__)
+        _layers = sum(1 for _m in model.modules() if type(_m).__name__ == _target)
+        if accelerator.is_main_process:
+            log.info(f"AC_LAYER_GRANULAR: wrapped {_after - _before} x {_target} "
+                     f"(layers found={_layers}, wrappers before={_before} after={_after})")
+        # Refuse rather than run a silently-unwrapped model: this is a MEMORY-critical change, and
+        # a no-op here would OOM at the first step or, worse, quietly retain everything.
+        if _layers == 0 or (_after - _before) != _layers:
+            raise RuntimeError(
+                f"AC_LAYER_GRANULAR failed: expected to wrap {_layers} x {_target}, "
+                f"wrapped {_after - _before}. Check AC_LAYER_CLS matches this architecture."
+            )
+
     if accelerator.is_main_process:
         log.info(f"Calling accelerator.prepare()... (FSDP2={_fsdp_v2})")
     if _fsdp_v2:
@@ -2190,6 +2239,28 @@ def main():
     else:
         model, dataloader = accelerator.prepare(model, dataloader)
     gc.collect()
+
+    # ── torch.compile (2026-08-01) — OPT-IN, default OFF ──
+    # Absent from this trainer entirely until now, while the launcher has exported
+    # TRITON_PTXAS_PATH since 2026-07-11 specifically so Triton can emit sm_121 (its bundled ptxas
+    # cannot). The enabler for Inductor was wired and the feature was never switched on.
+    # Applied AFTER prepare so the compiled graph wraps the already-sharded FSDP2 module; compiling
+    # before would capture the pre-shard module and the wrap would discard it.
+    # Default OFF because compile cost and graph-break behaviour under FSDP2 + activation
+    # checkpointing are UNMEASURED on this stack — this is a lever to A/B, not a default to assume.
+    # TORCH_COMPILE_MODE defaults to "default"; max-autotune spends far longer compiling and its
+    # payoff here is exactly what the A/B is for.
+    if os.environ.get("TORCH_COMPILE", "0") == "1":
+        _cmode = os.environ.get("TORCH_COMPILE_MODE", "default")
+        _t0 = time.time()
+        if accelerator.is_main_process:
+            log.info(f"TORCH_COMPILE: compiling (mode={_cmode}) — first step includes compile cost")
+        model = torch.compile(model, mode=_cmode)
+        if accelerator.is_main_process:
+            log.info(f"TORCH_COMPILE: wrapper applied in {time.time()-_t0:.1f}s "
+                     f"(actual graph compile happens on first forward)")
+    elif accelerator.is_main_process:
+        log.info("TORCH_COMPILE: disabled (set TORCH_COMPILE=1 to enable)")
 
     # ── DOUBLE-SHARD FIX — COVERAGE PROOF (2026-07-12, CORPUS_OBJECTIVES Gate 3) ──
     # steps/epoch = len(prepared dataloader). blocks/epoch = steps/epoch × global_batch MUST ≈ the
@@ -2321,15 +2392,41 @@ def main():
     # fsdp_activation_checkpointing=true (applied INSIDE prepare, BEFORE fully_shard — the
     # mandatory order). The earlier manual POST-prepare apply_activation_checkpointing failed
     # because it was the WRONG ORDER (wrappers already transformed). VERIFY it actually applied: ──
+    # ── AC VERIFY — count is necessary but NOT sufficient (2026-08-02) ──
+    # The previous check accepted ANY count > 0 as a pass. Production reported 256 wrappers across
+    # 64 decoder layers and the gate went green — but 256 is 4-per-layer, i.e. Accelerate wrapped
+    # each decoder layer's CHILDREN, not the layer. Mechanism, quoted from upstream by HORIZON and
+    # verifiable at accelerate/utils/fsdp_utils.py:716-718: the auto-wrap policy is evaluated
+    # against the PARENT and then `checkpoint_wrapper` is applied to the child. So a policy naming
+    # Qwen3_5DecoderLayer wraps that layer's children.
+    # Why it matters: child-level wrapping retains a boundary per CHILD instead of per LAYER, which
+    # is the difference between a ~5.4GB hidden-state floor and the ~52GB of activations measured
+    # at MAX_SEQ=8192. The gate passed on precisely the configuration it existed to catch — a check
+    # of FORM (something is wrapped) reported as a check of TRUTH (the right thing is wrapped).
+    # Now records WHICH classes are wrapped and how many, so the granularity is visible in the log
+    # of every run rather than inferable only by dividing two numbers by hand.
     _acw = -1
     try:
-        _acw = sum(1 for _m in model.modules() if "CheckpointWrapper" in type(_m).__name__)
+        _wrapped = [_m for _m in model.modules() if "CheckpointWrapper" in type(_m).__name__]
+        _acw = len(_wrapped)
+        _inner = collections.Counter()
+        for _m in _wrapped:
+            _c = getattr(_m, "_checkpoint_wrapped_module", None)
+            _inner[type(_c).__name__ if _c is not None else "?"] += 1
+        _n_layers = sum(1 for _m in model.modules()
+                        if type(_m).__name__.endswith("DecoderLayer"))
         if accelerator.is_main_process:
-            if _acw > 0:
-                log.info(f"AC VERIFY: {_acw} CheckpointWrapper modules present → activation checkpointing ACTIVE (exp9 fix working)")
-            else:
-                log.info("AC VERIFY: 0 CheckpointWrapper modules → accelerate AC did NOT apply; "
-                         "ESCALATE to manual pre-prepare apply_activation_checkpointing (grok/perplexity path)")
+            log.info(f"AC VERIFY: {_acw} CheckpointWrapper modules over {_n_layers} decoder layers "
+                     f"→ {(_acw / _n_layers) if _n_layers else float('nan'):.2f} per layer; "
+                     f"wrapped classes = {dict(_inner)}")
+            if _acw == 0:
+                log.info("AC VERIFY: 0 wrappers → accelerate AC did NOT apply; ESCALATE to manual "
+                         "pre-prepare apply_activation_checkpointing")
+            elif _n_layers and _acw == _n_layers:
+                log.info("AC VERIFY: LAYER-GRANULAR (1 wrapper per decoder layer) — minimum retained state")
+            elif _n_layers:
+                log.info(f"AC VERIFY: CHILD-GRANULAR — {_acw / _n_layers:.0f}x more retained boundaries "
+                         f"than layer-granular. See AC_LAYER_GRANULAR=1.")
     except Exception as _e:
         log.info(f"AC VERIFY skipped ({_e})")
     if _exact_sft_epoch:
