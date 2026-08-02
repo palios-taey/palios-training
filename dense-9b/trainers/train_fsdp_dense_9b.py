@@ -1245,6 +1245,14 @@ def main():
         raise RuntimeError("EXPECTED_SFT_SAMPLES must be zero or positive")
     _exact_sft_epoch = os.environ.get("EXACT_SFT_EPOCH", "0") == "1"
     _expected_real_samples = int(os.environ.get("EXPECTED_REAL_SAMPLES", "0"))
+    # ONE definition of "is this run a bake/export rather than a training run", for the same
+    # reason EPOCHS is defined once below. A bake loads a checkpoint and writes an artifact: it
+    # takes no optimizer steps, so TOTAL_STEPS=1 is a formality there and any gate reasoning about
+    # the training horizon is a FALSE POSITIVE on that path. It was previously computed inside the
+    # LR-scheduler block, where it was both conditionally scoped and invisible to the horizon
+    # contract added later — which would then have blocked every packed bake, reproducing the
+    # 2026-07-28 warmup-guard failure documented at its own use site.
+    _is_bake = bool(os.environ.get("BAKE_TO_HF", "") or os.environ.get("EXPORT_DCP", ""))
     # ONE definition of EPOCHS, read once and closed over by everything below.
     # It is defined HERE rather than at each use because the first version read it inside
     # _make_optim only, and the END-OF-RUN dose check 900 lines away kept its own one-epoch
@@ -2224,7 +2232,7 @@ def main():
         # bake on 2026-07-28 with "WARMUP_STEPS=25 >= TOTAL_STEPS=1" minutes after I shipped the
         # guard. A gate that fires on a path it does not govern trains people to bypass gates —
         # which is worse than the miss it was built to prevent.
-        _is_bake = bool(os.environ.get("BAKE_TO_HF", "") or os.environ.get("EXPORT_DCP", ""))
+        # _is_bake is defined once at main scope (see its definition alongside EPOCHS).
         if warmup_steps >= total_steps and not _is_bake:
             raise RuntimeError(
                 f"WARMUP_STEPS={warmup_steps} >= TOTAL_STEPS={total_steps}: the LR would peak at "
@@ -2344,6 +2352,16 @@ def main():
     except Exception as _e:
         if _exact_sft_epoch:
             raise RuntimeError(f"EXACT SFT could not prove prepared coverage: {_e}") from _e
+        # A packed CPT run whose horizon cannot be proven is the "check FAILED TO RUN" case, which
+        # blocks — as distinct from "the check does not model this construct", which may earn a
+        # substitute. Without this, an unmeasurable loader would skip the horizon contract below
+        # and the run would proceed on an unverified TOTAL_STEPS, which is the state that already
+        # cost 2 blocks once.
+        if _packed and not _is_bake:
+            raise RuntimeError(
+                f"packed CPT could not prove prepared coverage: {_e} — refusing to train on an "
+                "unverified horizon"
+            ) from _e
         if accelerator.is_main_process:
             log.info(f"COVERAGE PROOF: len(dataloader) unavailable ({_e})")
     else:
@@ -2361,6 +2379,66 @@ def main():
                 f"{_blocks_per_epoch}/{_dataset_blocks} blocks per epoch "
                 f"(global_batch={_gb}); probable double-sharding"
             )
+        # ── CPT HORIZON CONTRACT (2026-08-02) ──
+        # The coverage proof above answers "does the LOADER see every block". It does not answer
+        # "does the RUN consume them", and nothing did: TOTAL_STEPS was hand-computed. On
+        # 2026-08-01 that division was done as 334/4 = 83.5 -> 83 and 2 blocks were never trained.
+        # The same corpus packed at 16384 divides worse — 167/4 = 41.75, so the same rounding
+        # costs 3 blocks (1.8%) — which is what made this worth closing rather than remembering.
+        #
+        # `_spe` is the authority, not a fresh ceil(blocks/gb) computed here. It is what the
+        # PREPARED loader actually yields, already including the pad-to-global-batch that the
+        # coverage bound above permits (_dataset_blocks <= _blocks_per_epoch < _dataset_blocks+_gb).
+        # A second division in a second place is a second thing to get wrong, and disagreeing
+        # copies of one quantity is the defect class this file has already paid for twice.
+        #
+        # SESSION_LIMIT is deliberately NOT bound: for CPT it caps ONE session of a resumable run
+        # (defaults 250 against TOTAL_STEPS 3000) and is expected to be smaller than the horizon.
+        #
+        # A deliberately short run (throughput probe, smoke test) declares itself by setting
+        # HORIZON_PARTIAL to the SAME value as TOTAL_STEPS. It is a restated value rather than a
+        # boolean on purpose: a forgotten boolean fails OPEN on the next production run, while a
+        # stale HORIZON_PARTIAL=8 sitting in an environment whose TOTAL_STEPS is 42 fails CLOSED
+        # on the mismatch. The declaration cannot be set once and forgotten.
+        # `not _is_bake` for the reason spelled out at the warmup guard above: a bake takes no
+        # optimizer steps, runs packed (bake_27b.sh passes CPT_PACKED through), and carries
+        # TOTAL_STEPS=1 as a formality. Without this clause the contract fires on every bake —
+        # the identical false positive the warmup guard shipped and had to be corrected for.
+        if _packed and not _is_bake and not _exact_sft_epoch and not _natural_sft_mode:
+            _expected_cpt_steps = _spe * _epochs
+            _partial = os.environ.get("HORIZON_PARTIAL", "")
+            if _partial:
+                if int(_partial) != total_steps:
+                    raise RuntimeError(
+                        f"HORIZON_PARTIAL={_partial} does not match TOTAL_STEPS={total_steps}. "
+                        "A partial horizon must be restated for the run it applies to; a stale "
+                        "value from an earlier run is not a declaration about this one."
+                    )
+                if accelerator.is_main_process:
+                    _frac = 100.0 * total_steps / max(1, _expected_cpt_steps)
+                    log.info(
+                        f"CPT HORIZON: PARTIAL run declared — {total_steps} of "
+                        f"{_expected_cpt_steps} steps ({_frac:.1f}% of the corpus). "
+                        f"{max(0, (_expected_cpt_steps - total_steps) * _gb)} blocks will NOT be "
+                        "trained. This is a probe, not a production run."
+                    )
+            elif total_steps != _expected_cpt_steps:
+                _missed = (_expected_cpt_steps - total_steps) * _gb
+                raise RuntimeError(
+                    "CPT HORIZON CONTRACT FAILED: "
+                    f"TOTAL_STEPS={total_steps} but this corpus needs {_expected_cpt_steps} "
+                    f"({_spe} steps/epoch x {_epochs} epoch(s)) to train every block "
+                    f"(dataset_blocks={_dataset_blocks} global_batch={_gb}). "
+                    f"As set, {_missed} blocks would go untrained and the run would report "
+                    "success anyway. Set TOTAL_STEPS to the expected value, or declare a "
+                    "deliberate probe with HORIZON_PARTIAL matching TOTAL_STEPS."
+                )
+            elif accelerator.is_main_process:
+                log.info(
+                    f"CPT HORIZON CONTRACT PASS: TOTAL_STEPS={total_steps} = {_spe} steps/epoch "
+                    f"x {_epochs} epoch(s), dataset_blocks={_dataset_blocks} global_batch={_gb}"
+                )
+
         if _natural_sft_mode and _expected_sft_samples:
             expected_steps = math.ceil(_expected_sft_samples / _gb) * _epochs
             if total_steps != expected_steps:
