@@ -293,6 +293,19 @@ case "$CPT_DATA" in
         # "The public repos need to be clean. That means nothing out of date ever." Training a
         # current doc alongside its superseded predecessor is the confusion archiving removes.
         # 19 repos including governance; commit-pinned blobs via `git show HEAD:<path>`.
+        # TEST FILES ARE EXCLUDED TOO (repo_path_is_test in build_corpus_slices.py): tests/, test/,
+        # testing/, __tests__/, spec/ directories and test_*/*_test/conftest files. Per Jesse
+        # 2026-08-01: "there are no tests ever... We do production runs only." Training test code
+        # would teach a practice the operation does not have. The slice is 1098 rows at
+        # sha16 155dc385fb92ed47 AFTER both exclusions; the 1245-row form predates them and is a
+        # different pack-set (production_v1) living in a different slices directory.
+        #
+        # BLOCK LENGTH IS NOT PART OF THIS SANCTION and the pattern deliberately admits any
+        # PACK_SEQ: every length is the same 1098 documents and the same 2,731,282 real tokens,
+        # differing only in where the block boundary falls. Verified 2026-08-02 — 8192 -> 334
+        # blocks, 16384 -> 167, exactly halving, with an identical 4,846-token cycle-pad in the
+        # final block either way. What each length DOES change is peak memory, which is why each
+        # carries its own full-digest pin below rather than inheriting one.
         #
         # CREDENTIAL-SCANNED: 4 flagged values, every one verified from source as a test fixture
         # or documented placeholder (dev-token, OUTSIDE_MEMORY_SHOULD_NOT_RENDER, change-me).
@@ -343,6 +356,9 @@ case "$CPT_DATA" in
     # means the file is not the artifact these numbers were measured on.
     # public-repo surface corpus — FULL sha256, the strict form
     *cpt_repos_v1_packed_8192.jsonl) EXPECT_CORPUS_SHA=8ae2a486a92c51b288315a921f80cbe253c1ff4242a5d1f3c41db249708022de ;;
+    # 16384 pack of the SAME 1098-row slice (155dc385fb92ed47), 2026-08-02. 167 blocks,
+    # 2,736,128 tokens — token-for-token identical to the 8192 pack, half the blocks.
+    *cpt_repos_v1_packed_16384.jsonl) EXPECT_CORPUS_SHA=b89020fcdc913e3eb5bcd467cc596c7fced11c271d9aac59e15446eba4bf9d31 ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;
