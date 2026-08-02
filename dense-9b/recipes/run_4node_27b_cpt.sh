@@ -88,6 +88,10 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 # null result that looks like a real measurement.
 [ -n "${AC_LAYER_GRANULAR:-}" ] && RUN_ENV="$RUN_ENV AC_LAYER_GRANULAR=$AC_LAYER_GRANULAR"
 [ -n "${AC_LAYER_CLS:-}" ] && RUN_ENV="$RUN_ENV AC_LAYER_CLS=$AC_LAYER_CLS"
+# QUARANTINE_DIGESTS: the trainer DEFAULTS this to the in-repo registry and refuses to start
+# without it, so forwarding is only needed to override. Named here so an override actually
+# reaches the node -- RUN_ENV is an allowlist and an unnamed var is silently dropped.
+[ -n "${QUARANTINE_DIGESTS:-}" ] && RUN_ENV="$RUN_ENV QUARANTINE_DIGESTS=$QUARANTINE_DIGESTS"
 [ -n "${LIGER:-}" ] && RUN_ENV="$RUN_ENV LIGER=$LIGER"
 [ -n "${TORCH_COMPILE:-}" ] && RUN_ENV="$RUN_ENV TORCH_COMPILE=$TORCH_COMPILE"
 [ -n "${TORCH_COMPILE_MODE:-}" ] && RUN_ENV="$RUN_ENV TORCH_COMPILE_MODE=$TORCH_COMPILE_MODE"

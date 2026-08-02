@@ -957,7 +957,24 @@ def _quarantined_digests():
     corpus owner without touching the trainer.
     """
     out = {}
-    reg = os.environ.get("QUARANTINE_DIGESTS", "")
+    # DEFAULTED, not merely read from the environment. This gate was INERT for the first hours of
+    # its life because QUARANTINE_DIGESTS was never set anywhere — the code was present, the
+    # commit was real, and the list it consulted was empty, so it refused nothing. Found by
+    # treasurer 2026-08-02 by checking the RUNNING ENVIRONMENT rather than the code.
+    # A control whose operative input is optional is a control that is off by default.
+    _default = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "careers-qwen", "governance", "QUARANTINE_DIGESTS.txt",
+    )
+    reg = os.environ.get("QUARANTINE_DIGESTS", "") or _default
+    # FAIL CLOSED. Absence used to be silent; now it stops the run. An empty or missing registry
+    # is indistinguishable at load time from "nothing is quarantined", and the whole point of this
+    # gate is that the difference matters.
+    if not os.path.isfile(reg):
+        raise RuntimeError(
+            f"REFUSE: quarantine digest registry not found at {reg}. This gate cannot be "
+            f"silently inert. Restore the file, or set QUARANTINE_DIGESTS to a readable one."
+        )
     if reg and os.path.isfile(reg):
         for line in open(reg):
             line = line.strip()
@@ -1003,6 +1020,12 @@ def _assert_not_quarantined(path):
     quietly narrows the corpus is the failure it was built to prevent.
     """
     digests = _quarantined_digests()
+    if not digests:
+        raise RuntimeError(
+            "REFUSE: quarantine digest registry is EMPTY. An empty registry and a missing one "
+            "look identical to a corpus that is genuinely un-quarantined; this gate refuses "
+            "rather than assume the benign reading."
+        )
     if digests:
         d = _sha256_file(path)
         if d in digests:
