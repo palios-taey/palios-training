@@ -80,6 +80,13 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 [ -n "${TINY_LANE_THRESHOLD:-}" ] && RUN_ENV="$RUN_ENV TINY_LANE_THRESHOLD=$TINY_LANE_THRESHOLD"
 [ -n "${MODEL_PATH:-}" ] && RUN_ENV="$RUN_ENV MODEL_PATH=$MODEL_PATH"
 [ -n "${WARMUP_STEPS:-}" ] && RUN_ENV="$RUN_ENV WARMUP_STEPS=$WARMUP_STEPS"
+# HORIZON_PARTIAL: declares a deliberately short packed-CPT run (throughput probe, smoke test)
+# to the trainer's CPT horizon contract, which otherwise requires TOTAL_STEPS to cover the whole
+# corpus. MUST be named here: RUN_ENV is an ALLOWLIST, and dropped silently it would not weaken
+# the gate but strand it — the probe would be refused on the node with a declaration the operator
+# believes they made, which reads as a broken gate and invites bypassing it. The trainer requires
+# this to EQUAL TOTAL_STEPS, so a stale value fails closed rather than open.
+[ -n "${HORIZON_PARTIAL:-}" ] && RUN_ENV="$RUN_ENV HORIZON_PARTIAL=$HORIZON_PARTIAL"
 # NSYS_* must be named here or the profile silently never arms: RUN_ENV is an ALLOWLIST, and a var
 # absent from it does not reach the node. That is the same mechanism as the 2026-07-13 LR/WARMUP
 # non-forwarding bug recorded above — the run would look normal and produce no trace.
