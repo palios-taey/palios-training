@@ -329,3 +329,33 @@ Triage applied per `training-defect-triage`: all five are knowledge/procedure ga
 today's stack, not missing capability — so TRAINING, not bug reports. The infrastructure each row
 names (`/proc/<pid>/comm`, `ss`, `lsof`, systemd, HTTP status codes, mtime vs atime) exists and was
 exercised this session.
+
+---
+
+## DEBT: a canonical spec row teaches a topology Jesse superseded (found 2026-08-02, tutor)
+
+`spec_knowledge/training_methodology_v1.jsonl` row [7] (`training/module-topology`) states Taey's
+weights are "one frozen full-parameter CPT base plus numbered, isolated, **swappable** LoRA modules
+served multi-LoRA — a capability module never contaminates another."
+
+That is the framing Jesse superseded on 2026-07-24. The committed record, chased to the documents
+rather than asserted from recollection:
+
+- `README.md:23` — "SFT (LoRA) | a module trained *from the previous module's adapter*, never fresh
+  from base"
+- `README.md:26` — "N-1's baked adapter. A module trained fresh from base has discarded every module
+  since, silently"
+- `public/METHOD.md:28` — "Starting fresh from base when a previous module exists silently discards"
+
+The row's own `source` cites `QWEN_CONVERGED_TRAINING_PLAN.md §1 + SFT_RECIPE_RECONCILE_v1.md`, both
+of which predate the directive, so the row is faithful to a stale source rather than invented. The
+source docs need the same check.
+
+**Why this is debt and not a quick edit.** "Isolated at SERVING" and "cumulative at TRAINING" are not
+obviously the same claim, and a module trained from N-1 provably contains N-1, so the two cannot both
+hold as written. Which half survives is a real question about the topology, not a wording fix, and
+the answer changes what every future module trains from. It is recorded here rather than patched
+mid-run because guessing at it would replace one confidently-wrong row with another.
+
+**Status: NOT eligible for any dose until resolved.** It is canonical, so it would otherwise ride
+into the next round teaching the retired model.
