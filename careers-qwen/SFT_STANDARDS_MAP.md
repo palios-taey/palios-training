@@ -7,23 +7,26 @@ This is a map of existing standards, not a new recipe. Canonical sources are
 
 ## Admission and promotion
 
-- Admit only production-observed source traces; generic Q&A and invented tool
-  events are not evidence.
+- Admit tool-use trajectories only from production-observed source traces;
+  generic Q&A and invented tool events are not evidence.
 - A tool trajectory must preserve the full live sequence: model read/inspect
   call → fresh tree/result with revision → one ref-bound action → post-action
-  result → next read/validation decision. Atomic snapshot/action/result records
-  are source material, not multi-turn SFT.
+  result → next read/validation call → validation tool result. Atomic
+  snapshot/action/result records are source material, not multi-turn SFT.
 - Validate against the live per-operation contract (`ats_mcp_server.py`), not
   the union schema. Keep right-way targets only; terminal or indeterminate
   effects are dropped.
 - Run the governed manifest, residue/privacy scan, quarantine classification,
   and promotion-lineage checks before sanction or tokenization. Quarantined,
   deleted, or superseded material cannot re-enter by filename or count.
-- Treasurer owns sanction and corpus status; Chats own mixture/dose decisions.
-  No training launch infers either approval.
+- Treasurer owns sanction and corpus status. Tutor applies the mixture and dose
+  decided through Chats. No training launch infers either approval.
 - Record base identity, horizon, corpus digest/config, dose proof, and outcome
-  in RUN_REGISTRY before and after each run. Evaluate only on the real Thor
-  production path; weight movement proves training occurred, not quality.
+  in RUN_REGISTRY before and after each run. Authoritative evaluation uses the
+  production engine, version, request shape, and live tools; final promotion is
+  decided by Taey doing real work on the served artifact. Spark batch evaluation
+  is training infrastructure, not a substitute for that oracle. Weight movement
+  proves training occurred, not quality.
 
 ## Lane matrix
 
