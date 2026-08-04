@@ -80,4 +80,4 @@ against a number nothing reads.
 ## Artifacts
 
 `nsys_rank{0,1,2,3}_step6.nsys-rep` on `.68` / `.80` / `.12` / `.19` under
-`/home/spark/cpt27b_logs/`, with matching `.sqlite` extractions.
+`<spark-home>/cpt27b_logs/`, with matching `.sqlite` extractions.

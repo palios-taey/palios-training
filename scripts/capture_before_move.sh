@@ -16,7 +16,7 @@
 # reads. Nothing here can lose data even if it is interrupted.
 set -uo pipefail
 
-DEST="${1:-/home/mira/recovery/consolidation-phase0-$(date -u +%Y%m%d)}"
+DEST="${1:-${CAPTURE_ROOT:?set CAPTURE_ROOT}/consolidation-phase0-$(date -u +%Y%m%d)}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INV="$ROOT/docs/TRAINING_INVENTORY.yml"
 
@@ -37,7 +37,7 @@ PY
 
 while IFS=$'\t' read -r p def ahead; do
   [ -n "$p" ] || continue
-  src="${p/\$HOME//home/mira}"
+  src="${p/\$HOME/$HOME}"
   name="$(basename "$src")"
   [ -d "$src/.git" ] || { echo "  SKIP  $name (no longer a repo)"; continue; }
   out="$DEST/$name"; mkdir -p "$out"

@@ -6,7 +6,7 @@
 
 ## What was found — Observed
 
-Five complete 35B identity/constitutional LoRA runs living **only** on `.68`, under `/home/spark/`.
+Five complete 35B identity/constitutional LoRA runs living **only** on `.68`, under `<spark-home>/`.
 All five target the same base, `Huihui-Qwen3.5-35B-A3B-abliterated`:
 
 | Run | rank | alpha | total | adapter | merged_model | checkpoints |
@@ -41,7 +41,7 @@ from whoever ran them or from git/plan history.
 
 ## Action taken
 
-Replicated the 25 GB of adapters + READMEs to `.19:/home/spark/preserved_35b_identity/`
+Replicated the 25 GB of adapters + READMEs to `.19:<spark-home>/preserved_35b_identity/`
 (1347 G free), preserving per-run directory structure.
 
 **Verified by content, not by size**: `adapter_model.safetensors` sha256 MATCH on all five,

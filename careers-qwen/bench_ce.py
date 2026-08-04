@@ -29,6 +29,7 @@ measure contention, not the kernels.
 from __future__ import annotations
 
 import argparse, sys, time
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -70,8 +71,9 @@ def baseline(h, w, t):
 
 
 def make_chunked(chunk):
-    sys.path.insert(0, "/home/spark/palios-training/careers-qwen")
-    sys.path.insert(0, "/home/mira/palios-training/careers-qwen")
+    module_dir = Path(__file__).resolve().parent
+    if str(module_dir) not in sys.path:
+        sys.path.insert(0, str(module_dir))
     from chunked_ce import chunked_cross_entropy
     def f(h, w, t):
         return chunked_cross_entropy(h, w, t, chunk_size=chunk)
