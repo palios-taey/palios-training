@@ -7,8 +7,9 @@ This is a map of existing standards, not a new recipe. Canonical sources are
 
 ## Admission and promotion
 
-- Admit tool-use trajectories only from production-observed source traces;
-  generic Q&A and invented tool events are not evidence.
+- Admit either production-observed source traces or design-backed rules from a
+  committed public canonical spec, live schema, or executable validator. Label
+  the source class; generic Q&A and invented tool events are not evidence.
 - A tool trajectory must preserve the full live sequence: model read/inspect
   call → fresh tree/result with revision → one ref-bound action → post-action
   result → next read/validation call → validation tool result. Atomic
@@ -28,15 +29,22 @@ This is a map of existing standards, not a new recipe. Canonical sources are
   is training infrastructure, not a substitute for that oracle. Weight movement
   proves training occurred, not quality.
 
+Design-backed rules use triage: model/contract mismatch is a training gap;
+implementation/contract mismatch is a code defect and full stop; ambiguous
+evidence is quarantined. Required coverage includes production-oracle/no-tests
+completion, first-error stop, cannot-lie status, authority/fail-closed behavior,
+Git/worktree/PR/merge verification, fleet routing/wait-wake/evidence closure,
+and each public repository's executable contract.
+
 ## Lane matrix
 
 | lane | accepted source | required production contract | current status |
 |---|---|---|---|
-| UI navigation | supervised full read/action/post-read walks | ATS `ui_action` per-op validator + ref/revision continuity | 91 atomic rows explicitly **ineligible**; capture queue required |
+| UI navigation | supervised full read/action/post-read walks | ATS `ui_action` per-op validator + ref/revision continuity | prior atomic artifact explicitly **ineligible**; capture queue required |
 | orchestration | real taey-plan/task/notify executions with evidence closure | live tracker/notification commands and completion evidence | no full trajectory admitted here |
 | Git maintenance | real status/log/blame/diff/topology/worktree/commit/push receipts | repository/git contract and digest verification | no full trajectory admitted here |
 | public repositories | production-observed executable contracts for each dependency repo | each repo's actual CLI/service contract and cross-repo receipt | inventory and traces required before admission |
 
-The 91-row atomic artifact was generated from real bundles but is deliberately
+The prior atomic artifact was generated from real bundles but is deliberately
 not a training promotion. The stale swappable-LoRA topology and deleted/bad
 voice material are excluded.
