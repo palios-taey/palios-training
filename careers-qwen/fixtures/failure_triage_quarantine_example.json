@@ -1,5 +1,5 @@
 {
-  "schema": "sft_failure_triage_verdict.v3",
+  "schema": "sft_failure_triage_verdict.v4",
   "verdict_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "protocol_pin": {
     "repo": "palios-taey/palios-training",
