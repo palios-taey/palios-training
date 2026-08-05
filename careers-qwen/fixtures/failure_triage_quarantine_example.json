@@ -1,0 +1,59 @@
+{
+  "schema": "sft_failure_triage_verdict.v1",
+  "verdict_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "protocol_pin": {
+    "repo": "palios-taey/palios-training",
+    "sha": "58b108042e66fa508765a6277c033cc5a8f86abd",
+    "path": "careers-qwen/docs/SFT_SELF_TRAINING_LOOP_PROTOCOL.md",
+    "lines": "46-52"
+  },
+  "verdict": "quarantine",
+  "lane": "orchestration",
+  "trace": {
+    "trace_id": "fixture",
+    "trace_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "event_count": 0
+  },
+  "contract": {
+    "repo": "palios-taey/palios-training",
+    "sha": "c164d35de6edec6c18e32b3f2bdd98fd5c71c1ab",
+    "path": "careers-qwen/SFT_STANDARDS_MAP.md",
+    "lines": "32-34",
+    "kind": "spec"
+  },
+  "deployed": {
+    "repo": "palios-taey/palios-training",
+    "sha": "58b108042e66fa508765a6277c033cc5a8f86abd",
+    "parity": "Unknown",
+    "evidence": "fixture: parity Unknown demonstrates quarantine path"
+  },
+  "predicates": {
+    "contract_resolved": {
+      "value": true,
+      "register": "Observed"
+    },
+    "implementation_matches_contract": {
+      "value": null,
+      "register": "Unknown"
+    },
+    "taey_violated_contract": {
+      "value": null,
+      "register": "Unknown"
+    }
+  },
+  "rationale": "Fixture verdict: Unknown parity forces quarantine under sft_failure_triage.v1.",
+  "allowed_next": [
+    "request_parity_evidence"
+  ],
+  "forbidden_next": [
+    "pair_admission",
+    "train_fire",
+    "infer_model_gap"
+  ],
+  "reviewer": {
+    "session": "fixture",
+    "receipt_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "recorded_at": "2026-08-05T00:00:00+00:00",
+    "method": "mechanical_checklist"
+  }
+}
