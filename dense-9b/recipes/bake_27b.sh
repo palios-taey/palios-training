@@ -1,7 +1,16 @@
 #!/bin/bash
 # TOPOLOGY comes from the gitignored fleet.env (see fleet.env.example). NEVER hardcode
 # addresses here — the public repo is production infrastructure; topology is deployment config.
-[ -f "$(git rev-parse --show-toplevel 2>/dev/null)/fleet.env" ] && . "$(git rev-parse --show-toplevel)/fleet.env"
+# FLEET_ENV load contract matches export_exact_checkpoint_artifact_b.sh: honor FLEET_ENV override,
+# default to repo-root fleet.env, fail-loud if missing (do not silently skip).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+FLEET_ENV="${FLEET_ENV:-$REPO_ROOT/fleet.env}"
+[ -f "$FLEET_ENV" ] || {
+  echo "REFUSE: fleet configuration is missing: $FLEET_ENV" >&2
+  exit 1
+}
+. "$FLEET_ENV"
 # bake_27b.sh — production Artifact-B exporter for a use_collectives=False per-rank resume checkpoint.
 # EXPORT_DCP reuses the trainer's proven 4-rank FSDP2 build + dcp.load path, then writes a coordinated
 # model-only DCP with global metadata. BAKE_TO_HF remains only as an explicitly named legacy mode.
