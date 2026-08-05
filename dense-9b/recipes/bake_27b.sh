@@ -74,6 +74,8 @@ TORCH_NCCL_TRACE_BUFFER_SIZE=2000 TORCH_NCCL_TRACE_CPP_STACK=1 TORCH_NCCL_DESYNC
 # Deployment recipe root: honor REMOTE_PALIOS_TRAINING_ROOT the same way
 # export_exact_checkpoint_artifact_b.sh does for inspection. Hardcoding
 # ${SPARK_HOME}/palios-training forced a dirty/live checkout path on nodes.
+# Lexically canonicalize after the absolute-shape check so root-equivalent
+# spellings (//, /./, /../, /tmp/..) cannot bypass a literal '/' refuse.
 REMOTE_PALIOS_TRAINING_ROOT="${REMOTE_PALIOS_TRAINING_ROOT:-${SPARK_HOME}/palios-training}"
 case "$REMOTE_PALIOS_TRAINING_ROOT" in
   /*) ;;
@@ -82,11 +84,12 @@ case "$REMOTE_PALIOS_TRAINING_ROOT" in
     exit 1
     ;;
 esac
+REMOTE_PALIOS_TRAINING_ROOT="$(realpath -m -- "$REMOTE_PALIOS_TRAINING_ROOT")"
 if [ "$REMOTE_PALIOS_TRAINING_ROOT" = "/" ]; then
-  echo "ERROR: REMOTE_PALIOS_TRAINING_ROOT must not be '/'" >&2
+  echo "ERROR: REMOTE_PALIOS_TRAINING_ROOT must not resolve to filesystem root '/'" >&2
   exit 1
 fi
-RECIPE_DIR="${REMOTE_PALIOS_TRAINING_ROOT%/}/dense-9b/recipes"
+RECIPE_DIR="${REMOTE_PALIOS_TRAINING_ROOT}/dense-9b/recipes"
 LOGDIR=${SPARK_HOME}/cpt27b_logs
 EXPORT_FREE_MARGIN_BYTES=${EXPORT_FREE_MARGIN_BYTES:-10737418240}
 
