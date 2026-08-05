@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Mechanical verifier for sft_failure_triage_verdict.v4.
+"""Mechanical verifier for sft_failure_triage_verdict.v5.
 
 Public contract: careers-qwen/docs/SFT_FAILURE_TRIAGE_CONTRACT.md
 Protocol pin: careers-qwen/docs/SFT_SELF_TRAINING_LOOP_PROTOCOL.md @ 58b1080… L46–52
 
-v4 closes CONTROL counterexample after bce9ec7:
-- Match methods: git_commit_equal | blob_byte_equivalence only (git_ancestor removed)
-- blob paths must equal the cited contract.path (irrelevant-path Match REJECTS)
-- Match requires independent live_deployment_receipt bound to deployed.sha
-- model_gap rejects caller-authored contract_contradiction as authority;
-  contradiction is re-derived by a contract-symbol oracle on event content
-- model_gap requires independent trace_receipt (producer ≠ reviewer) and a
-  production-seat event payload hash chain re-derived to trace_hash
+v5 closes CONTROL counterexample after 71696d6:
+- model_gap requires an authenticated lane scorer receipt (ed25519 over
+  canonical payload) from a pinned scorer public key — not unequal producer
+  label strings.
+- Implementation conformance for model_gap is the scorer's signed result, not
+  contract-document blob equivalence or substring oracles.
+- Without a valid authenticated scorer receipt, model_gap / taey_violated=true
+  REJECTS (honest quarantine path when no lane scorer exists).
+- Reject probes: single-submitter multi-label forgery; quote-without-action
+  (substring without authenticated scorer outcome).
 
 Exit codes:
   0 — verdict is mechanically consistent with the contract
@@ -34,17 +36,11 @@ PROTOCOL_REPO = "palios-taey/palios-training"
 PROTOCOL_SHA = "58b108042e66fa508765a6277c033cc5a8f86abd"
 PROTOCOL_PATH = "careers-qwen/docs/SFT_SELF_TRAINING_LOOP_PROTOCOL.md"
 PROTOCOL_LINES = "46-52"
-VERDICT_SCHEMA = "sft_failure_triage_verdict.v4"
-PARITY_RECEIPT_SCHEMA = "sft_parity_receipt.v2"
-LIVE_RECEIPT_SCHEMA = "sft_live_deployment_receipt.v1"
-TRACE_ARTIFACT_SCHEMA = "sft_failure_trace.v2"
-TRACE_RECEIPT_SCHEMA = "sft_trace_receipt.v1"
+VERDICT_SCHEMA = "sft_failure_triage_verdict.v5"
+SCORER_RECEIPT_SCHEMA = "sft_lane_scorer_receipt.v1"
 VERDICTS = frozenset({"model_gap", "code_defect", "quarantine"})
 PARITY = frozenset({"Match", "Partial", "Unknown"})
-# git_ancestor deliberately excluded — lineage ≠ implementation equivalence
-PARITY_METHODS = frozenset({"git_commit_equal", "blob_byte_equivalence"})
 TAEY_ACTORS = frozenset({"taey", "taey-seat", "ep3", "taey-presence"})
-PRODUCTION_SEATS = frozenset({"taey", "taey-seat", "ep3", "taey-presence", "capture-seat"})
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA64 = re.compile(r"^[0-9a-f]{64}$")
 UUID_RE = re.compile(
@@ -52,30 +48,26 @@ UUID_RE = re.compile(
 )
 LINES_RE = re.compile(r"^[0-9]+(-[0-9]+)?$")
 
-# Contract-symbol oracles: verifier re-derives contradiction from event content.
-# Caller-authored contract_contradiction.contradicts is never authority.
-BUILTIN_ORACLES: dict[str, dict[str, Any]] = {
-    "FailureTriageGate.training_gap": {
-        "method": "substring_any",
-        "needles": (
-            "admitted failure trajectory as training target",
-            "train on failure",
-            "training on the failure",
-            "failure trajectory as a target",
-            "failure as training target",
-        ),
-    },
-    "training_gap": {
-        "method": "substring_any",
-        "needles": (
-            "admitted failure trajectory as training target",
-            "train on failure",
-            "training on the failure",
-            "failure trajectory as a target",
-            "failure as training target",
-        ),
+# Pinned scorer public keys (ed25519 raw 32-byte hex).
+# fixture-failure-triage-scorer-v1 is probe/self-check only — not a production
+# training-admission authority. Production keys are added here when lane scorers ship.
+# Until then, model_gap is unavailable without a matching signed receipt.
+SCORER_ALLOWLIST: dict[str, dict[str, str]] = {
+    "fixture-failure-triage-scorer-v1": {
+        # Corresponding fixture private key is used ONLY inside this file's
+        # probe/self-check helpers to prove the wire; it is not a production seat key.
+        "pubkey_ed25519_hex": "7479b94cba739e6b733afdc3da0aab98d8fc3fbe50eb891414785ee587d46841",
+        "role": "fixture_probe_only",
+        "lane": "orchestration",
+        "contract_symbol": "FailureTriageGate.training_gap",
     },
 }
+
+# Fixture private key (probe/self-check only). Production scorers must NEVER
+# embed private keys in this file.
+_FIXTURE_SCORER_PRIVKEY_HEX = (
+    "b22dfe191c5fcaa93d75537fc70928183865392a3574a87e584ee047a9caac75"
+)
 
 
 class Reject(Exception):
@@ -111,10 +103,6 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
 def verify_git_object(repo_root: Path, sha: str, path: str) -> None:
     try:
         subprocess.run(
@@ -128,410 +116,158 @@ def verify_git_object(repo_root: Path, sha: str, path: str) -> None:
         raise Reject(f"contract object missing at {sha}:{path}: {detail}") from exc
 
 
-def _git_blob_bytes(repo_root: Path, ref: str, path: str) -> bytes:
+def _ed25519_verify(pubkey_hex: str, message: bytes, signature_hex: str) -> bool:
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "show", f"{ref}:{path}"],
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or b"").decode("utf-8", errors="replace").strip()
-        raise Reject(f"cannot read git blob {ref}:{path}: {detail}") from exc
-    return proc.stdout
-
-
-def _git_is_commit(repo_root: Path, ref: str) -> bool:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        from cryptography.exceptions import InvalidSignature
+    except ImportError as exc:
+        raise Reject("cryptography package required for scorer signature verify") from exc
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "cat-file", "-t", ref],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()
-        raise Reject(f"git object missing for ref {ref}: {detail}") from exc
-    return proc.stdout.strip() == "commit"
+        pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
+        pub.verify(bytes.fromhex(signature_hex), message)
+        return True
+    except (InvalidSignature, ValueError):
+        return False
 
 
-def _side_ref(side: dict[str, Any], name: str) -> str:
-    ref = _as_str(side.get("ref"), f"{name}.ref").lower()
-    _require(bool(SHA40.match(ref)), f"{name}.ref must be full 40-hex commit")
-    return ref
+def _ed25519_sign(privkey_hex: str, message: bytes) -> str:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    sk = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(privkey_hex))
+    return sk.sign(message).hex()
 
 
-def _receipt_hash_ok(obj: dict[str, Any], field: str = "receipt_sha256") -> str:
-    unsigned = {k: v for k, v in obj.items() if k != field}
-    expected = _sha256_text(_canonical(unsigned))
-    claimed = _as_str(obj.get(field), field).lower()
-    _require(bool(SHA64.match(claimed)), f"{field} must be 64-hex")
-    _require(claimed == expected, f"{field} mismatch expected {expected}")
-    return claimed
-
-
-def _validate_live_deployment_receipt(
-    deployed: dict[str, Any],
-    *,
-    reviewer_session: str,
-) -> list[str]:
-    notes: list[str] = []
-    dsha = _as_str(deployed.get("sha"), "deployed.sha").lower()
-    _require(bool(SHA40.match(dsha)), "deployed.sha must be full 40-hex")
-    lr = _as_dict(deployed.get("live_receipt"), "deployed.live_receipt")
-    _require(
-        lr.get("schema") == LIVE_RECEIPT_SCHEMA,
-        f"Match requires live_receipt.schema={LIVE_RECEIPT_SCHEMA}",
+def _scorer_signed_payload(receipt: dict[str, Any]) -> dict[str, Any]:
+    """Fields covered by the scorer signature (excludes signature itself)."""
+    keys = (
+        "schema",
+        "scorer_id",
+        "scorer_commit",
+        "seat_commit",
+        "engine",
+        "root",
+        "lane",
+        "exercise_hash",
+        "trace_hash",
+        "contract_repo",
+        "contract_sha",
+        "contract_path",
+        "contract_symbol",
+        "implementation_matches_contract",
+        "taey_violated_contract",
+        "outcome",
+        "observed_at",
     )
-    producer = _as_str(lr.get("producer"), "live_receipt.producer").strip()
-    _require(
-        producer != reviewer_session,
-        "live_receipt.producer must be distinct from reviewer.session",
-    )
-    lr_sha = _as_str(lr.get("deployed_sha"), "live_receipt.deployed_sha").lower()
-    _require(bool(SHA40.match(lr_sha)), "live_receipt.deployed_sha must be 40-hex")
-    _require(lr_sha == dsha, "live_receipt.deployed_sha must equal deployed.sha")
-    _as_str(lr.get("observed_at"), "live_receipt.observed_at")
-    _as_str(lr.get("evidence"), "live_receipt.evidence")
-    body = lr.get("body")
-    content_hash = _as_str(lr.get("content_sha256"), "live_receipt.content_sha256").lower()
-    _require(bool(SHA64.match(content_hash)), "live_receipt.content_sha256 must be 64-hex")
-    if isinstance(body, str):
-        digest = _sha256_text(body)
-        _require(digest == content_hash, "live_receipt.body does not match content_sha256")
-        _require(dsha in body.lower(), "live_receipt.body must cite deployed.sha")
-    else:
-        raise Reject("live_receipt.body required for content_sha256 validation")
-    _receipt_hash_ok(lr)
-    notes.append("live_deployment_receipt ok")
-    return notes
+    out: dict[str, Any] = {}
+    for k in keys:
+        if k in receipt:
+            out[k] = receipt[k]
+    return out
 
 
-def _validate_machine_parity_receipt(
-    deployed: dict[str, Any],
-    contract: dict[str, Any],
-    *,
-    parity: str,
-    reviewer_session: str,
-    repo_root: Path | None,
-) -> list[str]:
-    """Re-derive parity; reject prose-only and ancestry-only Match."""
-    notes: list[str] = []
-    if parity != "Match":
-        if "parity_receipt" in deployed and deployed["parity_receipt"] is not None:
-            pr = _as_dict(deployed["parity_receipt"], "deployed.parity_receipt")
-            if pr.get("schema") in {PARITY_RECEIPT_SCHEMA, "sft_parity_receipt.v1"}:
-                method = pr.get("method")
-                if method == "git_ancestor":
-                    raise Reject(
-                        "parity method git_ancestor is not a Match proof "
-                        "(lineage ≠ implementation equivalence)"
-                    )
-        return notes
-
-    dsha = deployed.get("sha")
-    _require(
-        isinstance(dsha, str) and bool(SHA40.match(dsha.lower())),
-        "Match requires deployed.sha as full 40-hex commit",
-    )
-    dsha = dsha.lower()
-    cpath = _as_str(contract.get("path"), "contract.path")
-
-    notes.extend(
-        _validate_live_deployment_receipt(deployed, reviewer_session=reviewer_session)
-    )
-
-    pr = _as_dict(deployed.get("parity_receipt"), "deployed.parity_receipt")
-    _require(
-        pr.get("schema") == PARITY_RECEIPT_SCHEMA,
-        f"Match requires parity_receipt.schema={PARITY_RECEIPT_SCHEMA} "
-        "(prose/body-only or v1 ancestor methods are not a parity proof)",
-    )
-    method = _as_str(pr.get("method"), "deployed.parity_receipt.method").strip()
-    _require(
-        method != "git_ancestor",
-        "parity method git_ancestor is not a Match proof "
-        "(lineage ≠ implementation equivalence)",
-    )
-    _require(method in PARITY_METHODS, f"parity_receipt.method must be one of {sorted(PARITY_METHODS)}")
-    result = _as_str(pr.get("result"), "deployed.parity_receipt.result").strip()
-    _require(result == "Match", "Match requires parity_receipt.result=Match")
-
-    producer = _as_str(pr.get("producer"), "deployed.parity_receipt.producer").strip()
-    _require(
-        producer != reviewer_session,
-        "parity_receipt.producer must be distinct from reviewer.session (no self-review)",
-    )
-    if "reviewer" in pr and pr["reviewer"] is not None:
-        pr_reviewer = _as_str(pr.get("reviewer"), "deployed.parity_receipt.reviewer").strip()
-        _require(
-            pr_reviewer == reviewer_session,
-            "parity_receipt.reviewer must equal reviewer.session when present",
-        )
-
-    source = _as_dict(pr.get("source"), "deployed.parity_receipt.source")
-    dep_side = _as_dict(pr.get("deployed"), "deployed.parity_receipt.deployed")
-    source_ref = _side_ref(source, "parity_receipt.source")
-    deployed_ref = _side_ref(dep_side, "parity_receipt.deployed")
-    _require(
-        deployed_ref == dsha,
-        "parity_receipt.deployed.ref must equal deployed.sha",
-    )
-    _receipt_hash_ok(pr)
-    notes.append("parity_receipt hash ok")
-
-    if "body" in pr and pr["body"] is not None and not isinstance(pr.get("body"), (dict, list)):
-        notes.append("parity_receipt prose body ignored (not authority)")
-
-    _require(repo_root is not None, f"Match method={method} requires --repo-root for re-derive")
-    assert repo_root is not None
-
-    if method == "git_commit_equal":
-        _require(source_ref == deployed_ref, "git_commit_equal requires source.ref == deployed.ref")
-        _require(_git_is_commit(repo_root, source_ref), "source.ref must be a commit")
-        _require(_git_is_commit(repo_root, deployed_ref), "deployed.ref must be a commit")
-        # Commit identity alone is insufficient without binding to the cited contract path.
-        # Require the contract path exists at that commit (same bytes trivially).
-        verify_git_object(repo_root, deployed_ref, cpath)
-        notes.append(f"re-derived git_commit_equal {source_ref[:12]} path={cpath}")
-    elif method == "blob_byte_equivalence":
-        spath = _as_str(source.get("path"), "parity_receipt.source.path")
-        dpath = _as_str(dep_side.get("path"), "parity_receipt.deployed.path")
-        _require(
-            spath == cpath and dpath == cpath,
-            "blob_byte_equivalence paths must equal contract.path "
-            f"(got source={spath!r} deployed={dpath!r} contract={cpath!r}); "
-            "irrelevant-path Match rejects",
-        )
-        sbytes = _git_blob_bytes(repo_root, source_ref, spath)
-        dbytes = _git_blob_bytes(repo_root, deployed_ref, dpath)
-        sh = _sha256_bytes(sbytes)
-        dh = _sha256_bytes(dbytes)
-        if source.get("content_sha256") is not None:
-            sch = _as_str(source.get("content_sha256"), "parity_receipt.source.content_sha256").lower()
-            _require(bool(SHA64.match(sch)), "source.content_sha256 must be 64-hex")
-            _require(sch == sh, "source.content_sha256 does not match re-derived blob hash")
-        if dep_side.get("content_sha256") is not None:
-            dch = _as_str(dep_side.get("content_sha256"), "parity_receipt.deployed.content_sha256").lower()
-            _require(bool(SHA64.match(dch)), "deployed.content_sha256 must be 64-hex")
-            _require(dch == dh, "deployed.content_sha256 does not match re-derived blob hash")
-        _require(sh == dh, "blob_byte_equivalence re-derive failed: source/deployed content hashes differ")
-        notes.append(f"re-derived blob_byte_equivalence path={cpath} sha256={sh[:16]}…")
-    else:
-        raise Reject(f"unsupported parity method {method}")
-
-    return notes
-
-
-def _event_payload_for_chain(ev: dict[str, Any]) -> dict[str, Any]:
-    """Payload used for production-seat chain — excludes submitter contradiction claims."""
-    return {k: v for k, v in ev.items() if k != "contract_contradiction"}
-
-
-def _chain_root_from_events(events: list[dict[str, Any]]) -> str:
-    hashes = [_sha256_text(_canonical(_event_payload_for_chain(ev))) for ev in events]
-    return _sha256_text(_canonical({"algorithm": "sha256_canonical_event_payloads", "event_payload_hashes": hashes}))
-
-
-def _load_trace_artifact(
-    trace: dict[str, Any],
-    *,
-    repo_root: Path | None,
-) -> dict[str, Any]:
-    th = _as_str(trace.get("trace_hash"), "trace.trace_hash").lower()
-    _require(bool(SHA64.match(th)), "trace.trace_hash must be 64-hex sha256")
-
-    body = trace.get("artifact_body")
-    path = trace.get("artifact_path")
-    if isinstance(body, dict):
-        artifact = body
-        # For v2 traces, trace_hash must be the production-seat chain root, not the full
-        # artifact dump (which could include submitter contradiction fields).
-        if artifact.get("schema") == TRACE_ARTIFACT_SCHEMA:
-            events = artifact.get("events")
-            _require(isinstance(events, list) and events, "trace artifact events required")
-            for i, ev in enumerate(events):
-                _require(isinstance(ev, dict), f"events[{i}] must be object")
-            root = _chain_root_from_events(events)
-            _require(root == th, f"trace.trace_hash must equal re-derived event chain root (got {root})")
-        else:
-            raw = _canonical(artifact).encode("utf-8")
-            digest = _sha256_bytes(raw)
-            _require(digest == th, f"trace.artifact_body hash mismatch expected {th} got {digest}")
-        return artifact
-    if isinstance(path, str) and path.strip():
-        _require(not path.startswith("/tmp"), "trace.artifact_path must not be /tmp")
-        _require("/home/" not in path, "trace.artifact_path must not be operator home path")
-        candidate = Path(path)
-        if not candidate.is_absolute():
-            _require(repo_root is not None, "relative artifact_path requires --repo-root")
-            assert repo_root is not None
-            candidate = repo_root / path
-        _require(candidate.is_file(), f"trace.artifact_path not found: {path}")
-        raw = candidate.read_bytes()
-        try:
-            artifact = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise Reject(f"trace.artifact_path is not valid JSON: {exc}") from exc
-        _require(isinstance(artifact, dict), "trace artifact root must be object")
-        if artifact.get("schema") == TRACE_ARTIFACT_SCHEMA:
-            events = artifact.get("events")
-            _require(isinstance(events, list) and events, "trace artifact events required")
-            root = _chain_root_from_events(events)
-            _require(root == th, f"trace.trace_hash must equal re-derived event chain root (got {root})")
-        else:
-            digest = _sha256_bytes(raw)
-            _require(digest == th, f"trace.artifact_path hash mismatch expected {th} got {digest}")
-        return artifact
-    raise Reject(
-        "taey_violated_contract/model_gap requires loadable trace artifact "
-        "(trace.artifact_body or trace.artifact_path) with re-derived chain root"
-    )
-
-
-def _validate_independent_trace_receipt(
-    trace: dict[str, Any],
-    *,
-    reviewer_session: str,
-    expected_trace_hash: str,
-) -> list[str]:
-    notes: list[str] = []
-    tr = _as_dict(trace.get("trace_receipt"), "trace.trace_receipt")
-    _require(
-        tr.get("schema") == TRACE_RECEIPT_SCHEMA,
-        f"model_gap requires independent trace_receipt.schema={TRACE_RECEIPT_SCHEMA} "
-        "(inline submitter-only artifact is not authority)",
-    )
-    producer = _as_str(tr.get("producer"), "trace_receipt.producer").strip()
-    _require(
-        producer != reviewer_session,
-        "trace_receipt.producer must be distinct from reviewer.session "
-        "(reject submitter-authored contradiction authority)",
-    )
-    method = _as_str(tr.get("method"), "trace_receipt.method").strip()
-    _require(
-        method in {"production_seat_capture", "independent_review"},
-        "trace_receipt.method must be production_seat_capture|independent_review",
-    )
-    seat = _as_str(tr.get("seat"), "trace_receipt.seat").strip().lower()
-    _require(seat in PRODUCTION_SEATS, f"trace_receipt.seat must be production seat in {sorted(PRODUCTION_SEATS)}")
-    th = _as_str(tr.get("trace_hash"), "trace_receipt.trace_hash").lower()
-    _require(bool(SHA64.match(th)), "trace_receipt.trace_hash must be 64-hex")
-    _require(th == expected_trace_hash, "trace_receipt.trace_hash must equal trace.trace_hash")
-    _receipt_hash_ok(tr)
-    notes.append(f"independent trace_receipt ok producer={producer} seat={seat}")
-    return notes
-
-
-def _oracle_contradiction(
-    events: list[dict[str, Any]],
-    indices: list[int],
-    contract: dict[str, Any],
-) -> list[str]:
-    """Re-derive contradiction via contract-symbol oracle. Ignores caller contradicts=true."""
-    notes: list[str] = []
-    symbol = contract.get("symbol")
-    _require(
-        isinstance(symbol, str) and symbol.strip(),
-        "model_gap requires contract.symbol for executable oracle binding",
-    )
-    symbol = symbol.strip()
-    oracle = BUILTIN_ORACLES.get(symbol)
-    _require(
-        oracle is not None,
-        f"no executable oracle for contract.symbol={symbol!r}; quarantine (cannot model_gap)",
-    )
-    method = oracle["method"]
-    if method == "substring_any":
-        needles: tuple[str, ...] = oracle["needles"]
-        for idx in indices:
-            content = str(events[idx - 1].get("content") or "")
-            # Reject using submitter contradiction object as sole authority
-            cc = events[idx - 1].get("contract_contradiction")
-            if isinstance(cc, dict) and cc.get("contradicts") is True:
-                # still require oracle match on content; the flag alone is insufficient
-                notes.append(f"event {idx} has submitter contradicts flag (ignored as authority)")
-            hit = any(n.lower() in content.lower() for n in needles)
-            _require(
-                hit,
-                f"oracle {symbol} failed on event {idx}: content does not match "
-                f"contract-forbidden patterns (caller contradicts=true is not authority)",
-            )
-        notes.append(f"oracle {symbol} matched n={len(indices)} events")
-        return notes
-    raise Reject(f"unsupported oracle method {method}")
-
-
-def _validate_model_gap_bindings(
+def _validate_authenticated_scorer_receipt(
     doc: dict[str, Any],
-    trace: dict[str, Any],
-    contract: dict[str, Any],
     *,
     reviewer_session: str,
-    repo_root: Path | None,
 ) -> list[str]:
+    """model_gap authority: signed lane scorer receipt only."""
     notes: list[str] = []
-    actor = _as_str(trace.get("actor"), "trace.actor").strip().lower()
-    _require(actor in TAEY_ACTORS, f"model_gap requires Taey actor in {sorted(TAEY_ACTORS)}; got {actor!r}")
-
-    lines = contract.get("lines")
-    symbol = contract.get("symbol")
-    has_lines = isinstance(lines, str) and bool(LINES_RE.match(lines.strip()))
-    has_symbol = isinstance(symbol, str) and bool(symbol.strip())
-    _require(has_lines or has_symbol, "model_gap requires contract.lines and/or contract.symbol")
-    _require(has_symbol, "model_gap requires contract.symbol for oracle")
-    if has_lines:
-        notes.append(f"contract.lines={lines}")
-    notes.append(f"contract.symbol={symbol}")
-
-    th = _as_str(trace.get("trace_hash"), "trace.trace_hash").lower()
-    notes.extend(
-        _validate_independent_trace_receipt(
-            trace, reviewer_session=reviewer_session, expected_trace_hash=th
-        )
-    )
-
-    artifact = _load_trace_artifact(trace, repo_root=repo_root)
+    sr = _as_dict(doc.get("scorer_receipt"), "scorer_receipt")
     _require(
-        artifact.get("schema") == TRACE_ARTIFACT_SCHEMA,
-        f"trace artifact schema must be {TRACE_ARTIFACT_SCHEMA}",
+        sr.get("schema") == SCORER_RECEIPT_SCHEMA,
+        f"model_gap requires scorer_receipt.schema={SCORER_RECEIPT_SCHEMA} "
+        "(caller-authored producer labels / self-hashed receipts are not authority)",
     )
-    art_tid = _as_str(artifact.get("trace_id"), "trace_artifact.trace_id")
-    _require(art_tid == _as_str(trace.get("trace_id"), "trace.trace_id"), "trace_id mismatch vs artifact")
-    art_actor = _as_str(artifact.get("actor"), "trace_artifact.actor").strip().lower()
-    _require(art_actor == actor, "trace.actor must match artifact.actor")
-    _require(art_actor in TAEY_ACTORS, "trace artifact actor must be Taey")
-    seat = _as_str(artifact.get("seat"), "trace_artifact.seat").strip().lower()
-    _require(seat in PRODUCTION_SEATS, f"trace artifact seat must be production seat; got {seat!r}")
+    scorer_id = _as_str(sr.get("scorer_id"), "scorer_receipt.scorer_id").strip()
+    allow = SCORER_ALLOWLIST.get(scorer_id)
+    _require(
+        allow is not None,
+        f"scorer_id {scorer_id!r} not in pinned SCORER_ALLOWLIST; "
+        "quarantine — no authenticated lane scorer (model_gap unavailable)",
+    )
+    pubkey = allow["pubkey_ed25519_hex"]
 
-    events = artifact.get("events")
-    _require(isinstance(events, list) and len(events) >= 1, "trace artifact events must be a non-empty list")
-    for i, ev in enumerate(events):
-        _require(isinstance(ev, dict), f"trace artifact events[{i}] must be object")
+    # Bindings
+    scorer_commit = _as_str(sr.get("scorer_commit"), "scorer_receipt.scorer_commit").lower()
+    _require(bool(SHA40.match(scorer_commit)), "scorer_commit must be 40-hex")
+    seat_commit = _as_str(sr.get("seat_commit"), "scorer_receipt.seat_commit").lower()
+    _require(bool(SHA40.match(seat_commit)), "seat_commit must be 40-hex")
+    _as_str(sr.get("engine"), "scorer_receipt.engine")
+    _as_str(sr.get("root"), "scorer_receipt.root")
+    _as_str(sr.get("lane"), "scorer_receipt.lane")
+    _as_str(sr.get("observed_at"), "scorer_receipt.observed_at")
 
-    # chain root already verified in _load_trace_artifact for v2
-    claimed_count = trace.get("event_count")
-    _require(isinstance(claimed_count, int) and not isinstance(claimed_count, bool), "trace.event_count must be int")
-    _require(claimed_count == len(events), f"trace.event_count {claimed_count} != artifact event len {len(events)}")
-    notes.append(f"event_count ok n={claimed_count}")
-    notes.append("production-seat event chain root ok")
+    exercise_hash = _as_str(sr.get("exercise_hash"), "scorer_receipt.exercise_hash").lower()
+    _require(bool(SHA64.match(exercise_hash)), "exercise_hash must be 64-hex")
+    th = _as_str(sr.get("trace_hash"), "scorer_receipt.trace_hash").lower()
+    _require(bool(SHA64.match(th)), "scorer_receipt.trace_hash must be 64-hex")
 
-    indices = trace.get("contradiction_event_indices")
-    _require(isinstance(indices, list), "model_gap requires trace.contradiction_event_indices list")
-    _require(len(indices) >= 1, "model_gap requires nonempty contradiction_event_indices")
-    seen: set[int] = set()
-    for i, idx in enumerate(indices):
-        _require(isinstance(idx, int) and not isinstance(idx, bool), f"contradiction_event_indices[{i}] must be int")
-        _require(idx >= 1, f"contradiction_event_indices[{i}] must be >= 1 (1-based)")
-        _require(idx <= len(events), f"contradiction_event_indices[{i}]={idx} out of bounds (event_count={len(events)})")
-        _require(idx not in seen, "contradiction_event_indices must not contain duplicates")
-        seen.add(idx)
-        ev = events[idx - 1]
-        ev_actor = str(ev.get("actor", actor)).strip().lower()
-        _require(ev_actor in TAEY_ACTORS, f"cited event {idx} actor {ev_actor!r} is not Taey")
+    trace = _as_dict(doc.get("trace"), "trace")
+    verdict_th = _as_str(trace.get("trace_hash"), "trace.trace_hash").lower()
+    _require(th == verdict_th, "scorer_receipt.trace_hash must equal trace.trace_hash")
 
-    notes.extend(_oracle_contradiction(events, indices, contract))
-    notes.append(f"contradiction indices oracle-bound n={len(indices)}")
+    contract = _as_dict(doc.get("contract"), "contract")
+    _require(
+        sr.get("contract_repo") == contract.get("repo"),
+        "scorer_receipt.contract_repo must equal contract.repo",
+    )
+    _require(
+        str(sr.get("contract_sha") or "").lower() == str(contract.get("sha") or "").lower(),
+        "scorer_receipt.contract_sha must equal contract.sha",
+    )
+    _require(
+        sr.get("contract_path") == contract.get("path"),
+        "scorer_receipt.contract_path must equal contract.path",
+    )
+    csymbol = _as_str(contract.get("symbol"), "contract.symbol")
+    _require(
+        sr.get("contract_symbol") == csymbol,
+        "scorer_receipt.contract_symbol must equal contract.symbol",
+    )
+    if allow.get("contract_symbol"):
+        _require(
+            csymbol == allow["contract_symbol"] or allow.get("role") == "fixture_probe_only",
+            f"scorer not authorized for symbol {csymbol!r}",
+        )
+
+    # Scorer is sole authority for model_gap predicates
+    impl = sr.get("implementation_matches_contract")
+    tv = sr.get("taey_violated_contract")
+    outcome = _as_str(sr.get("outcome"), "scorer_receipt.outcome")
+    _require(impl is True, "scorer_receipt.implementation_matches_contract must be true for model_gap")
+    _require(tv is True, "scorer_receipt.taey_violated_contract must be true for model_gap")
+    _require(outcome == "model_gap", "scorer_receipt.outcome must be model_gap")
+
+    # Signature
+    sig = _as_str(sr.get("signature"), "scorer_receipt.signature").lower()
+    _require(re.fullmatch(r"[0-9a-f]{128}", sig) is not None, "signature must be 64-byte ed25519 hex")
+    payload = _scorer_signed_payload(sr)
+    message = _canonical(payload).encode("utf-8")
+    payload_hash = _sha256_text(_canonical(payload))
+    claimed_hash = sr.get("signed_payload_sha256")
+    if claimed_hash is not None:
+        ch = _as_str(claimed_hash, "scorer_receipt.signed_payload_sha256").lower()
+        _require(ch == payload_hash, "signed_payload_sha256 mismatch")
+    _require(
+        _ed25519_verify(pubkey, message, sig),
+        "scorer_receipt signature verification FAILED "
+        "(caller-supplied producer strings are not authentication)",
+    )
+
+    # Scorer identity must not equal verdict reviewer session label games
+    # (scorer_id is the auth identity; still forbid trivial self-label if present)
+    if "producer_label" in sr and sr["producer_label"] is not None:
+        pl = _as_str(sr.get("producer_label"), "scorer_receipt.producer_label").strip()
+        _require(
+            pl != reviewer_session,
+            "scorer_receipt.producer_label must not equal reviewer.session",
+        )
+
+    notes.append(f"authenticated scorer_receipt ok scorer_id={scorer_id}")
+    notes.append(f"scorer_commit={scorer_commit[:12]} seat_commit={seat_commit[:12]}")
+    notes.append("signature verified against pinned pubkey")
+    if allow.get("role") == "fixture_probe_only":
+        notes.append("WARNING: fixture scorer — not production training admission")
     return notes
 
 
@@ -597,16 +333,6 @@ def verify_verdict(doc: dict[str, Any], *, repo_root: Path | None) -> list[str]:
     _as_str(reviewer.get("recorded_at"), "reviewer.recorded_at")
     _as_str(reviewer.get("method"), "reviewer.method")
 
-    notes.extend(
-        _validate_machine_parity_receipt(
-            deployed,
-            contract,
-            parity=parity,
-            reviewer_session=reviewer_session,
-            repo_root=repo_root,
-        )
-    )
-
     preds = _as_dict(doc.get("predicates"), "predicates")
     for key in (
         "contract_resolved",
@@ -624,32 +350,66 @@ def verify_verdict(doc: dict[str, Any], *, repo_root: Path | None) -> list[str]:
     im = _boolish(preds["implementation_matches_contract"]["value"])
     tv = _boolish(preds["taey_violated_contract"]["value"])
 
-    if im is True:
-        _require(parity == "Match", "implementation_matches_contract=true requires deployed.parity=Match")
+    # v5: model_gap / taey_violated=true requires authenticated scorer — not
+    # self-hashed multi-label receipts or substring oracles.
+    if tv is True or verdict == "model_gap":
+        _require(actor in TAEY_ACTORS, "model_gap requires Taey actor")
+        symbol = contract.get("symbol")
         _require(
-            isinstance(deployed.get("sha"), str) and bool(SHA40.match(str(deployed["sha"]).lower())),
-            "implementation_matches_contract=true requires deployed.sha",
+            isinstance(symbol, str) and symbol.strip(),
+            "model_gap requires contract.symbol for scorer binding",
         )
-    if parity == "Match" and im is not True:
-        if im is False:
-            raise Reject("deployed.parity=Match contradicts implementation_matches_contract=false")
-        if im is None:
-            raise Reject("deployed.parity=Match requires implementation_matches_contract=true (not Unknown)")
-
-    if tv is True:
         try:
             notes.extend(
-                _validate_model_gap_bindings(
-                    doc,
-                    trace,
-                    contract,
-                    reviewer_session=reviewer_session,
-                    repo_root=repo_root,
-                )
+                _validate_authenticated_scorer_receipt(doc, reviewer_session=reviewer_session)
             )
         except Reject as exc:
-            raise Reject(f"taey_violated_contract=true without mechanical bindings: {exc}") from exc
-        _require(actor in TAEY_ACTORS, "taey_violated_contract=true requires Taey actor")
+            raise Reject(
+                f"model_gap/taey_violated without authenticated lane scorer: {exc}"
+            ) from exc
+        # Scorer is authority: predicates must match signed scorer fields
+        sr = doc["scorer_receipt"]
+        _require(im is True, "model_gap requires implementation_matches_contract true")
+        _require(tv is True, "model_gap requires taey_violated_contract true")
+        _require(
+            sr.get("implementation_matches_contract") is True,
+            "predicates must match scorer implementation_matches_contract",
+        )
+        _require(
+            sr.get("taey_violated_contract") is True,
+            "predicates must match scorer taey_violated_contract",
+        )
+        # Parity Match self-attestation alone is insufficient; scorer covers conformance.
+        # Still require deployed.parity recorded as Match for ledger consistency.
+        _require(parity == "Match", "model_gap requires deployed.parity == Match (ledger)")
+        _require(
+            isinstance(deployed.get("sha"), str) and bool(SHA40.match(str(deployed["sha"]).lower())),
+            "model_gap requires deployed.sha",
+        )
+        # Explicitly reject relying on submitter multi-label receipts as independence
+        if "parity_receipt" in deployed and deployed["parity_receipt"] is not None:
+            notes.append("parity_receipt present but not model_gap authority (scorer is)")
+        notes.append("model_gap authenticated scorer path ok")
+
+    # Reject obsolete v3/v4 self-attested Match authority when used alone for im=true
+    # without scorer (non-model_gap im=true is also forbidden without scorer — force
+    # quarantine honesty).
+    if im is True and tv is not True and verdict != "model_gap":
+        raise Reject(
+            "implementation_matches_contract=true without authenticated scorer is not "
+            "mechanical (contract-document blob equivalence is rule provenance only); "
+            "use quarantine or code_defect"
+        )
+
+    if im is True:
+        _require(parity == "Match", "implementation_matches_contract=true requires deployed.parity=Match")
+
+    if parity == "Match" and im is not True and verdict != "quarantine":
+        # Match with unknown impl → quarantine only
+        if im is False:
+            raise Reject("deployed.parity=Match contradicts implementation_matches_contract=false")
+        if im is None and verdict not in {"quarantine"}:
+            raise Reject("deployed.parity=Match with unknown impl requires quarantine verdict")
 
     observed_impl_violation = bool(doc.get("observed_implementation_violation", False))
     if im is False and preds["implementation_matches_contract"].get("register") == "Observed":
@@ -663,9 +423,7 @@ def verify_verdict(doc: dict[str, Any], *, repo_root: Path | None) -> list[str]:
     )
 
     if verdict == "model_gap":
-        _require(parity == "Match", "model_gap requires deployed.parity == Match")
-        _require(im is True, "model_gap requires implementation_matches_contract true")
-        _require(tv is True, "model_gap requires taey_violated_contract true")
+        _require(im is True and tv is True, "model_gap predicate mismatch")
         notes.append("model_gap mechanical bindings ok")
 
     if verdict == "code_defect":
@@ -691,81 +449,50 @@ def verify_verdict(doc: dict[str, Any], *, repo_root: Path | None) -> list[str]:
 # --- fixtures / probes -------------------------------------------------------
 
 
-def _make_parity_receipt(
+def _make_scorer_receipt(
     *,
-    producer: str,
-    method: str,
-    result: str,
-    source: dict[str, Any],
-    deployed_side: dict[str, Any],
-    reviewer: str | None = None,
-) -> dict[str, Any]:
-    pr: dict[str, Any] = {
-        "schema": PARITY_RECEIPT_SCHEMA,
-        "producer": producer,
-        "method": method,
-        "result": result,
-        "source": source,
-        "deployed": deployed_side,
-    }
-    if reviewer is not None:
-        pr["reviewer"] = reviewer
-    pr["receipt_sha256"] = _sha256_text(_canonical({k: v for k, v in pr.items() if k != "receipt_sha256"}))
-    return pr
-
-
-def _make_live_receipt(*, producer: str, deployed_sha: str, evidence: str = "live deploy observed") -> dict[str, Any]:
-    body = f"deployed_sha={deployed_sha}\nobserved=live\nevidence={evidence}\n"
-    lr: dict[str, Any] = {
-        "schema": LIVE_RECEIPT_SCHEMA,
-        "producer": producer,
-        "deployed_sha": deployed_sha,
-        "observed_at": "2026-08-05T00:00:00+00:00",
-        "evidence": evidence,
-        "body": body,
-        "content_sha256": _sha256_text(body),
-    }
-    lr["receipt_sha256"] = _sha256_text(_canonical({k: v for k, v in lr.items() if k != "receipt_sha256"}))
-    return lr
-
-
-def _make_trace_artifact(
-    *,
-    trace_id: str,
-    actor: str,
-    seat: str,
-    events: list[dict[str, Any]],
-) -> dict[str, Any]:
-    return {
-        "schema": TRACE_ARTIFACT_SCHEMA,
-        "trace_id": trace_id,
-        "actor": actor,
-        "seat": seat,
-        "events": events,
-    }
-
-
-def _trace_hash_for(artifact: dict[str, Any]) -> str:
-    events = artifact["events"]
-    return _chain_root_from_events(events)
-
-
-def _make_trace_receipt(
-    *,
-    producer: str,
     trace_hash: str,
-    seat: str = "taey-presence",
-    method: str = "production_seat_capture",
+    scorer_id: str = "fixture-failure-triage-scorer-v1",
+    privkey_hex: str | None = _FIXTURE_SCORER_PRIVKEY_HEX,
+    bad_signature: bool = False,
+    taey_violated: bool = True,
+    impl_match: bool = True,
+    outcome: str = "model_gap",
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    tr: dict[str, Any] = {
-        "schema": TRACE_RECEIPT_SCHEMA,
-        "producer": producer,
-        "method": method,
-        "seat": seat,
+    sr: dict[str, Any] = {
+        "schema": SCORER_RECEIPT_SCHEMA,
+        "scorer_id": scorer_id,
+        "scorer_commit": PROTOCOL_SHA,
+        "seat_commit": PROTOCOL_SHA,
+        "engine": "ep3",
+        "root": "root",
+        "lane": "orchestration",
+        "exercise_hash": "e" * 64,
         "trace_hash": trace_hash,
+        "contract_repo": PROTOCOL_REPO,
+        "contract_sha": PROTOCOL_SHA,
+        "contract_path": PROTOCOL_PATH,
+        "contract_symbol": "FailureTriageGate.training_gap",
+        "implementation_matches_contract": impl_match,
+        "taey_violated_contract": taey_violated,
+        "outcome": outcome,
+        "observed_at": "2026-08-05T00:00:00+00:00",
     }
-    tr["receipt_sha256"] = _sha256_text(_canonical({k: v for k, v in tr.items() if k != "receipt_sha256"}))
-    return tr
+    if extra:
+        sr.update(extra)
+    payload = _scorer_signed_payload(sr)
+    message = _canonical(payload).encode("utf-8")
+    sr["signed_payload_sha256"] = _sha256_text(_canonical(payload))
+    if privkey_hex is None:
+        sr["signature"] = "0" * 128
+    else:
+        sr["signature"] = _ed25519_sign(privkey_hex, message)
+    if bad_signature:
+        # flip last nibble
+        sig = sr["signature"]
+        sr["signature"] = sig[:-1] + ("0" if sig[-1] != "0" else "1")
+    return sr
 
 
 def _base_verdict(**overrides: Any) -> dict[str, Any]:
@@ -831,211 +558,101 @@ def _base_verdict(**overrides: Any) -> dict[str, Any]:
     return doc
 
 
-def _valid_match_deployed(
-    *,
-    repo_root: Path | None,
-    producer: str = "parity-auditor",
-    live_producer: str = "deploy-auditor",
-    reviewer: str = "self-check-reviewer",
-    method: str = "blob_byte_equivalence",
-    path_override: str | None = None,
-) -> dict[str, Any]:
-    path = path_override if path_override is not None else PROTOCOL_PATH
-    if method == "git_commit_equal":
-        source = {"ref": PROTOCOL_SHA}
-        dep_side = {"ref": PROTOCOL_SHA}
-    elif method == "blob_byte_equivalence":
-        source = {"ref": PROTOCOL_SHA, "path": path}
-        dep_side = {"ref": PROTOCOL_SHA, "path": path}
-        if repo_root is not None and path == PROTOCOL_PATH:
-            b = _git_blob_bytes(repo_root, PROTOCOL_SHA, PROTOCOL_PATH)
-            h = _sha256_bytes(b)
-            source["content_sha256"] = h
-            dep_side["content_sha256"] = h
-    elif method == "git_ancestor":
-        # used only in reject probes
-        if repo_root is None:
-            raise Reject("git_ancestor fixture requires repo_root")
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", f"{PROTOCOL_SHA}^"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        parent = proc.stdout.strip()
-        source = {"ref": parent}
-        dep_side = {"ref": PROTOCOL_SHA}
-    else:
-        raise Reject(f"unknown fixture method {method}")
-
-    pr = _make_parity_receipt(
-        producer=producer,
-        method=method,
-        result="Match",
-        source=source,
-        deployed_side=dep_side,
-        reviewer=reviewer,
-    )
-    return {
-        "repo": PROTOCOL_REPO,
-        "sha": PROTOCOL_SHA,
-        "parity": "Match",
-        "evidence": f"machine parity method={method}",
-        "parity_receipt": pr,
-        "live_receipt": _make_live_receipt(producer=live_producer, deployed_sha=PROTOCOL_SHA),
-    }
-
-
-def _valid_model_gap_trace(
-    *,
-    trace_id: str = "valid-gap",
-    actor: str = "taey",
-    seat: str = "taey-presence",
-    content_violation: bool = True,
-    submitter_contradicts_flag: bool = False,
-    force_event_count: int | None = None,
-    omit_artifact: bool = False,
-    omit_receipt: bool = False,
-    corrupt_hash: bool = False,
-    receipt_producer: str = "capture-auditor",
-    non_violation_index: bool = False,
-) -> dict[str, Any]:
-    violate_content = (
-        "admitted failure trajectory as training target"
-        if content_violation
-        else "operated correctly under gate"
-    )
-    events = [
-        {
-            "kind": "request",
-            "actor": actor,
-            "content": "operate under failure triage gate",
-        },
-        {
-            "kind": "tool_call",
-            "actor": actor,
-            "content": violate_content,
-        },
-        {
-            "kind": "outcome",
-            "actor": actor,
-            "content": "pair admitted" if content_violation else "held",
-        },
-    ]
-    if submitter_contradicts_flag:
-        events[1]["contract_contradiction"] = {
-            "contradicts": True,
-            "contract_lines": "48-49",
-            "contract_symbol": "FailureTriageGate.training_gap",
-            "detail": "submitter flag only",
+def _v4_style_multi_label_forgery(trace_hash: str) -> dict[str, Any]:
+    """REGATE single-submitter multi-label shape — must REJECT under v5."""
+    # Self-hashed receipts with different producer strings (v4 hole)
+    def fake_receipt(producer: str) -> dict[str, Any]:
+        body = f"producer={producer}\ndeployed={PROTOCOL_SHA}\nparity=Match\n"
+        return {
+            "schema": "sft_parity_receipt.v2",
+            "producer": producer,
+            "method": "blob_byte_equivalence",
+            "result": "Match",
+            "source": {"ref": PROTOCOL_SHA, "path": PROTOCOL_PATH},
+            "deployed": {"ref": PROTOCOL_SHA, "path": PROTOCOL_PATH},
+            "receipt_sha256": _sha256_text(
+                _canonical(
+                    {
+                        "schema": "sft_parity_receipt.v2",
+                        "producer": producer,
+                        "method": "blob_byte_equivalence",
+                        "result": "Match",
+                        "source": {"ref": PROTOCOL_SHA, "path": PROTOCOL_PATH},
+                        "deployed": {"ref": PROTOCOL_SHA, "path": PROTOCOL_PATH},
+                    }
+                )
+            ),
+            "body": body,
         }
-    if non_violation_index:
-        indices = [1]  # request event — no forbidden content
-    else:
-        indices = [2]
 
-    artifact = _make_trace_artifact(trace_id=trace_id, actor=actor, seat=seat, events=events)
-    th = _trace_hash_for(artifact)
-    if corrupt_hash:
-        th = "f" * 64
-    tr: dict[str, Any] = {
-        "trace_id": trace_id,
-        "trace_hash": th,
-        "actor": actor,
-        "contradiction_event_indices": indices,
-        "event_count": force_event_count if force_event_count is not None else len(events),
+    live_body = f"deployed_sha={PROTOCOL_SHA}\n"
+    live = {
+        "schema": "sft_live_deployment_receipt.v1",
+        "producer": "forged-live-label",
+        "deployed_sha": PROTOCOL_SHA,
+        "observed_at": "2026-08-05T00:00:00+00:00",
+        "evidence": "forged",
+        "body": live_body,
+        "content_sha256": _sha256_text(live_body),
     }
-    if not omit_artifact:
-        tr["artifact_body"] = artifact
-    if not omit_receipt:
-        tr["trace_receipt"] = _make_trace_receipt(producer=receipt_producer, trace_hash=th, seat=seat)
-    return tr
+    live["receipt_sha256"] = _sha256_text(_canonical({k: v for k, v in live.items() if k != "receipt_sha256"}))
 
-
-def self_check(repo_root: Path | None) -> None:
-    good = _base_verdict()
-    notes = verify_verdict(good, repo_root=repo_root)
-    print("self-check quarantine PASS", "; ".join(notes) if notes else "")
-
-    # REGATE counterexample shape must reject
-    parent_pr = None
-    if repo_root is not None:
-        try:
-            counter = _base_verdict(
-                verdict="model_gap",
-                deployed=_valid_match_deployed(repo_root=repo_root, method="git_ancestor"),
-                predicates={
-                    "contract_resolved": {"value": True, "register": "Observed"},
-                    "implementation_matches_contract": {"value": True, "register": "Observed"},
-                    "taey_violated_contract": {"value": True, "register": "Observed"},
-                },
-                # inline contradicts-only style (v3 hole)
-                trace={
-                    **_valid_model_gap_trace(
-                        trace_id="counter",
-                        content_violation=False,
-                        submitter_contradicts_flag=True,
-                        omit_receipt=True,
-                    ),
-                    "contradiction_event_indices": [2],
-                },
-                contract={
-                    "repo": PROTOCOL_REPO,
-                    "sha": PROTOCOL_SHA,
-                    "path": PROTOCOL_PATH,
-                    "lines": "48-49",
-                    "symbol": "FailureTriageGate.training_gap",
-                    "kind": "spec",
-                },
-                rationale="counterexample",
-            )
-            # force contradicts flag path with no real content + no receipt
-            try:
-                verify_verdict(counter, repo_root=repo_root)
-                raise SystemExit("self-check expected reject REGATE counterexample shape")
-            except Reject as exc:
-                print(f"self-check REGATE counterexample REJECT ok: {exc}")
-        except Reject as exc:
-            # building git_ancestor fixture itself may raise on parity schema
-            print(f"self-check REGATE counterexample REJECT ok: {exc}")
-
-    # prose-only Match
-    prose_body = f"deployed={PROTOCOL_SHA}\nparity=Match\nindependent=true\n"
-    prose_match = _base_verdict(
+    return _base_verdict(
+        verdict="model_gap",
+        schema=VERDICT_SCHEMA,
         deployed={
             "repo": PROTOCOL_REPO,
             "sha": PROTOCOL_SHA,
             "parity": "Match",
-            "evidence": "prose only",
-            "parity_receipt": {
-                "producer": "parity-auditor",
-                "content_sha256": _sha256_text(prose_body),
-                "body": prose_body,
-            },
+            "evidence": "forged multi-label",
+            "parity_receipt": fake_receipt("forged-parity-label"),
+            "live_receipt": live,
         },
-        predicates={
-            "contract_resolved": {"value": True, "register": "Observed"},
-            "implementation_matches_contract": {"value": True, "register": "Observed"},
-            "taey_violated_contract": {"value": None, "register": "Unknown"},
-        },
-    )
-    try:
-        verify_verdict(prose_match, repo_root=repo_root)
-        raise SystemExit("self-check expected reject prose-only Match")
-    except Reject as exc:
-        print(f"self-check prose-only Match REJECT ok: {exc}")
-
-    # valid model_gap
-    tr = _valid_model_gap_trace()
-    valid_gap = _base_verdict(
-        verdict="model_gap",
-        deployed=_valid_match_deployed(repo_root=repo_root, method="blob_byte_equivalence"),
         predicates={
             "contract_resolved": {"value": True, "register": "Observed"},
             "implementation_matches_contract": {"value": True, "register": "Observed"},
             "taey_violated_contract": {"value": True, "register": "Observed"},
         },
-        trace=tr,
+        trace={
+            "trace_id": "forge",
+            "trace_hash": trace_hash,
+            "actor": "taey",
+            "contradiction_event_indices": [2],
+            "event_count": 3,
+            "trace_receipt": {
+                "schema": "sft_trace_receipt.v1",
+                "producer": "forged-capture-label",
+                "method": "production_seat_capture",
+                "seat": "taey-presence",
+                "trace_hash": trace_hash,
+                "receipt_sha256": _sha256_text(
+                    _canonical(
+                        {
+                            "schema": "sft_trace_receipt.v1",
+                            "producer": "forged-capture-label",
+                            "method": "production_seat_capture",
+                            "seat": "taey-presence",
+                            "trace_hash": trace_hash,
+                        }
+                    )
+                ),
+            },
+            "artifact_body": {
+                "schema": "sft_failure_trace.v2",
+                "trace_id": "forge",
+                "actor": "taey",
+                "seat": "taey-presence",
+                "events": [
+                    {"kind": "request", "actor": "taey", "content": "x"},
+                    {
+                        "kind": "tool_call",
+                        "actor": "taey",
+                        "content": "admitted failure trajectory as training target",
+                    },
+                    {"kind": "outcome", "actor": "taey", "content": "y"},
+                ],
+            },
+        },
         contract={
             "repo": PROTOCOL_REPO,
             "sha": PROTOCOL_SHA,
@@ -1044,9 +661,62 @@ def self_check(repo_root: Path | None) -> None:
             "symbol": "FailureTriageGate.training_gap",
             "kind": "spec",
         },
-        rationale="oracle-matched contradiction; blob_byte_equivalence on contract path; live deploy receipt.",
+        reviewer={
+            "session": "verdict-review-label",
+            "receipt_id": "22222222-2222-4222-8222-222222222222",
+            "recorded_at": "2026-08-05T00:00:00+00:00",
+            "method": "mechanical_checklist",
+        },
+        rationale="single submitter multi-label forgery",
     )
-    notes = verify_verdict(valid_gap, repo_root=repo_root)
+
+
+def self_check(repo_root: Path | None) -> None:
+    notes = verify_verdict(_base_verdict(), repo_root=repo_root)
+    print("self-check quarantine PASS", "; ".join(notes) if notes else "")
+
+    # single-submitter multi-label forgery must reject
+    forge = _v4_style_multi_label_forgery("b" * 64)
+    try:
+        verify_verdict(forge, repo_root=repo_root)
+        raise SystemExit("self-check expected reject single-submitter multi-label forgery")
+    except Reject as exc:
+        print(f"self-check single-submitter forgery REJECT ok: {exc}")
+
+    # valid model_gap with authenticated fixture scorer
+    th = "c" * 64
+    valid = _base_verdict(
+        verdict="model_gap",
+        deployed={
+            "repo": PROTOCOL_REPO,
+            "sha": PROTOCOL_SHA,
+            "parity": "Match",
+            "evidence": "scorer-authenticated",
+        },
+        predicates={
+            "contract_resolved": {"value": True, "register": "Observed"},
+            "implementation_matches_contract": {"value": True, "register": "Observed"},
+            "taey_violated_contract": {"value": True, "register": "Observed"},
+        },
+        trace={
+            "trace_id": "ok",
+            "trace_hash": th,
+            "actor": "taey",
+            "event_count": 3,
+            "contradiction_event_indices": [2],
+        },
+        contract={
+            "repo": PROTOCOL_REPO,
+            "sha": PROTOCOL_SHA,
+            "path": PROTOCOL_PATH,
+            "lines": "48-49",
+            "symbol": "FailureTriageGate.training_gap",
+            "kind": "spec",
+        },
+        scorer_receipt=_make_scorer_receipt(trace_hash=th),
+        rationale="authenticated fixture scorer signed model_gap",
+    )
+    notes = verify_verdict(valid, repo_root=repo_root)
     print("self-check valid model_gap PASS", "; ".join(notes) if notes else "")
 
     code_def = _base_verdict(
@@ -1061,9 +731,9 @@ def self_check(repo_root: Path | None) -> None:
             "repo": PROTOCOL_REPO,
             "sha": PROTOCOL_SHA,
             "parity": "Partial",
-            "evidence": "Observed production violates contract L30",
+            "evidence": "Observed production violates contract",
         },
-        rationale="Production violates public contract; full stop before train.",
+        rationale="impl violates contract",
     )
     notes = verify_verdict(code_def, repo_root=repo_root)
     print("self-check code_defect PASS", "; ".join(notes) if notes else "")
@@ -1089,6 +759,7 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
         else:
             print(f"PROBE FAIL {name}: expected_pass={expect_pass} err={err}", file=sys.stderr)
 
+    th = "d" * 64
     mg_contract = {
         "repo": PROTOCOL_REPO,
         "sha": PROTOCOL_SHA,
@@ -1102,282 +773,133 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
         "implementation_matches_contract": {"value": True, "register": "Observed"},
         "taey_violated_contract": {"value": True, "register": "Observed"},
     }
-    match_preds = {
-        "contract_resolved": {"value": True, "register": "Observed"},
-        "implementation_matches_contract": {"value": True, "register": "Observed"},
-        "taey_violated_contract": {"value": None, "register": "Unknown"},
+    mg_deployed = {
+        "repo": PROTOCOL_REPO,
+        "sha": PROTOCOL_SHA,
+        "parity": "Match",
+        "evidence": "scorer",
+    }
+    mg_trace = {
+        "trace_id": "p",
+        "trace_hash": th,
+        "actor": "taey",
+        "event_count": 3,
+        "contradiction_event_indices": [2],
     }
 
-    # --- REGATE post-bce9ec7 required rejects ---
-
-    # 1) ancestor-with-descendant-change (git_ancestor)
-    try:
-        dep_anc = _valid_match_deployed(repo_root=repo_root, method="git_ancestor")
-    except Reject:
-        # force a parity receipt with git_ancestor even if helper rejects
-        proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", f"{PROTOCOL_SHA}^"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        parent = proc.stdout.strip()
-        # manually build v2 receipt with forbidden method
-        pr = {
-            "schema": PARITY_RECEIPT_SCHEMA,
-            "producer": "parity-auditor",
-            "method": "git_ancestor",
-            "result": "Match",
-            "source": {"ref": parent},
-            "deployed": {"ref": PROTOCOL_SHA},
-            "reviewer": "self-check-reviewer",
-        }
-        pr["receipt_sha256"] = _sha256_text(_canonical({k: v for k, v in pr.items() if k != "receipt_sha256"}))
-        dep_anc = {
-            "repo": PROTOCOL_REPO,
-            "sha": PROTOCOL_SHA,
-            "parity": "Match",
-            "evidence": "ancestor",
-            "parity_receipt": pr,
-            "live_receipt": _make_live_receipt(producer="deploy-auditor", deployed_sha=PROTOCOL_SHA),
-        }
+    # REGATE post-71696d6 required rejects
     probe(
-        "ancestor_with_descendant_change",
+        "single_submitter_multi_label_forgery",
+        _v4_style_multi_label_forgery(th),
+        expect_pass=False,
+    )
+
+    # quote forbidden substring without authenticated scorer action/outcome
+    probe(
+        "quote_forbidden_substring_without_scorer",
         _base_verdict(
             verdict="model_gap",
-            deployed=dep_anc,
-            predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="anc"),
-            contract=mg_contract,
-            rationale="ancestor only",
-        ),
-        expect_pass=False,
-    )
-
-    # 2) irrelevant-path byte equivalence
-    probe(
-        "irrelevant_path_byte_equivalence",
-        _base_verdict(
-            deployed=_valid_match_deployed(
-                repo_root=repo_root,
-                method="blob_byte_equivalence",
-                path_override="README.md",
-            ),
-            predicates=match_preds,
-        ),
-        expect_pass=False,
-    )
-
-    # 3) arbitrary deployed SHA without live deployment receipt
-    pr_ok = _make_parity_receipt(
-        producer="parity-auditor",
-        method="git_commit_equal",
-        result="Match",
-        source={"ref": PROTOCOL_SHA},
-        deployed_side={"ref": PROTOCOL_SHA},
-        reviewer="self-check-reviewer",
-    )
-    probe(
-        "deployed_sha_without_live_receipt",
-        _base_verdict(
-            deployed={
-                "repo": PROTOCOL_REPO,
-                "sha": PROTOCOL_SHA,
-                "parity": "Match",
-                "evidence": "no live receipt",
-                "parity_receipt": pr_ok,
-            },
-            predicates=match_preds,
-        ),
-        expect_pass=False,
-    )
-
-    # 4) correctly hashed inline contradicts=true forgery (no oracle content, no independent receipt)
-    forge_events = [
-        {"kind": "request", "actor": "taey", "content": "hello"},
-        {
-            "kind": "tool_call",
-            "actor": "taey",
-            "content": "benign action with no forbidden pattern",
-            "contract_contradiction": {
-                "contradicts": True,
-                "contract_lines": "48-49",
-                "contract_symbol": "FailureTriageGate.training_gap",
-            },
-        },
-        {"kind": "outcome", "actor": "taey", "content": "ok"},
-    ]
-    forge_art = _make_trace_artifact(
-        trace_id="forge-inline", actor="taey", seat="taey-presence", events=forge_events
-    )
-    forge_th = _trace_hash_for(forge_art)
-    probe(
-        "inline_contradicts_true_forgery",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
+            deployed=mg_deployed,
             predicates=mg_preds,
             trace={
-                "trace_id": "forge-inline",
-                "trace_hash": forge_th,
-                "actor": "taey",
-                "contradiction_event_indices": [2],
-                "event_count": 3,
-                "artifact_body": forge_art,
-                # independent receipt present but oracle must still fail on content
-                "trace_receipt": _make_trace_receipt(producer="capture-auditor", trace_hash=forge_th),
-            },
-            contract=mg_contract,
-            rationale="forged contradicts flag",
-        ),
-        expect_pass=False,
-    )
-
-    # inline without independent receipt (even with real violation content)
-    probe(
-        "inline_without_independent_trace_receipt",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
-            predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="no-tr", omit_receipt=True),
-            contract=mg_contract,
-            rationale="no independent receipt",
-        ),
-        expect_pass=False,
-    )
-
-    # --- prior suite still required ---
-
-    probe(
-        "forged_model_gap_no_indices",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
-            predicates=mg_preds,
-            trace={**_valid_model_gap_trace(trace_id="no-idx"), "contradiction_event_indices": []},
-            contract=mg_contract,
-        ),
-        expect_pass=False,
-    )
-
-    probe(
-        "non_taey_actor",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
-            predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="sup", actor="supervisor"),
-            contract=mg_contract,
-        ),
-        expect_pass=False,
-    )
-
-    probe(
-        "match_without_receipt",
-        _base_verdict(
-            deployed={
-                "repo": PROTOCOL_REPO,
-                "sha": PROTOCOL_SHA,
-                "parity": "Match",
-                "evidence": "claimed",
-            },
-            predicates=match_preds,
-        ),
-        expect_pass=False,
-    )
-
-    prose = f"deployed={PROTOCOL_SHA}\nparity=Match\n"
-    probe(
-        "forged_prose_parity_distinct_producer",
-        _base_verdict(
-            deployed={
-                "repo": PROTOCOL_REPO,
-                "sha": PROTOCOL_SHA,
-                "parity": "Match",
-                "evidence": "prose",
-                "parity_receipt": {
-                    "producer": "parity-auditor",
-                    "content_sha256": _sha256_text(prose),
-                    "body": prose,
+                **mg_trace,
+                "artifact_body": {
+                    "schema": "sft_failure_trace.v2",
+                    "trace_id": "p",
+                    "actor": "taey",
+                    "seat": "taey-presence",
+                    "events": [
+                        {"kind": "request", "actor": "taey", "content": "discuss policy"},
+                        {
+                            "kind": "tool_call",
+                            "actor": "taey",
+                            "content": (
+                                "I read that admitted failure trajectory as training target "
+                                "is forbidden — quoting only"
+                            ),
+                        },
+                        {"kind": "outcome", "actor": "taey", "content": "held"},
+                    ],
                 },
-                "live_receipt": _make_live_receipt(producer="deploy-auditor", deployed_sha=PROTOCOL_SHA),
             },
-            predicates=match_preds,
+            contract=mg_contract,
+            rationale="quote only no scorer",
         ),
         expect_pass=False,
     )
 
     probe(
-        "self_review_parity",
-        _base_verdict(
-            deployed=_valid_match_deployed(repo_root=repo_root, producer="self-check-reviewer"),
-            predicates=match_preds,
-        ),
-        expect_pass=False,
-    )
-
-    probe(
-        "self_review_trace_receipt",
+        "model_gap_without_scorer_receipt",
         _base_verdict(
             verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
+            deployed=mg_deployed,
             predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="self-tr", receipt_producer="self-check-reviewer"),
+            trace=mg_trace,
             contract=mg_contract,
-            rationale="self review trace",
+            rationale="no scorer",
         ),
         expect_pass=False,
     )
 
     probe(
-        "mismatched_event_count",
+        "bad_scorer_signature",
         _base_verdict(
             verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
+            deployed=mg_deployed,
             predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="bad-count", force_event_count=99),
+            trace=mg_trace,
             contract=mg_contract,
-            rationale="bad count",
+            scorer_receipt=_make_scorer_receipt(trace_hash=th, bad_signature=True),
+            rationale="bad sig",
         ),
         expect_pass=False,
     )
 
     probe(
-        "missing_trace_artifact",
+        "unknown_scorer_id",
         _base_verdict(
             verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
+            deployed=mg_deployed,
             predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="no-art", omit_artifact=True),
+            trace=mg_trace,
             contract=mg_contract,
-            rationale="missing artifact",
+            scorer_receipt=_make_scorer_receipt(
+                trace_hash=th, scorer_id="not-in-allowlist", privkey_hex=_FIXTURE_SCORER_PRIVKEY_HEX
+            ),
+            rationale="unknown scorer",
         ),
         expect_pass=False,
     )
 
     probe(
-        "hash_mismatched_trace_artifact",
+        "scorer_trace_hash_mismatch",
         _base_verdict(
             verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
+            deployed=mg_deployed,
             predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="bad-hash", corrupt_hash=True),
+            trace=mg_trace,
             contract=mg_contract,
-            rationale="hash mismatch",
+            scorer_receipt=_make_scorer_receipt(trace_hash="f" * 64),
+            rationale="trace mismatch",
         ),
         expect_pass=False,
     )
 
     probe(
-        "in_range_non_oracle_index",
+        "im_true_without_scorer_not_model_gap",
         _base_verdict(
-            verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root),
-            predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="non-or", non_violation_index=True),
-            contract=mg_contract,
-            rationale="non oracle event",
+            deployed={
+                "repo": PROTOCOL_REPO,
+                "sha": PROTOCOL_SHA,
+                "parity": "Match",
+                "evidence": "blob only",
+            },
+            predicates={
+                "contract_resolved": {"value": True, "register": "Observed"},
+                "implementation_matches_contract": {"value": True, "register": "Observed"},
+                "taey_violated_contract": {"value": None, "register": "Unknown"},
+            },
+            rationale="impl match without scorer",
         ),
         expect_pass=False,
     )
@@ -1388,7 +910,7 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
             contract={
                 "repo": PROTOCOL_REPO,
                 "sha": PROTOCOL_SHA,
-                "path": "/tmp/secret_contract.md",
+                "path": "/tmp/secret.md",
                 "lines": "1-2",
                 "kind": "spec",
             },
@@ -1396,31 +918,19 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
         expect_pass=False,
     )
 
-    probe("wrong_schema", _base_verdict(schema="sft_failure_triage_verdict.v3"), expect_pass=False)
+    probe("wrong_schema", _base_verdict(schema="sft_failure_triage_verdict.v4"), expect_pass=False)
     probe("valid_quarantine", _base_verdict(), expect_pass=True)
 
     probe(
-        "valid_model_gap",
+        "valid_model_gap_authenticated_scorer",
         _base_verdict(
             verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root, method="blob_byte_equivalence"),
+            deployed=mg_deployed,
             predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="ok"),
+            trace=mg_trace,
             contract=mg_contract,
-            rationale="oracle + independent receipts + contract-path blob eq",
-        ),
-        expect_pass=True,
-    )
-
-    probe(
-        "valid_model_gap_git_commit_equal",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=_valid_match_deployed(repo_root=repo_root, method="git_commit_equal"),
-            predicates=mg_preds,
-            trace=_valid_model_gap_trace(trace_id="ok-gce"),
-            contract=mg_contract,
-            rationale="git_commit_equal + live receipt",
+            scorer_receipt=_make_scorer_receipt(trace_hash=th),
+            rationale="authenticated scorer",
         ),
         expect_pass=True,
     )
@@ -1441,9 +951,24 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
                 "parity": "Partial",
                 "evidence": "Observed violation",
             },
-            rationale="impl violates contract",
+            rationale="impl violates",
         ),
         expect_pass=True,
+    )
+
+    # non-taey actor with valid scorer still rejects on actor check first
+    probe(
+        "non_taey_actor",
+        _base_verdict(
+            verdict="model_gap",
+            deployed=mg_deployed,
+            predicates=mg_preds,
+            trace={**mg_trace, "actor": "supervisor"},
+            contract=mg_contract,
+            scorer_receipt=_make_scorer_receipt(trace_hash=th),
+            rationale="supervisor",
+        ),
+        expect_pass=False,
     )
 
     doc = _base_verdict()
@@ -1473,7 +998,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--verdict", help="Path to verdict JSON")
     parser.add_argument("--repo-root", default=None, help="Git repository root")
     parser.add_argument("--self-check", action="store_true")
-    parser.add_argument("--probe-suite", action="store_true", help="Run adversarial probes")
+    parser.add_argument("--probe-suite", action="store_true")
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).resolve() if args.repo_root else None
