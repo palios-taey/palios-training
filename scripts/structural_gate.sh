@@ -93,6 +93,7 @@ import json, sys
 # Each entry: (path, rule) characterised as a NON-secret, with the reason it is not one.
 KNOWN = {
  ("careers-qwen/run_stage2_sft_ddp_till_done.sh", "generic-api-key"),   # sha256 of the qualification receipt — a content digest, the receipt identity itself
+ ("careers-qwen/failure_triage_verify.py",         "generic-api-key"),   # fixture ed25519 probe keypair; not a cloud API credential
  ("dense-9b/instrumentation/README.md",           "generic-api-key"),   # sha256 tokenizer-manifest digest quoted in prose
  ("datasets/current/moe-35b/phase1_infra_v2_gated.jsonl", "generic-api-key"),  # 25-char config assignment after the literal word "key parameters"
  ("datasets/current/moe-35b/combined_v1_gated.jsonl",     "generic-api-key"),  # same assignment, same corpus
