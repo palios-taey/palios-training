@@ -13,9 +13,8 @@ FLEET_ENV="${FLEET_ENV:-$REPO_ROOT/fleet.env}"
 : "${SPARK_HOME:?fleet.env must define SPARK_HOME}"
 : "${SPARK_MGMT_IPS:?fleet.env must define SPARK_MGMT_IPS}"
 : "${SPARK_USER:?fleet.env must define SPARK_USER}"
-: "${NCCL_IB_HCA:?run manifest must define NCCL_IB_HCA}"
-: "${NCCL_NET_GDR_LEVEL:?run manifest must define NCCL_NET_GDR_LEVEL}"
-: "${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:?run manifest must define TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC}"
+# NCCL fabric vars are export/bake-only. Metadata inspect uses python over SSH
+# and never loads NCCL; requiring them before mode dispatch blocked inspect.
 
 usage() {
   echo "usage:"
@@ -67,6 +66,12 @@ echo "EXACT CHECKPOINT PASS step=$step ranks=4/4 path=$checkpoint"
 if [ "$mode" = inspect ]; then
   exit 0
 fi
+
+# Export-only: NCCL fabric prerequisites for bake (fail-closed).
+: "${NCCL_IB_HCA:?run manifest must define NCCL_IB_HCA}"
+: "${NCCL_NET_GDR_LEVEL:?run manifest must define NCCL_NET_GDR_LEVEL}"
+: "${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:?run manifest must define TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC}"
+
 case "$artifact_b_dir" in
   "${SPARK_HOME}"/exports/*_artifactB) ;;
   *) echo "REFUSE: Artifact B path must be ${SPARK_HOME}/exports/*_artifactB" >&2; exit 1 ;;
