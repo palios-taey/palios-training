@@ -1,5 +1,5 @@
 {
-  "schema": "sft_failure_triage_verdict.v1",
+  "schema": "sft_failure_triage_verdict.v2",
   "verdict_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "protocol_pin": {
     "repo": "palios-taey/palios-training",
@@ -12,13 +12,15 @@
   "trace": {
     "trace_id": "fixture",
     "trace_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor": "unknown",
+    "contradiction_event_indices": [],
     "event_count": 0
   },
   "contract": {
     "repo": "palios-taey/palios-training",
-    "sha": "5f01a90b39c133fbc081f791f3bc451e05eadf34",
-    "path": "careers-qwen/docs/SFT_FAILURE_TRIAGE_CONTRACT.md",
-    "lines": "1-40",
+    "sha": "58b108042e66fa508765a6277c033cc5a8f86abd",
+    "path": "careers-qwen/docs/SFT_SELF_TRAINING_LOOP_PROTOCOL.md",
+    "lines": "46-52",
     "kind": "spec"
   },
   "deployed": {
@@ -41,7 +43,7 @@
       "register": "Unknown"
     }
   },
-  "rationale": "Fixture verdict: Unknown parity forces quarantine under sft_failure_triage.v1.",
+  "rationale": "Fixture v2: Unknown parity quarantines; no forged Match/model_gap.",
   "allowed_next": [
     "request_parity_evidence"
   ],

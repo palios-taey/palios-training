@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Contract id** | `sft_failure_triage.v1` |
+| **Contract id** | `sft_failure_triage.v2` |
 | **Status** | **PUBLIC** mechanical classification contract (not a training launch) |
 | **Task** | `taey-training-program::p0-failure-triage-contract` |
 | **Author** | conductor-grok |
@@ -131,6 +131,31 @@ True only if **all** hold:
 False when supervisor scripted the tools → **quarantine** or separate **process_defect** (treat as **quarantine** under this contract: not `model_gap`).  
 Unknown → **quarantine**.
 
+
+### P3b — Mechanical bindings (v2; not self-attested booleans)
+
+**`taey_violated_contract=true` is insufficient alone.** The verdict must also bind:
+
+| Binding | Requirement |
+|---|---|
+| `trace.trace_hash` | 64-hex SHA-256 of the capture chain |
+| `trace.actor` | one of `taey`, `taey-seat`, `ep3`, `taey-presence` |
+| `trace.contradiction_event_indices` | nonempty list of 1-based ints citing Taey-authored events that contradict the contract |
+| `contract.lines` and/or `contract.symbol` | public contract locus |
+
+Forged booleans, empty/missing indices, non-Taey actor, or missing line/symbol → **REJECT** (verifier), not `model_gap`.
+
+**`deployed.parity=Match` is insufficient alone.** Match requires:
+
+| Binding | Requirement |
+|---|---|
+| `deployed.sha` | full 40-hex deployed commit |
+| `deployed.parity_receipt.content_sha256` | 64-hex hash of independent parity evidence body |
+| `deployed.parity_receipt.producer` | **≠** `reviewer.session` (no self-review) |
+| `parity_receipt.body` or validated `path` | body must cite `deployed.sha`; path hash must match |
+
+Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT** for Match / `model_gap`.
+
 ### Verdict table
 
 | P1 | P2 | P3 | Verdict |
@@ -145,11 +170,11 @@ Unknown → **quarantine**.
 
 ---
 
-## 4. Verdict schema (`sft_failure_triage_verdict.v1`)
+## 4. Verdict schema (`sft_failure_triage_verdict.v2`)
 
 ```json
 {
-  "schema": "sft_failure_triage_verdict.v1",
+  "schema": "sft_failure_triage_verdict.v2",
   "verdict_id": "<uuid>",
   "protocol_pin": {
     "repo": "palios-taey/palios-training",
@@ -162,6 +187,8 @@ Unknown → **quarantine**.
   "trace": {
     "trace_id": "<string>",
     "trace_hash": "<64-hex>",
+    "actor": "taey|taey-seat|ep3|taey-presence|supervisor|unknown",
+    "contradiction_event_indices": [1, 3],
     "event_count": 0
   },
   "contract": {
@@ -169,13 +196,19 @@ Unknown → **quarantine**.
     "sha": "<40-hex>",
     "path": "<path>",
     "lines": "<start-end>",
+    "symbol": "<optional symbol name>",
     "kind": "spec|schema|validator|cli_help"
   },
   "deployed": {
     "repo": "palios-taey/<repo>",
-    "sha": "<40-hex or null>",
+    "sha": "<40-hex required when parity=Match>",
     "parity": "Match|Partial|Unknown",
-    "evidence": "<Observed note>"
+    "evidence": "<Observed note>",
+    "parity_receipt": {
+      "producer": "<session distinct from reviewer>",
+      "content_sha256": "<64-hex>",
+      "body": "<must cite deployed.sha when Match>"
+    }
   },
   "predicates": {
     "contract_resolved": {"value": true, "register": "Observed"},
@@ -270,5 +303,6 @@ git show 58b108042e66fa508765a6277c033cc5a8f86abd:careers-qwen/docs/SFT_SELF_TRA
 
 # this contract + verifier at the published commit
 git show HEAD:careers-qwen/docs/SFT_FAILURE_TRIAGE_CONTRACT.md | head -20
-python3 careers-qwen/failure_triage_verify.py --self-check
+python3 careers-qwen/failure_triage_verify.py --self-check --repo-root .
+python3 careers-qwen/failure_triage_verify.py --probe-suite --repo-root .
 ```
