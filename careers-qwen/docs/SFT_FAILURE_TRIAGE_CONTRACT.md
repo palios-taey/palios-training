@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| **Contract id** | `sft_failure_triage.v2` |
+| **Contract id** | `sft_failure_triage.v3` |
 | **Status** | **PUBLIC** mechanical classification contract (not a training launch) |
 | **Task** | `taey-training-program::p0-failure-triage-contract` |
 | **Author** | conductor-grok |
@@ -132,29 +132,44 @@ False when supervisor scripted the tools → **quarantine** or separate **proces
 Unknown → **quarantine**.
 
 
-### P3b — Mechanical bindings (v2; not self-attested booleans)
+### P3b — Mechanical bindings (v3; not self-attested booleans)
 
 **`taey_violated_contract=true` is insufficient alone.** The verdict must also bind:
 
 | Binding | Requirement |
 |---|---|
-| `trace.trace_hash` | 64-hex SHA-256 of the capture chain |
+| `trace.trace_hash` | 64-hex SHA-256 of the **reachable** trace artifact (canonical JSON bytes) |
 | `trace.actor` | one of `taey`, `taey-seat`, `ep3`, `taey-presence` |
-| `trace.contradiction_event_indices` | nonempty list of 1-based ints citing Taey-authored events that contradict the contract |
+| `trace.event_count` | int equal to `len(artifact.events)` |
+| `trace.contradiction_event_indices` | nonempty list of 1-based ints; each index in bounds |
+| `trace.artifact_body` or `trace.artifact_path` | loadable artifact; bytes hash **must** equal `trace_hash` |
+| cited event `contract_contradiction` | object with `contradicts=true` and locus matching `contract.lines` and/or `contract.symbol` |
 | `contract.lines` and/or `contract.symbol` | public contract locus |
 
-Forged booleans, empty/missing indices, non-Taey actor, or missing line/symbol → **REJECT** (verifier), not `model_gap`.
+Forged booleans, empty/missing indices, non-Taey actor, missing/mismatched artifact, wrong `event_count`, in-range index without contradiction, or missing line/symbol → **REJECT** (verifier), not `model_gap`.
 
-**`deployed.parity=Match` is insufficient alone.** Match requires:
+**`deployed.parity=Match` is insufficient alone.** Match requires a **machine-generated** parity receipt (`sft_parity_receipt.v1`). The verifier **re-derives** the claim from reachable git artifacts. Merely hashing prose that says `parity=Match` **REJECTS**.
 
 | Binding | Requirement |
 |---|---|
 | `deployed.sha` | full 40-hex deployed commit |
-| `deployed.parity_receipt.content_sha256` | 64-hex hash of independent parity evidence body |
-| `deployed.parity_receipt.producer` | **≠** `reviewer.session` (no self-review) |
-| `parity_receipt.body` or validated `path` | body must cite `deployed.sha`; path hash must match |
+| `parity_receipt.schema` | `sft_parity_receipt.v1` |
+| `parity_receipt.method` | `git_commit_equal` \| `git_ancestor` \| `blob_byte_equivalence` |
+| `parity_receipt.result` | must be `Match` |
+| `parity_receipt.source.ref` / `deployed.ref` | full 40-hex; `deployed.ref` **must equal** `deployed.sha` |
+| `parity_receipt.producer` | **≠** `reviewer.session` (no self-review) |
+| `parity_receipt.receipt_sha256` | hash of canonical receipt excluding this field |
+| re-derive | method-specific mechanical check against `--repo-root` (see §3c) |
 
-Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT** for Match / `model_gap`.
+Stale/wrong receipt hash, Partial, Unknown, missing receipt, self-review, prose-only body, wrong compared artifact, or failed re-derive → **REJECT** for Match / `model_gap`.
+
+### 3c — Parity re-derive methods
+
+| Method | Mechanical re-derive |
+|---|---|
+| `git_commit_equal` | `source.ref == deployed.ref == deployed.sha`; both resolve as commits |
+| `git_ancestor` | `source.ref` is ancestor-or-equal of `deployed.ref` (`git merge-base --is-ancestor`); `deployed.ref == deployed.sha` |
+| `blob_byte_equivalence` | SHA-256 of `git show source.ref:source.path` equals SHA-256 of `git show deployed.ref:deployed.path`; optional claimed `content_sha256` fields must match re-derived hashes |
 
 ### Verdict table
 
@@ -170,11 +185,11 @@ Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT
 
 ---
 
-## 4. Verdict schema (`sft_failure_triage_verdict.v2`)
+## 4. Verdict schema (`sft_failure_triage_verdict.v3`)
 
 ```json
 {
-  "schema": "sft_failure_triage_verdict.v2",
+  "schema": "sft_failure_triage_verdict.v3",
   "verdict_id": "<uuid>",
   "protocol_pin": {
     "repo": "palios-taey/palios-training",
@@ -186,10 +201,34 @@ Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT
   "lane": "ui|orchestration|git|public_repo|string",
   "trace": {
     "trace_id": "<string>",
-    "trace_hash": "<64-hex>",
+    "trace_hash": "<64-hex of canonical artifact JSON>",
     "actor": "taey|taey-seat|ep3|taey-presence|supervisor|unknown",
-    "contradiction_event_indices": [1, 3],
-    "event_count": 0
+    "contradiction_event_indices": [2],
+    "event_count": 3,
+    "artifact_body": {
+      "schema": "sft_failure_trace.v1",
+      "trace_id": "<same as trace.trace_id>",
+      "actor": "taey",
+      "events": [
+        {
+          "kind": "request|tool_call|tool_result|outcome|string",
+          "actor": "taey",
+          "content": "<string>",
+          "contract_contradiction": false
+        },
+        {
+          "kind": "tool_call",
+          "actor": "taey",
+          "content": "<string>",
+          "contract_contradiction": {
+            "contradicts": true,
+            "contract_lines": "48-49",
+            "contract_symbol": "FailureTriageGate.training_gap",
+            "detail": "<string>"
+          }
+        }
+      ]
+    }
   },
   "contract": {
     "repo": "palios-taey/<repo>",
@@ -205,9 +244,14 @@ Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT
     "parity": "Match|Partial|Unknown",
     "evidence": "<Observed note>",
     "parity_receipt": {
+      "schema": "sft_parity_receipt.v1",
       "producer": "<session distinct from reviewer>",
-      "content_sha256": "<64-hex>",
-      "body": "<must cite deployed.sha when Match>"
+      "reviewer": "<optional; must equal reviewer.session when set>",
+      "method": "git_commit_equal|git_ancestor|blob_byte_equivalence",
+      "result": "Match",
+      "source": {"ref": "<40-hex>", "path": "<for blob method>", "content_sha256": "<optional>"},
+      "deployed": {"ref": "<must equal deployed.sha>", "path": "<for blob method>", "content_sha256": "<optional>"},
+      "receipt_sha256": "<sha256 of canonical receipt without this field>"
     }
   },
   "predicates": {
@@ -268,6 +312,8 @@ Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT
 | Parity Unknown for training deploy SHA | `quarantine` (cannot claim Match) |
 | Supervisor scripted tool sequence; Taey did not choose | `quarantine` (not model_gap) |
 | Contract path only in private `/tmp` | `quarantine` (`private_contract`) |
+| Match attested only by prose body hash from a second session | **REJECT** (not a parity proof) |
+| model_gap cites in-range event without `contract_contradiction.contradicts=true` | **REJECT** |
 
 ---
 
@@ -286,12 +332,11 @@ Stale/wrong hash, Partial, Unknown, missing receipt, or self-review → **REJECT
 ## 8. Executable verifier
 
 ```bash
-python3 careers-qwen/failure_triage_verify.py --verdict path/to/verdict.json
 python3 careers-qwen/failure_triage_verify.py --verdict path/to/verdict.json --repo-root .
 # exit 0 = mechanically valid binding; exit 1 = reject
 ```
 
-The verifier checks schema, required bindings, predicate/verdict table consistency, protocol pin, and (when `--repo-root` is set) that `contract.sha:contract.path` resolves as a Git object. It does **not** re-judge production parity from live deploys — parity must already be recorded as Observed on the verdict.
+The verifier checks schema, required bindings, predicate/verdict table consistency, protocol pin, machine parity re-derive, loadable trace artifact + event-level contradiction binding, and (when `--repo-root` is set) that `contract.sha:contract.path` resolves as a Git object. Match **requires** `--repo-root` so ancestry/byte-equivalence can be re-derived. It does **not** re-judge live production deploys beyond the receipt’s reachable git objects.
 
 ---
 
