@@ -957,16 +957,25 @@ def _quarantined_digests():
     corpus owner without touching the trainer.
     """
     out = {}
-    # DEFAULTED, not merely read from the environment. This gate was INERT for the first hours of
-    # its life because QUARANTINE_DIGESTS was never set anywhere — the code was present, the
-    # commit was real, and the list it consulted was empty, so it refused nothing. Found by
-    # treasurer 2026-08-02 by checking the RUNNING ENVIRONMENT rather than the code.
-    # A control whose operative input is optional is a control that is off by default.
-    _default = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "careers-qwen", "governance", "QUARANTINE_DIGESTS.txt",
-    )
-    reg = os.environ.get("QUARANTINE_DIGESTS", "") or _default
+    # Private quarantine digests are not shipped in this public tree. Resolve only from:
+    #   1) QUARANTINE_DIGESTS env (explicit file), or
+    #   2) $GOVERNED_SFT_ROOT/sources/.../careers-qwen/governance/QUARANTINE_DIGESTS.txt
+    # No operator-home or in-tree private path fallback.
+    reg = os.environ.get("QUARANTINE_DIGESTS", "").strip()
+    if not reg:
+        root = os.environ.get("GOVERNED_SFT_ROOT", "").strip()
+        if root:
+            cand = os.path.join(
+                root,
+                "sources",
+                "palios-training-c164d35",
+                "tree",
+                "careers-qwen",
+                "governance",
+                "QUARANTINE_DIGESTS.txt",
+            )
+            if os.path.isfile(cand):
+                reg = cand
     # FAIL CLOSED. Absence used to be silent; now it stops the run. An empty or missing registry
     # is indistinguishable at load time from "nothing is quarantined", and the whole point of this
     # gate is that the difference matters.

@@ -109,7 +109,7 @@ TOOLING_COMMIT=$(git rev-parse HEAD)
 LOCAL_TOOLS=(
   careers-qwen/graft_cpt_into_servable.py
   careers-qwen/corpus_manifest.py
-  careers-qwen/emit_training_provenance.py
+  ${GOVERNED_SFT_ROOT:?set GOVERNED_SFT_ROOT}/sources/palios-training-c164d35/tree/careers-qwen/emit_training_provenance.py
 )
 PRODUCTION_FILES=(
   careers-qwen/finalize_post_cpt_candidate.sh
@@ -351,7 +351,7 @@ for artifact_stage in "$HF_OUT:cpt:851" "$SERVABLE_OUT:graft:1199"; do
   remainder=${artifact_stage#*:}
   stage=${remainder%%:*}
   expected_tensors=${remainder##*:}
-  remote_container_python "$CONVERT_TOOLS/emit_training_provenance.py" \
+  remote_container_python "${GOVERNED_SFT_ROOT:?set GOVERNED_SFT_ROOT}/sources/palios-training-c164d35/tree/careers-qwen/emit_training_provenance.py" \
     --artifact "$artifact" --stage "$stage" --base "$CONVERT_BASE" \
     --corpus "$CONVERT_CORPUS" --total-steps "$TOTAL_STEPS" \
     --completed-step "$CKPT" --warmup-steps "$WARMUP_STEPS" \

@@ -45,15 +45,33 @@ TRAINABLE = ("canonical", "derived")   # statuses whose rows may enter a module 
 def load_registry():
     """The registry IS the source of truth for what exists. Import it rather than
     re-deriving it, so this builder cannot drift from the manifest the way a second
-    hardcoded list would."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    spec = importlib.util.spec_from_file_location(
-        "pairs_manifest", os.path.join(here, "data", "build_pairs_manifest.py"))
+    hardcoded list would.
+
+    Private pair-registry code is not shipped in this public tree. Resolve only from
+    GOVERNED_SFT_ROOT (fail loud; no operator-path fallback).
+    """
+    root = os.environ.get("GOVERNED_SFT_ROOT", "").strip()
+    if not root:
+        raise SystemExit(
+            "REFUSE: GOVERNED_SFT_ROOT is unset. Private pair-registry tooling lives in "
+            "the governed-SFT authority, not this public repository."
+        )
+    if not os.path.isdir(os.path.join(root, ".git")):
+        raise SystemExit(f"REFUSE: GOVERNED_SFT_ROOT={root!r} is not a Git repository")
+    reg_path = os.path.join(
+        root, "sources", "palios-training-c164d35", "tree",
+        "careers-qwen", "data", "build_pairs_manifest.py",
+    )
+    if not os.path.isfile(reg_path):
+        raise SystemExit(
+            f"REFUSE: private pair registry missing at {reg_path}. "
+            "Restore the governed-SFT source snapshot or set GOVERNED_SFT_ROOT correctly."
+        )
+    spec = importlib.util.spec_from_file_location("pairs_manifest", reg_path)
     mod = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(mod)
     except SystemExit:
-        # the manifest fails loud when TRAINING_DATA_ROOT is unset; surface that verbatim
         raise
     return mod.STATUS, mod.ROOT
 

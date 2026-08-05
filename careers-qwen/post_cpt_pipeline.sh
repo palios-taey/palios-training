@@ -118,7 +118,7 @@ REMOTE_PY_TOOLS=(
   careers-qwen/graft_cpt_into_servable.py
   careers-qwen/measure_cpt_delta.py
   careers-qwen/corpus_manifest.py
-  careers-qwen/emit_training_provenance.py
+  ${GOVERNED_SFT_ROOT:?set GOVERNED_SFT_ROOT}/sources/palios-training-c164d35/tree/careers-qwen/emit_training_provenance.py
 )
 EXPORT_RUNTIME=(
   dense-9b/trainers/train_fsdp_dense_9b.py
@@ -533,7 +533,7 @@ echo "=== 7. PROVENANCE + TRANSIENT RETIREMENT ==="
 for artifact_stage in "$HF_OUT:cpt" "$SERVABLE_OUT:graft"; do
   artifact=${artifact_stage%%:*}
   stage=${artifact_stage##*:}
-  remote_container_python "$CONVERT_TOOLS/emit_training_provenance.py" \
+  remote_container_python "${GOVERNED_SFT_ROOT:?set GOVERNED_SFT_ROOT}/sources/palios-training-c164d35/tree/careers-qwen/emit_training_provenance.py" \
     --artifact "$artifact" --stage "$stage" --base "$CONVERT_BASE" --corpus "$CONVERT_CORPUS" \
     --total-steps "$PROV_TOTAL_STEPS" --completed-step "$CKPT" \
     --warmup-steps "$PROV_WARMUP_STEPS" \
