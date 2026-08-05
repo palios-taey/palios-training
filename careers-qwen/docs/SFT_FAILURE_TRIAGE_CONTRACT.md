@@ -56,10 +56,14 @@ capture complete?
 - Substring / quote matching of forbidden phrases without scorer outcome
 - Inline `contract_contradiction.contradicts=true`
 
-### Scorer allowlist
+### Scorer allowlist (production path only)
 
-Maintained in `failure_triage_verify.py` as `SCORER_ALLOWLIST`.  
-`fixture-failure-triage-scorer-v1` is **probe/self-check only** (not production training admission). Production scorer keys are added when lane scorers ship.
+Maintained in `failure_triage_verify.py` as `SCORER_ALLOWLIST`.
+
+- **Only** entries with `role=production` may authorize `model_gap` on the normal `--verdict` path.
+- Fixture / non-production material lives in a **separate** probe-only table and is **rejected before signature acceptance**.
+- An embedded fixture private key **never** confers admission authority, even if the signature verifies cryptographically.
+- Until a real production scorer public key is pinned, `SCORER_ALLOWLIST` is empty and `model_gap` is unavailable.
 
 ---
 

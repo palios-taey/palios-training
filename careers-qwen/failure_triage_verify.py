@@ -4,16 +4,14 @@
 Public contract: careers-qwen/docs/SFT_FAILURE_TRIAGE_CONTRACT.md
 Protocol pin: careers-qwen/docs/SFT_SELF_TRAINING_LOOP_PROTOCOL.md @ 58b1080… L46–52
 
-v5 closes CONTROL counterexample after 71696d6:
-- model_gap requires an authenticated lane scorer receipt (ed25519 over
-  canonical payload) from a pinned scorer public key — not unequal producer
-  label strings.
-- Implementation conformance for model_gap is the scorer's signed result, not
-  contract-document blob equivalence or substring oracles.
-- Without a valid authenticated scorer receipt, model_gap / taey_violated=true
-  REJECTS (honest quarantine path when no lane scorer exists).
-- Reject probes: single-submitter multi-label forgery; quote-without-action
-  (substring without authenticated scorer outcome).
+v5 (post-715655a CONTROL fix):
+- model_gap requires a PRODUCTION scorer receipt (ed25519) from SCORER_ALLOWLIST
+  entries with role=production only.
+- Fixture / non-production scorers are rejected BEFORE signature acceptance on
+  the normal --verdict path (embedded fixture keys never authorize admission).
+- Without a production scorer pubkey pinned, model_gap is honestly unavailable.
+- Reject probes include fixture-key CLI forgery, single-submitter multi-label
+  forgery, and quote-without-scorer.
 
 Exit codes:
   0 — verdict is mechanically consistent with the contract
@@ -48,26 +46,33 @@ UUID_RE = re.compile(
 )
 LINES_RE = re.compile(r"^[0-9]+(-[0-9]+)?$")
 
-# Pinned scorer public keys (ed25519 raw 32-byte hex).
-# fixture-failure-triage-scorer-v1 is probe/self-check only — not a production
-# training-admission authority. Production keys are added here when lane scorers ship.
-# Until then, model_gap is unavailable without a matching signed receipt.
+# PRODUCTION scorer allowlist only (role must be "production").
+# Empty until a real lane scorer public key is pinned. model_gap is unavailable.
+# Fixture keys MUST NOT appear here — they cannot authorize --verdict admission.
 SCORER_ALLOWLIST: dict[str, dict[str, str]] = {
+    # Example when a real scorer ships (do not uncomment without a real key):
+    # "ui-lane-production-scorer-v1": {
+    #     "pubkey_ed25519_hex": "<32-byte hex>",
+    #     "role": "production",
+    #     "lane": "ui",
+    #     "contract_symbol": "FailureTriageGate.training_gap",
+    # },
+}
+
+# Isolated fixture material for adversarial probes ONLY.
+# Used to SIGN counterexample verdicts that the production path must REJECT.
+# Never merged into SCORER_ALLOWLIST. Never consulted by production verify.
+_FIXTURE_SCORER_MATERIAL: dict[str, dict[str, str]] = {
     "fixture-failure-triage-scorer-v1": {
-        # Corresponding fixture private key is used ONLY inside this file's
-        # probe/self-check helpers to prove the wire; it is not a production seat key.
         "pubkey_ed25519_hex": "7479b94cba739e6b733afdc3da0aab98d8fc3fbe50eb891414785ee587d46841",
+        "privkey_ed25519_hex": (
+            "b22dfe191c5fcaa93d75537fc70928183865392a3574a87e584ee047a9caac75"
+        ),
         "role": "fixture_probe_only",
-        "lane": "orchestration",
-        "contract_symbol": "FailureTriageGate.training_gap",
     },
 }
 
-# Fixture private key (probe/self-check only). Production scorers must NEVER
-# embed private keys in this file.
-_FIXTURE_SCORER_PRIVKEY_HEX = (
-    "b22dfe191c5fcaa93d75537fc70928183865392a3574a87e584ee047a9caac75"
-)
+PRODUCTION_SCORER_ROLE = "production"
 
 
 class Reject(Exception):
@@ -179,11 +184,26 @@ def _validate_authenticated_scorer_receipt(
         "(caller-authored producer labels / self-hashed receipts are not authority)",
     )
     scorer_id = _as_str(sr.get("scorer_id"), "scorer_receipt.scorer_id").strip()
+
+    # REJECT non-production / fixture scorers BEFORE signature acceptance.
+    # Known fixture material is never production authority even if signature is valid.
+    if scorer_id in _FIXTURE_SCORER_MATERIAL:
+        raise Reject(
+            f"scorer_id {scorer_id!r} is fixture/non-production material; "
+            "rejected on production --verdict path before signature acceptance "
+            "(fixture keys never authorize model_gap admission)"
+        )
     allow = SCORER_ALLOWLIST.get(scorer_id)
     _require(
         allow is not None,
-        f"scorer_id {scorer_id!r} not in pinned SCORER_ALLOWLIST; "
-        "quarantine — no authenticated lane scorer (model_gap unavailable)",
+        f"scorer_id {scorer_id!r} not in production SCORER_ALLOWLIST; "
+        "quarantine — no authenticated production lane scorer (model_gap unavailable)",
+    )
+    role = str(allow.get("role") or "").strip()
+    _require(
+        role == PRODUCTION_SCORER_ROLE,
+        f"non-production scorer role {role!r} rejected before signature acceptance "
+        f"(require role={PRODUCTION_SCORER_ROLE!r})",
     )
     pubkey = allow["pubkey_ed25519_hex"]
 
@@ -226,7 +246,7 @@ def _validate_authenticated_scorer_receipt(
     )
     if allow.get("contract_symbol"):
         _require(
-            csymbol == allow["contract_symbol"] or allow.get("role") == "fixture_probe_only",
+            csymbol == allow["contract_symbol"],
             f"scorer not authorized for symbol {csymbol!r}",
         )
 
@@ -238,7 +258,7 @@ def _validate_authenticated_scorer_receipt(
     _require(tv is True, "scorer_receipt.taey_violated_contract must be true for model_gap")
     _require(outcome == "model_gap", "scorer_receipt.outcome must be model_gap")
 
-    # Signature
+    # Signature (only after production-role allowlist gate)
     sig = _as_str(sr.get("signature"), "scorer_receipt.signature").lower()
     _require(re.fullmatch(r"[0-9a-f]{128}", sig) is not None, "signature must be 64-byte ed25519 hex")
     payload = _scorer_signed_payload(sr)
@@ -254,8 +274,6 @@ def _validate_authenticated_scorer_receipt(
         "(caller-supplied producer strings are not authentication)",
     )
 
-    # Scorer identity must not equal verdict reviewer session label games
-    # (scorer_id is the auth identity; still forbid trivial self-label if present)
     if "producer_label" in sr and sr["producer_label"] is not None:
         pl = _as_str(sr.get("producer_label"), "scorer_receipt.producer_label").strip()
         _require(
@@ -263,11 +281,9 @@ def _validate_authenticated_scorer_receipt(
             "scorer_receipt.producer_label must not equal reviewer.session",
         )
 
-    notes.append(f"authenticated scorer_receipt ok scorer_id={scorer_id}")
+    notes.append(f"authenticated production scorer_receipt ok scorer_id={scorer_id}")
     notes.append(f"scorer_commit={scorer_commit[:12]} seat_commit={seat_commit[:12]}")
-    notes.append("signature verified against pinned pubkey")
-    if allow.get("role") == "fixture_probe_only":
-        notes.append("WARNING: fixture scorer — not production training admission")
+    notes.append("signature verified against production pinned pubkey")
     return notes
 
 
@@ -449,17 +465,29 @@ def verify_verdict(doc: dict[str, Any], *, repo_root: Path | None) -> list[str]:
 # --- fixtures / probes -------------------------------------------------------
 
 
+def _fixture_privkey(scorer_id: str = "fixture-failure-triage-scorer-v1") -> str:
+    mat = _FIXTURE_SCORER_MATERIAL[scorer_id]
+    return mat["privkey_ed25519_hex"]
+
+
 def _make_scorer_receipt(
     *,
     trace_hash: str,
     scorer_id: str = "fixture-failure-triage-scorer-v1",
-    privkey_hex: str | None = _FIXTURE_SCORER_PRIVKEY_HEX,
+    privkey_hex: str | None = None,
     bad_signature: bool = False,
     taey_violated: bool = True,
     impl_match: bool = True,
     outcome: str = "model_gap",
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Build a signed scorer receipt.
+
+    Default signs with isolated fixture material for adversarial probes that
+    the production path MUST reject. Does not confer production admission.
+    """
+    if privkey_hex is None and scorer_id in _FIXTURE_SCORER_MATERIAL:
+        privkey_hex = _fixture_privkey(scorer_id)
     sr: dict[str, Any] = {
         "schema": SCORER_RECEIPT_SCHEMA,
         "scorer_id": scorer_id,
@@ -489,7 +517,6 @@ def _make_scorer_receipt(
     else:
         sr["signature"] = _ed25519_sign(privkey_hex, message)
     if bad_signature:
-        # flip last nibble
         sig = sr["signature"]
         sr["signature"] = sig[:-1] + ("0" if sig[-1] != "0" else "1")
     return sr
@@ -683,15 +710,16 @@ def self_check(repo_root: Path | None) -> None:
     except Reject as exc:
         print(f"self-check single-submitter forgery REJECT ok: {exc}")
 
-    # valid model_gap with authenticated fixture scorer
+    # CONTROL residual after 715655a: fixture-signed model_gap must REJECT on
+    # the production path (even when the signature is cryptographically valid).
     th = "c" * 64
-    valid = _base_verdict(
+    fixture_gap = _base_verdict(
         verdict="model_gap",
         deployed={
             "repo": PROTOCOL_REPO,
             "sha": PROTOCOL_SHA,
             "parity": "Match",
-            "evidence": "scorer-authenticated",
+            "evidence": "fixture-signed forgery",
         },
         predicates={
             "contract_resolved": {"value": True, "register": "Observed"},
@@ -699,7 +727,7 @@ def self_check(repo_root: Path | None) -> None:
             "taey_violated_contract": {"value": True, "register": "Observed"},
         },
         trace={
-            "trace_id": "ok",
+            "trace_id": "fixture-forge",
             "trace_hash": th,
             "actor": "taey",
             "event_count": 3,
@@ -714,10 +742,22 @@ def self_check(repo_root: Path | None) -> None:
             "kind": "spec",
         },
         scorer_receipt=_make_scorer_receipt(trace_hash=th),
-        rationale="authenticated fixture scorer signed model_gap",
+        rationale="fixture scorer must not admit on production path",
     )
-    notes = verify_verdict(valid, repo_root=repo_root)
-    print("self-check valid model_gap PASS", "; ".join(notes) if notes else "")
+    try:
+        verify_verdict(fixture_gap, repo_root=repo_root)
+        raise SystemExit("self-check expected reject fixture-signed model_gap on production path")
+    except Reject as exc:
+        print(f"self-check fixture-scorer production REJECT ok: {exc}")
+
+    # Production allowlist isolation invariants.
+    for sid, entry in SCORER_ALLOWLIST.items():
+        if str(entry.get("role") or "") != PRODUCTION_SCORER_ROLE:
+            raise SystemExit(f"self-check: allowlist entry {sid!r} is not role=production")
+    for fid in _FIXTURE_SCORER_MATERIAL:
+        if fid in SCORER_ALLOWLIST:
+            raise SystemExit(f"self-check: fixture scorer {fid!r} leaked into SCORER_ALLOWLIST")
+    print("self-check production allowlist isolation ok")
 
     code_def = _base_verdict(
         verdict="code_defect",
@@ -841,19 +881,36 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
         expect_pass=False,
     )
 
+    # CONTROL residual: fixture-signed model_gap via normal production path
     probe(
-        "bad_scorer_signature",
+        "fixture_scorer_key_rejects_on_production_path",
         _base_verdict(
             verdict="model_gap",
             deployed=mg_deployed,
             predicates=mg_preds,
             trace=mg_trace,
             contract=mg_contract,
-            scorer_receipt=_make_scorer_receipt(trace_hash=th, bad_signature=True),
-            rationale="bad sig",
+            scorer_receipt=_make_scorer_receipt(trace_hash=th),
+            rationale="fixture key must not admit",
         ),
         expect_pass=False,
     )
+
+    # every known fixture id must reject
+    for fid in sorted(_FIXTURE_SCORER_MATERIAL):
+        probe(
+            f"fixture_key_reject_{fid}",
+            _base_verdict(
+                verdict="model_gap",
+                deployed=mg_deployed,
+                predicates=mg_preds,
+                trace=mg_trace,
+                contract=mg_contract,
+                scorer_receipt=_make_scorer_receipt(trace_hash=th, scorer_id=fid),
+                rationale=f"fixture {fid}",
+            ),
+            expect_pass=False,
+        )
 
     probe(
         "unknown_scorer_id",
@@ -864,23 +921,11 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
             trace=mg_trace,
             contract=mg_contract,
             scorer_receipt=_make_scorer_receipt(
-                trace_hash=th, scorer_id="not-in-allowlist", privkey_hex=_FIXTURE_SCORER_PRIVKEY_HEX
+                trace_hash=th,
+                scorer_id="not-in-allowlist",
+                privkey_hex=_fixture_privkey(),
             ),
             rationale="unknown scorer",
-        ),
-        expect_pass=False,
-    )
-
-    probe(
-        "scorer_trace_hash_mismatch",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=mg_deployed,
-            predicates=mg_preds,
-            trace=mg_trace,
-            contract=mg_contract,
-            scorer_receipt=_make_scorer_receipt(trace_hash="f" * 64),
-            rationale="trace mismatch",
         ),
         expect_pass=False,
     )
@@ -921,19 +966,8 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
     probe("wrong_schema", _base_verdict(schema="sft_failure_triage_verdict.v4"), expect_pass=False)
     probe("valid_quarantine", _base_verdict(), expect_pass=True)
 
-    probe(
-        "valid_model_gap_authenticated_scorer",
-        _base_verdict(
-            verdict="model_gap",
-            deployed=mg_deployed,
-            predicates=mg_preds,
-            trace=mg_trace,
-            contract=mg_contract,
-            scorer_receipt=_make_scorer_receipt(trace_hash=th),
-            rationale="authenticated scorer",
-        ),
-        expect_pass=True,
-    )
+    # Honest: no production scorer pinned ⇒ no valid model_gap admit probe.
+    # When a production key is later pinned, add a production-signed admit probe.
 
     probe(
         "valid_code_defect",
@@ -956,7 +990,6 @@ def run_probe_suite(repo_root: Path | None) -> tuple[int, int]:
         expect_pass=True,
     )
 
-    # non-taey actor with valid scorer still rejects on actor check first
     probe(
         "non_taey_actor",
         _base_verdict(
