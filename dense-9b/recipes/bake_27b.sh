@@ -71,7 +71,22 @@ RUN_ENV="$RUN_ENV NCCL_IB_HCA=$NCCL_IB_HCA NCCL_NET_GDR_LEVEL=$NCCL_NET_GDR_LEVE
 RUN_ENV="$RUN_ENV TORCH_NCCL_ASYNC_ERROR_HANDLING=1 TORCH_NCCL_DUMP_ON_TIMEOUT=1 \
 TORCH_NCCL_TRACE_BUFFER_SIZE=2000 TORCH_NCCL_TRACE_CPP_STACK=1 TORCH_NCCL_DESYNC_DEBUG=1"
 [ -n "${NCCL_DEBUG:-}" ] && RUN_ENV="$RUN_ENV NCCL_DEBUG=$NCCL_DEBUG"
-RECIPE_DIR=${SPARK_HOME}/palios-training/dense-9b/recipes
+# Deployment recipe root: honor REMOTE_PALIOS_TRAINING_ROOT the same way
+# export_exact_checkpoint_artifact_b.sh does for inspection. Hardcoding
+# ${SPARK_HOME}/palios-training forced a dirty/live checkout path on nodes.
+REMOTE_PALIOS_TRAINING_ROOT="${REMOTE_PALIOS_TRAINING_ROOT:-${SPARK_HOME}/palios-training}"
+case "$REMOTE_PALIOS_TRAINING_ROOT" in
+  /*) ;;
+  *)
+    echo "ERROR: REMOTE_PALIOS_TRAINING_ROOT must be an absolute path (got: $REMOTE_PALIOS_TRAINING_ROOT)" >&2
+    exit 1
+    ;;
+esac
+if [ "$REMOTE_PALIOS_TRAINING_ROOT" = "/" ]; then
+  echo "ERROR: REMOTE_PALIOS_TRAINING_ROOT must not be '/'" >&2
+  exit 1
+fi
+RECIPE_DIR="${REMOTE_PALIOS_TRAINING_ROOT%/}/dense-9b/recipes"
 LOGDIR=${SPARK_HOME}/cpt27b_logs
 EXPORT_FREE_MARGIN_BYTES=${EXPORT_FREE_MARGIN_BYTES:-10737418240}
 
