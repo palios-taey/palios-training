@@ -16,9 +16,9 @@
   },
   "contract": {
     "repo": "palios-taey/palios-training",
-    "sha": "c164d35de6edec6c18e32b3f2bdd98fd5c71c1ab",
-    "path": "careers-qwen/SFT_STANDARDS_MAP.md",
-    "lines": "32-34",
+    "sha": "5f01a90b39c133fbc081f791f3bc451e05eadf34",
+    "path": "careers-qwen/docs/SFT_FAILURE_TRIAGE_CONTRACT.md",
+    "lines": "1-40",
     "kind": "spec"
   },
   "deployed": {
