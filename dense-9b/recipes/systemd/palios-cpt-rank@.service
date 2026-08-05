@@ -1,0 +1,31 @@
+# Canonical per-rank supervisor for distributed CPT. Install-time substitution
+# resolves deployment paths; never commit a resolved unit back into this repo.
+[Unit]
+Description=PALIOS distributed CPT rank %i
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=3
+
+[Service]
+Type=exec
+User=@PALIOS_TRAINING_USER@
+WorkingDirectory=@PALIOS_TRAINING_ROOT@/dense-9b/recipes
+Environment=HOME=@SPARK_HOME@
+Environment=SPARK_HOME=@SPARK_HOME@
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=@CPT_ENV_FILE@
+ExecStartPre=/usr/bin/test -d /var/log/journal
+ExecStartPre=/usr/bin/test -s @CPT_ENV_FILE@
+ExecStartPre=/usr/bin/test -x @PALIOS_TRAINING_ROOT@/dense-9b/recipes/systemd/run_cpt_rank.sh
+ExecStart=@PALIOS_TRAINING_ROOT@/dense-9b/recipes/systemd/run_cpt_rank.sh %i
+LimitMEMLOCK=infinity
+Restart=no
+KillMode=control-group
+TimeoutStopSec=300
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=palios-cpt-rank-%i
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,7 @@ set -euo pipefail
 
 : "${SPARK_HOME:?fleet.env did not load}"
 : "${SPARK_MGMT_IPS:?fleet.env did not load}"
+: "${SPARK_USER:?fleet.env did not load}"
 
 NODES=(${SPARK_MGMT_IPS})
 RECIPE_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -88,28 +89,28 @@ collect(){
   local cleanup_stage=1
   trap 'if [ "${cleanup_stage:-0}" = 1 ]; then rm -rf -- "$stage"; fi' RETURN
 
-  ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[0]}" \
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "${SPARK_USER}@${NODES[0]}" \
     "test -f '$spark_export/.metadata'"
   local rank
   for rank in 0 1 2 3; do
-    ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[$rank]}" \
+    ssh -o BatchMode=yes -o ConnectTimeout=10 "${SPARK_USER}@${NODES[$rank]}" \
       "test -f '$spark_export/__${rank}_0.distcp' &&
        test -f '$spark_export/manifest.rank${rank}.json' &&
        test -f '$spark_export/READY.rank${rank}'"
   done
 
   scp -q -o BatchMode=yes -o ConnectTimeout=10 \
-    "spark@${NODES[0]}:$spark_export/.metadata" "$stage/.metadata"
+    "${SPARK_USER}@${NODES[0]}:$spark_export/.metadata" "$stage/.metadata"
 
   local pids=()
   for rank in 0 1 2 3; do
     (
       scp -q -o BatchMode=yes -o ConnectTimeout=10 \
-        "spark@${NODES[$rank]}:$spark_export/__${rank}_0.distcp" "$stage/"
+        "${SPARK_USER}@${NODES[$rank]}:$spark_export/__${rank}_0.distcp" "$stage/"
       scp -q -o BatchMode=yes -o ConnectTimeout=10 \
-        "spark@${NODES[$rank]}:$spark_export/manifest.rank${rank}.json" "$stage/"
+        "${SPARK_USER}@${NODES[$rank]}:$spark_export/manifest.rank${rank}.json" "$stage/"
       scp -q -o BatchMode=yes -o ConnectTimeout=10 \
-        "spark@${NODES[$rank]}:$spark_export/READY.rank${rank}" "$stage/"
+        "${SPARK_USER}@${NODES[$rank]}:$spark_export/READY.rank${rank}" "$stage/"
     ) &
     pids+=($!)
   done
@@ -184,10 +185,10 @@ retire_sparks(){
   }
   local rank existing=0
   for rank in 0 1 2 3; do
-    if ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[$rank]}" \
+    if ssh -o BatchMode=yes -o ConnectTimeout=10 "${SPARK_USER}@${NODES[$rank]}" \
         "test -e '$spark_export'"; then
       existing=$((existing + 1))
-      ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[$rank]}" \
+      ssh -o BatchMode=yes -o ConnectTimeout=10 "${SPARK_USER}@${NODES[$rank]}" \
         "test -f '$spark_export/READY.rank${rank}'; rm -rf -- '$spark_export'"
     fi
   done

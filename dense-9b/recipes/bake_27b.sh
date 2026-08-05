@@ -16,6 +16,15 @@
 #   MAX_SEQ, BATCH_SIZE_PER_RANK, CPT_PACKED, OUTPUT_DIR, CLOCK_CAP.
 set -euo pipefail
 
+: "${SPARK_HOME:?fleet.env must define SPARK_HOME}"
+: "${SPARK_MASTER:?fleet.env must define SPARK_MASTER}"
+: "${SPARK_MGMT_IPS:?fleet.env must define SPARK_MGMT_IPS}"
+: "${SPARK_RAIL_MASTER:?fleet.env must define SPARK_RAIL_MASTER}"
+: "${SPARK_USER:?fleet.env must define SPARK_USER}"
+: "${NCCL_IB_HCA:?run manifest must define NCCL_IB_HCA}"
+: "${NCCL_NET_GDR_LEVEL:?run manifest must define NCCL_NET_GDR_LEVEL}"
+: "${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:?run manifest must define TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC}"
+
 MASTER=${SPARK_MASTER}
 WORKERS=(${SPARK_MGMT_IPS#* })
 ALL=("$MASTER" "${WORKERS[@]}")
@@ -55,6 +64,7 @@ RUN_ENV="$RUN_ENV SPARK_RAIL_MASTER=$SPARK_RAIL_MASTER"
 # bake dies instantly on every rank AFTER printing "launched bake rank N" four times. Fixed in
 # run_4node_27b_cpt.sh 2026-07-28; this file has its OWN RUN_ENV and was missed.
 RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
+RUN_ENV="$RUN_ENV NCCL_IB_HCA=$NCCL_IB_HCA NCCL_NET_GDR_LEVEL=$NCCL_NET_GDR_LEVEL TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=$TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
 [ -n "${EXPORT_DCP:-}" ] && RUN_ENV="$RUN_ENV EXPORT_DCP=$EXPORT_DCP"
 # Q2 Flight-Recorder discriminator env (both lanes): a wedge on ANY collective now aborts-with-stack
 # + dumps per-rank traces instead of the 1-hour silent sit. Harmless on the healthy gloo export path.
@@ -74,9 +84,9 @@ if [ -n "${EXPORT_DCP:-}" ]; then
   existing=0
   for i in 0 1 2 3; do
     host=${ALL[$i]}
-    if ssh -o BatchMode=yes -o ConnectTimeout=8 spark@"$host" "test -e '$EXPORT_DCP'"; then
+    if ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPARK_USER}@${host}" "test -e '$EXPORT_DCP'"; then
       existing=$((existing + 1))
-      ssh -o BatchMode=yes -o ConnectTimeout=8 spark@"$host" \
+      ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPARK_USER}@${host}" \
         "test ! -f '$EXPORT_DCP/READY.rank${i}'" || {
         echo "ERROR: refusing to reset an export with READY.rank${i} on $host" >&2
         exit 1
@@ -89,7 +99,7 @@ if [ -n "${EXPORT_DCP:-}" ]; then
       exit 1
     fi
     for host in "${ALL[@]}"; do
-      ssh -o BatchMode=yes -o ConnectTimeout=8 spark@"$host" \
+      ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPARK_USER}@${host}" \
         "rm -rf -- '$EXPORT_DCP'"
     done
     echo "  reset known-incomplete Artifact B on $existing node(s)"
@@ -97,7 +107,7 @@ if [ -n "${EXPORT_DCP:-}" ]; then
   for i in 0 1 2 3; do
     host=${ALL[$i]}
     read -r shard_bytes available_bytes < <(
-      ssh -o BatchMode=yes -o ConnectTimeout=8 spark@"$host" \
+      ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPARK_USER}@${host}" \
         "printf '%s %s\n' \"\$(stat -c %s '$RESUME_DELTA/dcp/__${i}_0.distcp')\" \"\$(df -B1 --output=avail '$(dirname "$EXPORT_DCP")' | tail -1 | tr -d ' ')\""
     )
     required_bytes=$((shard_bytes + EXPORT_FREE_MARGIN_BYTES))
@@ -111,7 +121,7 @@ fi
 
 launch_rank () {
   local host=$1 rank=$2
-  ssh -o ConnectTimeout=8 spark@"$host" \
+  ssh -o ConnectTimeout=8 "${SPARK_USER}@${host}" \
     "mkdir -p $LOGDIR; cd $RECIPE_DIR && tmux new-session -d -s cpt27b \
        \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/bake_r$rank.log 2>&1\"" \
     && echo "  launched bake rank $rank on $host"
@@ -121,7 +131,7 @@ echo "=== 27B BAKE launch $(date -u +%H:%M:%S) — $RESUME_DELTA → $BAKE_TO_HF
 CLOCK_CAP="${CLOCK_CAP:-2000}"
 if [ "$CLOCK_CAP" != "0" ]; then
   for h in "${ALL[@]}"; do
-    ssh -o ConnectTimeout=6 spark@"$h" "sudo nvidia-smi -pm 1 >/dev/null 2>&1; sudo nvidia-smi -lgc 0,$CLOCK_CAP >/dev/null 2>&1" \
+    ssh -o ConnectTimeout=6 "${SPARK_USER}@${h}" "sudo nvidia-smi -pm 1 >/dev/null 2>&1; sudo nvidia-smi -lgc 0,$CLOCK_CAP >/dev/null 2>&1" \
       && echo "    .${h##*.} capped @${CLOCK_CAP}" || echo "    .${h##*.} cap FAILED"
   done
 fi
@@ -139,7 +149,7 @@ echo ""
 echo "=== waiting for completion on master (BAKE COMPLETE or EXPORT_DCP COMPLETE) ==="
 complete=0
 for t in $(seq 1 60); do   # ~30 min @ 30s
-  st=$(ssh -o ConnectTimeout=5 spark@"$MASTER" \
+  st=$(ssh -o ConnectTimeout=5 "${SPARK_USER}@${MASTER}" \
        'grep -aE "BAKE COMPLETE|EXPORT_DCP COMPLETE|EXPORT_DCP: |BAKE: save_pretrained|BAKE: gathering|OOM|out of memory|No space left|unexpected pos|CheckpointException|ChildFailedError|Traceback|Error|RuntimeError" '"$LOGDIR"'/bake_r0.log 2>/dev/null | tail -1' 2>/dev/null)
   echo "[$t] ${st:0:130}"
   case "$st" in
@@ -150,11 +160,11 @@ for t in $(seq 1 60); do   # ~30 min @ 30s
       exit 1
       ;;
   esac
-  alive=$(ssh -o ConnectTimeout=5 spark@"$MASTER" \
+  alive=$(ssh -o ConnectTimeout=5 "${SPARK_USER}@${MASTER}" \
     'tmux has-session -t cpt27b 2>/dev/null && echo 1 || echo 0' 2>/dev/null)
   if [ "$alive" = 0 ]; then
     echo ">>> FAILURE: rank0 session exited without a completion marker" >&2
-    ssh -o ConnectTimeout=5 spark@"$MASTER" "tail -n 80 '$LOGDIR/bake_r0.log'" >&2
+    ssh -o ConnectTimeout=5 "${SPARK_USER}@${MASTER}" "tail -n 80 '$LOGDIR/bake_r0.log'" >&2
     exit 1
   fi
   sleep 30
@@ -165,9 +175,9 @@ done
 }
 
 if [ -n "${EXPORT_DCP:-}" ]; then
-  ssh -o BatchMode=yes -o ConnectTimeout=8 spark@"$MASTER" "test -f '$EXPORT_DCP/.metadata'"
+  ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPARK_USER}@${MASTER}" "test -f '$EXPORT_DCP/.metadata'"
   for i in 0 1 2 3; do
-    ssh -o BatchMode=yes -o ConnectTimeout=8 spark@"${ALL[$i]}" \
+    ssh -o BatchMode=yes -o ConnectTimeout=8 "${SPARK_USER}@${ALL[$i]}" \
       "test -f '$EXPORT_DCP/READY.rank${i}' && test -f '$EXPORT_DCP/manifest.rank${i}.json'"
   done
   echo "=== Artifact B acceptance: global .metadata + 4/4 READY + 4/4 manifests ==="

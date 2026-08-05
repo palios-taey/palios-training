@@ -15,8 +15,8 @@ export LD_LIBRARY_PATH=$NCCL_LIB:${LD_LIBRARY_PATH:-}
 # --- validated NCCL block for 4× GB10 dual-rail RoCE CPU-proxy ---
 export NCCL_NET_PLUGIN=none          # CRITICAL: AWS-OFI plugin fails on GB10 (proven)
 export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=rocep1s0f0,roceP2p1s0f0
-export NCCL_NET_GDR_LEVEL=0
+export NCCL_IB_HCA="${NCCL_IB_HCA:?ERROR: NCCL_IB_HCA must be supplied by the ruled run manifest}"
+export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:?ERROR: NCCL_NET_GDR_LEVEL must be supplied by the ruled run manifest}"
 export NCCL_IB_GID_INDEX=3
 export NCCL_SOCKET_IFNAME=enp1s0f0np0
 export GLOO_SOCKET_IFNAME=enp1s0f0np0
@@ -34,7 +34,7 @@ export NCCL_IB_RETRY_CNT=7           # hardware-saturating (3-bit QP field)
 # the wedge is node power/thermal crash, not fabric routing — real fix is collective-reduction via micro_bsz)
 # heartbeat watchdog: without this a hung collective NEVER times out → blocked CUDA stream
 # + memory pressure → driver OOM → kernel panic → power-cycle. With it: clean traceback+abort.
-export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=120   # 120=clean OOM abort (fleet exp4), not 1800 (30min hang->freeze risk unattended)
+export TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC="${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:?ERROR: TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC must be supplied by the ruled run manifest}"   # 120=clean OOM abort (fleet exp4), not 1800 (30min hang->freeze risk unattended)
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"   # override to INFO to capture topology + tuned bus-bandwidth
 # NCCL_DEBUG=INFO is verbose (init topology, rings/trees, per-algo BW estimates) — route it to a
@@ -44,11 +44,10 @@ export NCCL_DEBUG_SUBSYS="${NCCL_DEBUG_SUBSYS:-INIT}"   # INIT shows topology de
 # GAIA fragrdma reframe (2026-07-09): the whole-node death (mgmt Realtek + both mlx5 rails die together)
 # is NOT a torch-VMM<->NCCL-VMM allocator conflict — it's NCCL silently doing GPUDirect-RDMA (dma-buf MR)
 # over torch's expandable-segment pages, which torch later unmaps → NIC DMAs into freed pages → PCIe/kernel
-# death. Root: NCCL_NET_GDR_C2C defaults to 1 since 2.27 and OVERRIDES NCCL_NET_GDR_LEVEL on C2C parts (GB10
-# = Grace+Blackwell over NVLink-C2C) → GDR silently live despite GDR_LEVEL=0. Fix: force GDR off + disable
-# every buffer-registration path so NCCL never registers torch's remappable pages with the NIC.
-export NCCL_NET_GDR_C2C=0          # <<< THE one: 2.28 default 1 overrides GDR_LEVEL on C2C parts
-export NCCL_NET_GDR_LEVEL=LOC      # (overrides the =0 above; LOC = keep GDR genuinely off)
+# death. Root: NCCL_NET_GDR_C2C defaults to 1 since 2.27 and overrides the ordinary distance limit on
+# C2C parts (GB10 = Grace+Blackwell over NVLink-C2C). Fix: force C2C GDR off, require the ruled LOC limit,
+# and disable every buffer-registration path so NCCL never registers torch's remappable pages with the NIC.
+export NCCL_NET_GDR_C2C="${NCCL_NET_GDR_C2C:-0}"  # NCCL 2.28 defaults to 1; keep C2C GDR off
 export NCCL_DMABUF_ENABLE=0        # no dma-buf export of remappable VMM pages
 export NCCL_LOCAL_REGISTER=0       # stop ncclCommRegister of allocator segments
 export NCCL_GRAPH_REGISTER=0       # stop graph-capture buffer registration

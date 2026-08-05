@@ -695,10 +695,13 @@ class BucketCPTDataset(Dataset):
                     row = json.loads(raw.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
-                text = str(row.get("text", "")).strip()
-                if not text:
-                    continue
-                length = len(tokenizer.encode(text, add_special_tokens=False)) + 1
+                if isinstance(row.get("input_ids"), list):
+                    length = len(row["input_ids"])
+                else:
+                    text = str(row.get("text", "")).strip()
+                    if not text:
+                        continue
+                    length = len(tokenizer.encode(text, add_special_tokens=False)) + 1
                 if length > max_seq:
                     raise RuntimeError(
                         f"CPT row exceeds max_seq: {length}>{max_seq} at byte offset {offset}; "
@@ -759,13 +762,24 @@ class BucketCPTDataset(Dataset):
             idx, loss_denom_tokens, group_end, group_id, micro_id, pad_to_length = key
         else:
             idx, loss_denom_tokens, group_end, group_id, micro_id, pad_to_length = key, 0, True, -1, 0, 0
+        if idx < 0:
+            return {
+                "input_ids": [(self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.eos_token_id)] * max(1, int(pad_to_length)),
+                "labels": [-100] * max(1, int(pad_to_length)), "is_dpo": False,
+                "loss_denom_tokens": int(loss_denom_tokens), "group_end": bool(group_end), "group_id": int(group_id),
+                "micro_id": int(micro_id), "bucket": "padding", "length": 0,
+                "pad_to_length": int(pad_to_length), "is_padding": True,
+            }
         entry = self.entries[idx]
         with open(self.cpt_path, "rb") as f:
             f.seek(entry["offset"])
             raw = f.readline()
         row = json.loads(raw.decode("utf-8"))
-        text = str(row.get("text", "")).strip()
-        ids = self.tokenizer.encode(text, add_special_tokens=False) + [self.eos_token_id]
+        if isinstance(row.get("input_ids"), list):
+            ids = [int(token) for token in row["input_ids"]]
+        else:
+            text = str(row.get("text", "")).strip()
+            ids = self.tokenizer.encode(text, add_special_tokens=False) + [self.eos_token_id]
         if len(ids) > self.max_seq:
             raise RuntimeError(f"CPT row exceeds max_seq after tokenize: {len(ids)}>{self.max_seq}")
         return {
@@ -834,18 +848,19 @@ class DistributedTokenBucketBatchSampler:
             per_rank = self.bucket_batch_sizes[bucket]
             global_size = per_rank * self.num_replicas
             indices = sorted(bucket_to_indices[bucket], key=lambda i: (self.dataset.entries[i]["length"], i))
-            usable = len(indices) - (len(indices) % global_size)
-            if usable <= 0:
+            if not indices:
                 continue
-            indices = indices[:usable]
+            padding = (-len(indices)) % global_size
+            indices = indices + [-1] * padding
             for start in range(0, len(indices), global_size):
                 global_indices = indices[start : start + global_size]
                 rank_indices = [
                     global_indices[r * per_rank : (r + 1) * per_rank]
                     for r in range(self.num_replicas)
                 ]
-                global_loss_tokens = sum(self.dataset.entries[i]["loss_tokens"] for i in global_indices)
-                max_length = max(self.dataset.entries[i]["length"] for i in global_indices)
+                real = [i for i in global_indices if i >= 0]
+                global_loss_tokens = sum(self.dataset.entries[i]["loss_tokens"] for i in real)
+                max_length = max([self.dataset.entries[i]["length"] for i in real] or [1])
                 microbatches.append({
                     "bucket": bucket,
                     "indices": rank_indices,
@@ -882,6 +897,22 @@ class DistributedTokenBucketBatchSampler:
                 flush_group()
         flush_group()
         return batches
+
+    def coverage_receipt(self):
+        seen = []
+        for batch in self._rank_batches():
+            for item in batch:
+                seen.append(item[0])
+        real = [i for i in seen if i >= 0]
+        duplicates = len(real) - len(set(real))
+        counts = {b: sum(1 for e in self.dataset.entries if e["bucket"] == b)
+                  for b in ("short", "mid", "long")}
+        padding = sum((-n) % (self.bucket_batch_sizes[b] * self.num_replicas)
+                      for b, n in counts.items())
+        return {"real_unique": len(set(real)), "omitted": len(self.dataset.entries)-len(set(real)),
+                "duplicates": duplicates, "expected_padding": padding,
+                "emitted_padding": sum(1 for i in seen if i < 0), "buckets": counts,
+                "optimizer_groups": len({item[3] for batch in self._rank_batches() for item in batch})}
 
 
 def _package_version(name):
@@ -1240,6 +1271,7 @@ def main():
     total_steps = int(os.environ.get("TOTAL_STEPS", "3000"))
     save_every = int(os.environ.get("SAVE_EVERY", "50"))
     session_limit = int(os.environ.get("SESSION_LIMIT", "250"))
+    _memory_gate_log_every_step = os.environ.get("MEMORY_GATE_LOG_EVERY_STEP", "0") == "1"
     _expected_sft_samples = int(os.environ.get("EXPECTED_SFT_SAMPLES", "0"))
     if _expected_sft_samples < 0:
         raise RuntimeError("EXPECTED_SFT_SAMPLES must be zero or positive")
@@ -1681,6 +1713,7 @@ def main():
     #           token-budget accumulation. Set CPT_BUCKETING=0 only for a
     #           diagnostic rollback to the old random CombinedSFTDataset path.
     cpt_bucket_mode = False
+    _bucket_groups_by_epoch = None
     # PACKED mode: pre-tokenized fixed-length blocks (uniform shape → no allocator fragmentation →
     # fixes the first-step OOM + zero padding waste). Triggered by CPT_PACKED=1 or a "packed" filename.
     _packed = bool(cpt_data) and (os.environ.get("CPT_PACKED", "0") == "1"
@@ -1804,6 +1837,18 @@ def main():
                 dtype=torch.long,
             )
         if "loss_denom_tokens" in batch[0]:
+            denoms = [int(b["loss_denom_tokens"]) for b in batch]
+            if not denoms or min(denoms) <= 0 or len(set(denoms)) != 1:
+                raise RuntimeError("CPT bucket group denominator must be identical and positive")
+            if any(bool(b.get("is_padding", False)) and any(v != -100 for v in b["labels"])
+                   for b in batch):
+                raise RuntimeError("CPT bucket padding labels must be fully masked")
+            if any(not b.get("is_padding", False) and not any(v != -100 for v in b["labels"])
+                   for b in batch):
+                raise RuntimeError("CPT bucket real rows must contribute loss")
+            out["is_padding"] = torch.tensor(
+                [1 if b.get("is_padding", False) else 0 for b in batch], dtype=torch.long
+            )
             out["loss_denom_tokens"] = torch.tensor(
                 [int(b["loss_denom_tokens"]) for b in batch], dtype=torch.long
             )
@@ -1832,6 +1877,18 @@ def main():
             target_tokens_per_step=token_budget_per_step,
             seed=42,
         )
+        _coverage = sampler.coverage_receipt()
+        _bucket_groups_by_epoch = []
+        for _epoch in range(_epochs):
+            sampler.set_epoch(_epoch)
+            _bucket_groups_by_epoch.append(len({item[3] for batch in sampler._rank_batches() for item in batch}))
+        sampler.set_epoch(0)
+        if (_coverage["real_unique"] != len(dataset) or _coverage["omitted"] or
+                _coverage["duplicates"] or _coverage["emitted_padding"] != _coverage["expected_padding"] or
+                _coverage["optimizer_groups"] <= 0):
+            raise RuntimeError(f"CPT BUCKET COVERAGE FAILED: {_coverage}")
+        if accelerator.is_main_process:
+            log.info(f"CPT BUCKET COVERAGE PASS: {_coverage}")
         dataloader = DataLoader(
             dataset,
             batch_sampler=sampler,
@@ -2366,9 +2423,12 @@ def main():
             log.info(f"COVERAGE PROOF: len(dataloader) unavailable ({_e})")
     else:
         if accelerator.is_main_process:
-            log.info(f"COVERAGE PROOF: steps/epoch={_spe} global_batch={_gb} "
-                     f"blocks/epoch={_blocks_per_epoch} dataset_blocks={_dataset_blocks} "
-                     f"(FULL coverage ⇔ blocks/epoch ≈ dataset_blocks)")
+            if cpt_bucket_mode:
+                log.info(f"CPT BUCKET COVERAGE PROOF: rows={len(dataset)} groups_by_epoch={_bucket_groups_by_epoch}")
+            else:
+                log.info(f"COVERAGE PROOF: steps/epoch={_spe} global_batch={_gb} "
+                         f"blocks/epoch={_blocks_per_epoch} dataset_blocks={_dataset_blocks} "
+                         f"(FULL coverage ⇔ blocks/epoch ≈ dataset_blocks)")
         _full_coverage_expected = _packed or (
             not cpt_bucket_mode and not os.environ.get("LANE_WEIGHTS", ""))
         if _full_coverage_expected and not (
@@ -2404,8 +2464,8 @@ def main():
         # optimizer steps, runs packed (bake_27b.sh passes CPT_PACKED through), and carries
         # TOTAL_STEPS=1 as a formality. Without this clause the contract fires on every bake —
         # the identical false positive the warmup guard shipped and had to be corrected for.
-        if _packed and not _is_bake and not _exact_sft_epoch and not _natural_sft_mode:
-            _expected_cpt_steps = _spe * _epochs
+        if (_packed or cpt_bucket_mode) and not _is_bake and not _exact_sft_epoch and not _natural_sft_mode:
+            _expected_cpt_steps = (sum(_bucket_groups_by_epoch) if _bucket_groups_by_epoch is not None else _spe * _epochs)
             _partial = os.environ.get("HORIZON_PARTIAL", "")
             if _partial:
                 if int(_partial) != total_steps:
@@ -2416,14 +2476,14 @@ def main():
                     )
                 if accelerator.is_main_process:
                     _frac = 100.0 * total_steps / max(1, _expected_cpt_steps)
-                    log.info(
-                        f"CPT HORIZON: PARTIAL run declared — {total_steps} of "
-                        f"{_expected_cpt_steps} steps ({_frac:.1f}% of the corpus). "
-                        f"{max(0, (_expected_cpt_steps - total_steps) * _gb)} blocks will NOT be "
-                        "trained. This is a probe, not a production run."
-                    )
+                    if cpt_bucket_mode:
+                        log.info(f"CPT BUCKET HORIZON PARTIAL: {total_steps}/{_expected_cpt_steps} optimizer groups ({_frac:.1f}%)")
+                    else:
+                        log.info(f"CPT HORIZON PARTIAL: {total_steps}/{_expected_cpt_steps} steps; {max(0, (_expected_cpt_steps-total_steps)*_gb)} blocks untrained")
             elif total_steps != _expected_cpt_steps:
                 _missed = (_expected_cpt_steps - total_steps) * _gb
+                if cpt_bucket_mode:
+                    raise RuntimeError(f"CPT BUCKET HORIZON FAILED: TOTAL_STEPS={total_steps}, expected optimizer groups={_expected_cpt_steps}, remaining={_expected_cpt_steps-total_steps}")
                 raise RuntimeError(
                     "CPT HORIZON CONTRACT FAILED: "
                     f"TOTAL_STEPS={total_steps} but this corpus needs {_expected_cpt_steps} "
@@ -2434,10 +2494,10 @@ def main():
                     "deliberate probe with HORIZON_PARTIAL matching TOTAL_STEPS."
                 )
             elif accelerator.is_main_process:
-                log.info(
-                    f"CPT HORIZON CONTRACT PASS: TOTAL_STEPS={total_steps} = {_spe} steps/epoch "
-                    f"x {_epochs} epoch(s), dataset_blocks={_dataset_blocks} global_batch={_gb}"
-                )
+                if cpt_bucket_mode:
+                    log.info(f"CPT BUCKET HORIZON PASS: TOTAL_STEPS={total_steps} groups_by_epoch={_bucket_groups_by_epoch}")
+                else:
+                    log.info(f"CPT HORIZON CONTRACT PASS: TOTAL_STEPS={total_steps} = {_spe} steps/epoch x {_epochs}, dataset_blocks={_dataset_blocks} global_batch={_gb}")
 
         if _natural_sft_mode and _expected_sft_samples:
             expected_steps = math.ceil(_expected_sft_samples / _gb) * _epochs
@@ -3287,7 +3347,14 @@ def main():
             # blocks), allocNow=live tensors. If resNow GROWS but allocNow FLAT → allocator caching
             # (variable-batch hoarding; fix gc_threshold/fixed-batch). If allocNow GROWS → real leak
             # (retained tensor/graph). sysUsed=system RAM (= GPU on unified) to catch CPU-side growth.
-            if accelerator.is_main_process and (global_step <= resume_step + 12 or global_step % 10 == 0):
+            if (
+                (accelerator.is_main_process or _memory_gate_log_every_step)
+                and (
+                    _memory_gate_log_every_step
+                    or global_step <= resume_step + 12
+                    or global_step % 10 == 0
+                )
+            ):
                 mem = torch.cuda.mem_get_info()
                 vm = psutil.virtual_memory()
                 stats = torch.cuda.memory_stats()
@@ -3311,7 +3378,7 @@ def main():
                     _tokwin_n = 0; _tokwin_t0 = _time.time()
                 except NameError:
                     _toks = ""
-                log.info(f"[step {global_step}] loss={loss_str} "
+                log.info(f"[step {global_step}] rank={accelerator.process_index} loss={loss_str} "
                          f"lr={lr_scheduler.get_last_lr()[0]:.2e} free={mem[0]/1e9:.1f}GB "
                          f"resNow={reserved/1e9:.1f}GB allocNow={alloc/1e9:.1f}GB "
                          f"sysUsed={vm.used/1e9:.1f}GB frag={frag:.1%} "
@@ -3512,13 +3579,25 @@ def main():
 
 def _evict_page_cache(filepath):
     """Evict file from page cache to protect UMA headroom."""
+    fd = os.open(filepath, os.O_RDONLY)
     try:
-        fd = os.open(filepath, os.O_RDONLY)
         os.fsync(fd)
         os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    finally:
         os.close(fd)
-    except (OSError, AttributeError):
-        pass
+
+
+def _host_memory_gb():
+    fields = {}
+    with open("/proc/meminfo", encoding="ascii") as meminfo:
+        for line in meminfo:
+            name, value = line.split(":", 1)
+            if name in {"MemAvailable", "Cached", "Dirty", "Writeback"}:
+                fields[name] = int(value.split()[0]) / (1024 * 1024)
+    missing = {"MemAvailable", "Cached", "Dirty", "Writeback"} - fields.keys()
+    if missing:
+        raise RuntimeError(f"/proc/meminfo lacks required fields: {sorted(missing)}")
+    return fields
 
 
 def _free_for_save(model, optimizer):
@@ -3570,11 +3649,46 @@ def _save_checkpoint_dcp(model, optimizer, lr_scheduler, tokenizer,
     import gc
     gc.collect(); torch.cuda.empty_cache(); gc.collect()
     mem = torch.cuda.mem_get_info()
+    host_mem = _host_memory_gb()
     if accelerator.is_main_process:
-        log.info(f"DCP save → {ckpt_dir} (sharded, self-contained per-rank, no gather) | free={mem[0]/1e9:.1f}GB")
+        log.info(
+            f"DCP save → {ckpt_dir} (sharded, self-contained per-rank, no gather) | "
+            f"free={mem[0]/1e9:.1f}GB host_available={host_mem['MemAvailable']:.1f}GB "
+            f"cached={host_mem['Cached']:.1f}GB dirty={host_mem['Dirty']:.1f}GB"
+        )
     # sharded model+optimizer state (DTensors) — no gather; use_collectives=False → per-rank bundle
     msd, osd = get_state_dict(model, optimizer)
     dcp.save({"model": msd, "optim": osd}, checkpoint_id=dcp_dir, use_collectives=False)
+
+    rank = accelerator.process_index
+    rank_metadata = os.path.join(dcp_dir, f"__{rank}.metadata")
+    rank_shards = sorted(glob.glob(os.path.join(dcp_dir, f"__{rank}_*.distcp")))
+    if not os.path.isfile(rank_metadata) or not rank_shards:
+        raise RuntimeError(
+            f"DCP save returned without a complete local rank-{rank} bundle: "
+            f"metadata={os.path.isfile(rank_metadata)} shards={len(rank_shards)}"
+        )
+
+    # On UMA, a closed DCP shard can remain dirty in host page cache while the next batch
+    # reallocates CUDA memory. Flush and evict it before any rank is allowed to continue.
+    post_write_host = _host_memory_gb()
+    del msd, osd
+    gc.collect(); torch.cuda.empty_cache(); gc.collect()
+    for checkpoint_file in [rank_metadata, *rank_shards]:
+        _evict_page_cache(checkpoint_file)
+    post_evict_host = _host_memory_gb()
+    post_evict_free, _ = torch.cuda.mem_get_info()
+    log.info(
+        f"DCP durable reclaim COMPLETE: rank={rank} files={1 + len(rank_shards)} "
+        f"host_available={post_write_host['MemAvailable']:.1f}→"
+        f"{post_evict_host['MemAvailable']:.1f}GB "
+        f"cached={post_write_host['Cached']:.1f}→{post_evict_host['Cached']:.1f}GB "
+        f"dirty={post_write_host['Dirty']:.1f}→{post_evict_host['Dirty']:.1f}GB "
+        f"writeback={post_write_host['Writeback']:.1f}→{post_evict_host['Writeback']:.1f}GB "
+        f"torch_alloc={torch.cuda.memory_allocated()/1e9:.1f}GB "
+        f"torch_reserved={torch.cuda.memory_reserved()/1e9:.1f}GB "
+        f"driver_free={post_evict_free/1e9:.1f}GB"
+    )
     accelerator.wait_for_everyone()
     # Per-rank trainer meta + COMPLETE (each node self-contained; RNG is per-rank = correct on resume)
     meta = {

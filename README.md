@@ -115,6 +115,24 @@ The export contract is a unanimous Chats ruling (`dense-9b/experiments/BAKE_ARCH
 **no `full_state_dict`, no gather.** Use `EXPORT_DCP`, then collect, then `bake_dcp_offline.py`
 with `no_dist=True`. Consolidation and HF output never land on rank 0.
 
+Select a checkpoint by exact step; never choose `latest` or manipulate a checkpoint directory:
+
+```bash
+bash dense-9b/recipes/export_exact_checkpoint_artifact_b.sh inspect \
+  <step> <absolute-checkpoint-root>
+bash dense-9b/recipes/export_exact_checkpoint_artifact_b.sh export \
+  <step> <absolute-checkpoint-root> "${SPARK_HOME}/exports/<name>_artifactB"
+bash dense-9b/recipes/artifact_b_sync.sh collect \
+  "${SPARK_HOME}/exports/<name>_artifactB" <absolute-controller-dir>
+python3 dense-9b/recipes/bake_dcp_offline.py \
+  --assembled <absolute-controller-dir> --verify-manifests --verify-only
+```
+
+The selector requires the requested `checkpoint-<step>` basename plus matching `COMPLETE`,
+`trainer_meta.pt`, rank metadata, and non-empty rank shards on all four nodes before export starts.
+Artifact B collection verifies every rank manifest and digest before the offline converter is
+eligible to run.
+
 `BAKE_TO_HF` is legacy and the trainer itself calls it **wedge-prone**. A full-state gather puts
 rank 0 in one collective while peers are in another and deadlocks permanently. Its signature is
 worth memorising: **zero disk IO, zero network bytes, RSS frozen to the byte, threads at 100%.**

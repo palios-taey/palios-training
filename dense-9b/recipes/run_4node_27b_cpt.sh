@@ -3,13 +3,19 @@
 # addresses here — the public repo is production infrastructure; topology is deployment config.
 [ -f "$(git rev-parse --show-toplevel 2>/dev/null)/fleet.env" ] && . "$(git rev-parse --show-toplevel)/fleet.env"
 # Mira-side 4-node orchestrator for Qwen3.6-27B full-parameter CPT.
-# Launches the per-node recipe (launch_cpt_qwen36_27b_fsdp.sh) on each Spark in a
-# detached tmux, master (.68=rank0) FIRST so it binds :29500 before workers dial in.
+# Launches the per-node recipe (launch_cpt_qwen36_27b_fsdp.sh) under a systemd
+# service on each Spark, master rank 0 FIRST so it binds :29500 before workers dial in.
 #
 # PRE-CONDITION (caller's responsibility, per reboot-after-every-run): all 4 nodes
 # freshly REBOOTED + pristine (avail~108G, /dev/shm/nccl*=0, no torch procs). This
 # script does NOT reboot — it assumes clean nodes and refuses to kill-and-relaunch.
 set -uo pipefail
+
+: "${SPARK_HOME:?fleet.env must define SPARK_HOME}"
+: "${SPARK_MASTER:?fleet.env must define SPARK_MASTER}"
+: "${SPARK_MGMT_IPS:?fleet.env must define SPARK_MGMT_IPS}"
+: "${SPARK_RAIL_MASTER:?fleet.env must define SPARK_RAIL_MASTER}"
+: "${SPARK_USER:?fleet.env must define SPARK_USER}"
 
 MASTER=${SPARK_MASTER}            # rank 0 — torchrun rendezvous host (${SPARK_RAIL_MASTER} rail)
 WORKERS=(${SPARK_MGMT_IPS#* })   # ranks 1,2,3
@@ -29,8 +35,8 @@ export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_su
 : "${CPT_SHORT_BATCH:=8}"; : "${CPT_MID_BATCH:=4}"; : "${CPT_LONG_BATCH:=1}"
 # PACKED mode (fixed-length, uniform shape → no fragmentation): set CPT_DATA to a *packed* corpus +
 # BATCH_SIZE_PER_RANK (bucket vars are then ignored by the trainer's else-branch dataloader).
-: "${BATCH_SIZE_PER_RANK:=1}"; : "${CPT_PACKED:=0}"
-RUN_ENV="CPT_DATA=$CPT_DATA MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK CPT_PACKED=$CPT_PACKED CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
+: "${BATCH_SIZE_PER_RANK:=1}"; : "${CPT_PACKED:=0}"; : "${CPT_BUCKETING:=1}"
+RUN_ENV="CPT_DATA=$CPT_DATA MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK CPT_PACKED=$CPT_PACKED CPT_BUCKETING=$CPT_BUCKETING CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
 # TOPOLOGY MUST BE FORWARDED — the nodes do not have fleet.env.
 # This script sources fleet.env on MIRA, but fleet.env is gitignored and is NOT deployed to the
 # Sparks. launch_cpt_qwen36_27b_fsdp.sh:399 dereferences SPARK_RAIL_MASTER under `set -u`, so
@@ -102,6 +108,7 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 # believes they made, which reads as a broken gate and invites bypassing it. The trainer requires
 # this to EQUAL TOTAL_STEPS, so a stale value fails closed rather than open.
 [ -n "${HORIZON_PARTIAL:-}" ] && RUN_ENV="$RUN_ENV HORIZON_PARTIAL=$HORIZON_PARTIAL"
+[ -n "${MEMORY_GATE_LOG_EVERY_STEP:-}" ] && RUN_ENV="$RUN_ENV MEMORY_GATE_LOG_EVERY_STEP=$MEMORY_GATE_LOG_EVERY_STEP"
 # NSYS_* must be named here or the profile silently never arms: RUN_ENV is an ALLOWLIST, and a var
 # absent from it does not reach the node. That is the same mechanism as the 2026-07-13 LR/WARMUP
 # non-forwarding bug recorded above — the run would look normal and produce no trace.
@@ -146,40 +153,152 @@ RUN_ENV="$RUN_ENV ADAFACTOR_EPS1=$ADAFACTOR_EPS1"
 : "${ADAFACTOR_DOSE_LOG:=1}"
 [ -n "${ADAFACTOR_DOSE_LOG:-}" ] && RUN_ENV="$RUN_ENV ADAFACTOR_DOSE_LOG=$ADAFACTOR_DOSE_LOG"
 [ -n "${BAKE_TO_HF:-}" ] && RUN_ENV="$RUN_ENV BAKE_TO_HF=$BAKE_TO_HF"
+# EXPORT_DCP is the coordinated sharded export path for full-parameter CPT.
+# It is intentionally distinct from adapter-only export.
+[ -n "${EXPORT_DCP:-}" ] && RUN_ENV="$RUN_ENV EXPORT_DCP=$EXPORT_DCP"
 # Forward NCCL debug capture to the per-node sessions (the orchestrator only passes an allowlist, so
 # NCCL_DEBUG set on the Mira shell would NOT reach the remote tmux without this). Enables the fabric
 # bus-bandwidth/topology capture (NCCL_DEBUG=INFO NCCL_DEBUG_FILE=...).
 [ -n "${NCCL_DEBUG:-}" ] && RUN_ENV="$RUN_ENV NCCL_DEBUG=$NCCL_DEBUG"
 [ -n "${NCCL_DEBUG_FILE:-}" ] && RUN_ENV="$RUN_ENV NCCL_DEBUG_FILE=$NCCL_DEBUG_FILE"
 [ -n "${NCCL_DEBUG_SUBSYS:-}" ] && RUN_ENV="$RUN_ENV NCCL_DEBUG_SUBSYS=$NCCL_DEBUG_SUBSYS"
+# NCCL/torch TUNING — not debug. Only the four DEBUG vars above were forwarded, so the GB10/Blackwell
+# settings that actually change fabric behaviour were unreachable through this launcher: values
+# exported by the controller were silently dropped before reaching the remote process, so the run
+# proceeded on defaults while the operator believed the explicit manifest was active.
+#
+# WHY THE ALLOWLIST GATE DID NOT CATCH THIS, recorded so the gate is not over-trusted:
+# allowlist_completeness_gate.py diffs the trainer's own os.environ.get calls against what the
+# launcher forwards. NCCL_* and TORCH_NCCL_* are consumed by the NCCL C library and by torch's
+# distributed layer, NEVER read by the trainer through os.environ — so they are invisible to that
+# scan by construction. The gate covers trainer-read config only; library-read config needs this
+# explicit list.
+: "${NCCL_IB_HCA:?ERROR: NCCL_IB_HCA must state the canonical HCA and port selection; it is not defaulted}"
+: "${NCCL_NET_GDR_LEVEL:?ERROR: NCCL_NET_GDR_LEVEL must state the canonical GDR selection; it is not defaulted}"
+: "${TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC:?ERROR: TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC must state the canonical heartbeat; it is not defaulted}"
+RUN_ENV="$RUN_ENV NCCL_IB_HCA=$NCCL_IB_HCA NCCL_NET_GDR_LEVEL=$NCCL_NET_GDR_LEVEL TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC=$TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"
+[ -n "${NCCL_P2P_DISABLE:-}" ] && RUN_ENV="$RUN_ENV NCCL_P2P_DISABLE=$NCCL_P2P_DISABLE"
+[ -n "${NCCL_SHM_DISABLE:-}" ] && RUN_ENV="$RUN_ENV NCCL_SHM_DISABLE=$NCCL_SHM_DISABLE"
+[ -n "${NCCL_IB_DISABLE:-}" ] && RUN_ENV="$RUN_ENV NCCL_IB_DISABLE=$NCCL_IB_DISABLE"
+[ -n "${NCCL_SOCKET_IFNAME:-}" ] && RUN_ENV="$RUN_ENV NCCL_SOCKET_IFNAME=$NCCL_SOCKET_IFNAME"
+[ -n "${NCCL_ALGO:-}" ] && RUN_ENV="$RUN_ENV NCCL_ALGO=$NCCL_ALGO"
+[ -n "${NCCL_PROTO:-}" ] && RUN_ENV="$RUN_ENV NCCL_PROTO=$NCCL_PROTO"
+[ -n "${NCCL_TIMEOUT:-}" ] && RUN_ENV="$RUN_ENV NCCL_TIMEOUT=$NCCL_TIMEOUT"
+[ -n "${TORCH_NCCL_DUMP_ON_TIMEOUT:-}" ] && RUN_ENV="$RUN_ENV TORCH_NCCL_DUMP_ON_TIMEOUT=$TORCH_NCCL_DUMP_ON_TIMEOUT"
+[ -n "${TORCH_NCCL_ASYNC_ERROR_HANDLING:-}" ] && RUN_ENV="$RUN_ENV TORCH_NCCL_ASYNC_ERROR_HANDLING=$TORCH_NCCL_ASYNC_ERROR_HANDLING"
+[ -n "${PG_TIMEOUT_SEC:-}" ] && RUN_ENV="$RUN_ENV PG_TIMEOUT_SEC=$PG_TIMEOUT_SEC"
 [ -n "${FP8:-}" ] && RUN_ENV="$RUN_ENV FP8=$FP8"
 RECIPE_DIR=${SPARK_HOME}/palios-training/dense-9b/recipes
 LOGDIR=${SPARK_HOME}/cpt27b_logs
+SYSTEMD_STARTER=${RECIPE_DIR}/systemd/start_cpt_rank_service.sh
+SYSTEMD_VERIFIER=${RECIPE_DIR}/systemd/verify_cpt_rank_process_env.sh
+ATTEMPTED_HOSTS=()
+ATTEMPTED_RANKS=()
 
 launch_rank () {  # $1=host  $2=rank
   local host=$1 rank=$2
-  # LOG ROTATION (2026-07-27). The redirect below is `>`, so every launch TRUNCATED the previous
-  # run's log. On 2026-07-26 that destroyed the forensics of a completed null run: a later launch
-  # that was killed ~60s in overwrote rank 0's log with a 10-line stub, and the AF-DOSE /
-  # monkeypatch-install evidence needed to explain the null was gone. Worse, the stub was then
-  # read as if it were the null run's log and produced two opposite wrong conclusions before the
-  # mtimes gave it away. Ranks 1-3 survived only because that launch died before reaching them.
-  # Rotate-then-write: the read path ($LOGDIR/r$rank.log) is unchanged for the monitor below and
-  # for every caller, and no prior run's evidence is ever destroyed again. Cost is disk, which is
-  # the cheapest thing we have (478G free) against a forensic dead end, which cost a whole evening.
-  ssh -o ConnectTimeout=8 spark@"$host" \
-    "mkdir -p $LOGDIR; \
-     if [ -s $LOGDIR/r$rank.log ]; then \
-       mv $LOGDIR/r$rank.log $LOGDIR/r$rank.\$(date -r $LOGDIR/r$rank.log +%Y%m%dT%H%M%S).log; \
-     fi; \
-     cd $RECIPE_DIR && tmux new-session -d -s cpt27b \
-       \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/r$rank.log 2>&1\"" \
-    && echo "  launched rank $rank on $host" || echo "  FAILED to launch rank $rank on $host"
+  local entry remote_command
+  local -a run_env_entries=()
+
+  read -r -a run_env_entries <<< "$RUN_ENV"
+  for entry in "${run_env_entries[@]}"; do
+    if [[ ! "$entry" =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$ ]]; then
+      echo "ERROR: RUN_ENV cannot be serialized safely for rank $rank: $entry" >&2
+      return 1
+    fi
+  done
+
+  printf -v remote_command \
+    'SPARK_HOME=%q PALIOS_TRAINING_USER=%q /usr/bin/bash %q %q' \
+    "$SPARK_HOME" "$SPARK_USER" "$SYSTEMD_STARTER" "$rank"
+
+  # Record the attempt before SSH. A lost start receipt is ambiguous: the unit may
+  # already be running remotely even though this client observes a transport failure.
+  ATTEMPTED_HOSTS+=("$host")
+  ATTEMPTED_RANKS+=("$rank")
+
+  if printf '%s\n' "${run_env_entries[@]}" | \
+      ssh -o ConnectTimeout=8 -o BatchMode=yes "${SPARK_USER}@${host}" "$remote_command"; then
+    echo "  systemd owns rank $rank on $host"
+  else
+    echo "  FAILED to start supervised rank $rank on $host" >&2
+    return 1
+  fi
+}
+
+rollback_attempted_ranks() {
+  local idx host rank unit remote_command
+  local rollback_status=0
+
+  echo "  rolling back ${#ATTEMPTED_HOSTS[@]} attempted rank service(s)" >&2
+  for ((idx=${#ATTEMPTED_HOSTS[@]} - 1; idx >= 0; idx--)); do
+    host=${ATTEMPTED_HOSTS[$idx]}
+    rank=${ATTEMPTED_RANKS[$idx]}
+    unit="palios-cpt-rank@${rank}.service"
+    printf -v remote_command \
+      'unit=%q; load_state=$(sudo systemctl show --property LoadState --value "$unit") || exit 1; if [ "$load_state" = not-found ]; then exit 0; fi; sudo systemctl stop "$unit"; active_state=$(sudo systemctl show --property ActiveState --value "$unit") || exit 1; [ "$active_state" = inactive ] || [ "$active_state" = failed ]' \
+      "$unit"
+
+    if ssh -o ConnectTimeout=8 -o BatchMode=yes "${SPARK_USER}@${host}" "$remote_command"; then
+      echo "  rollback confirmed rank $rank on $host" >&2
+    else
+      echo "  ROLLBACK FAILED rank $rank on $host" >&2
+      rollback_status=1
+    fi
+  done
+
+  return "$rollback_status"
+}
+
+launch_rank_or_rollback() {
+  local host=$1 rank=$2 launch_status
+
+  launch_rank "$host" "$rank"
+  launch_status=$?
+  if [ "$launch_status" -eq 0 ]; then
+    return 0
+  fi
+
+  echo "ERROR: rank $rank failed to start on $host; stopping the whole attempted job" >&2
+  if ! rollback_attempted_ranks; then
+    echo "FATAL: whole-job rollback was incomplete; manual intervention is required" >&2
+  fi
+  return "$launch_status"
+}
+
+verify_all_rank_environments() {
+  local rank host remote_command
+  local verification_failures=0
+
+  for rank in 0 1 2 3; do
+    host=${ALL[$rank]}
+    printf -v remote_command '/usr/bin/bash %q %q' "$SYSTEMD_VERIFIER" "$rank"
+    if ssh -o ConnectTimeout=8 -o BatchMode=yes "${SPARK_USER}@${host}" "$remote_command"; then
+      echo "  live environment confirmed rank $rank on $host"
+    else
+      echo "  LIVE ENVIRONMENT FAILED rank $rank on $host" >&2
+      verification_failures=$((verification_failures + 1))
+    fi
+  done
+
+  [ "$verification_failures" -eq 0 ]
+}
+
+verify_all_rank_environments_or_rollback() {
+  if verify_all_rank_environments; then
+    return 0
+  fi
+
+  echo "ERROR: live environment verification failed; stopping the whole attempted job" >&2
+  if ! rollback_attempted_ranks; then
+    echo "FATAL: whole-job rollback was incomplete; manual intervention is required" >&2
+  fi
+  return 1
 }
 
 measure_gemm_tflops() {
   local host=$1
-  ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$host" \
+  ssh -o ConnectTimeout=8 -o BatchMode=yes "${SPARK_USER}@${host}" \
     "PYTHONWARNINGS=ignore python3 -c '
 import subprocess
 import time
@@ -257,7 +376,7 @@ CLOCK_CAP="${CLOCK_CAP:-2000}"
 if [ "$CLOCK_CAP" != "0" ]; then
   echo "  thermal: capping graphics clock <= ${CLOCK_CAP}MHz on all 4 nodes (prevents ~94C hard-crash)"
   for h in "${ALL[@]}"; do
-    ssh -o ConnectTimeout=6 spark@"$h" "sudo nvidia-smi -pm 1 >/dev/null 2>&1; sudo nvidia-smi -lgc 0,$CLOCK_CAP >/dev/null 2>&1 && nvidia-smi --query-gpu=clocks.max.gr --format=csv,noheader 2>/dev/null | head -1" \
+    ssh -o ConnectTimeout=6 "${SPARK_USER}@${h}" "sudo nvidia-smi -pm 1 >/dev/null 2>&1; sudo nvidia-smi -lgc 0,$CLOCK_CAP >/dev/null 2>&1 && nvidia-smi --query-gpu=clocks.max.gr --format=csv,noheader 2>/dev/null | head -1" \
       && echo "    .${h##*.} capped @${CLOCK_CAP}" || echo "    .${h##*.} CAP FAILED (check sudo/nvidia-smi)"
   done
 fi
@@ -311,52 +430,82 @@ if [ "$GEMM_PREFLIGHT_ONLY" = "1" ]; then
 fi
 
 echo "  master $MASTER = rank 0 (binding :29500 first)"
-launch_rank "$MASTER" 0
+launch_rank_or_rollback "$MASTER" 0 || exit 1
 echo "  (master settling 12s...)"
 sleep 12
-for i in 0 1 2; do launch_rank "${WORKERS[$i]}" $((i+1)); done
+for i in 0 1 2; do launch_rank_or_rollback "${WORKERS[$i]}" $((i+1)) || exit 1; done
 
 echo ""
 echo "=== monitor: peakUsed/node + trainer liveness + master optimizer-step progression ==="
 STEP_SEEN=0
+ENV_VERIFIED=0
 for t in $(seq 1 80); do   # ~40 min @ 30s
-  line=""; alive=0
-  for h in "${ALL[@]}"; do
-    r=$(ssh -o ConnectTimeout=5 -o BatchMode=yes spark@"$h" \
-        'u=$(free -g|awk "/Mem:/{print \$3}"); p=$(ps -eo comm=,args= | awk "/^python3[[:space:]].*[t]rain_fsdp_dense_9b.py/{n++} END{print n+0}"); printf "%s %s" "$u" "$p"' \
+  line=""; alive=0; failed_units=0
+  for rank in 0 1 2 3; do
+    h=${ALL[$rank]}
+    r=$(ssh -o ConnectTimeout=5 -o BatchMode=yes "${SPARK_USER}@${h}" \
+        'u=$(free -g|awk "/Mem:/{print \$3}"); p=$(ps -eo comm=,args= | awk "/^python3[[:space:]].*[t]rain_fsdp_dense_9b.py/{n++} END{print n+0}"); s=$(systemctl show --property ActiveState --value palios-cpt-rank@'"$rank"'.service); printf "%s %s %s" "$u" "$p" "$s"' \
         2>/dev/null)
-    used=""; trainers=""; extra=""
-    read -r used trainers extra <<<"$r"
-    if [[ "$used" =~ ^[0-9]+$ && "$trainers" =~ ^[0-9]+$ && -z "$extra" ]]; then
+    used=""; trainers=""; unit_state=""; extra=""
+    read -r used trainers unit_state extra <<<"$r"
+    if [[ "$used" =~ ^[0-9]+$ && "$trainers" =~ ^[0-9]+$ && "$unit_state" =~ ^[a-z-]+$ && -z "$extra" ]]; then
       [ "$trainers" -gt 0 ] && alive=$((alive+1))
-      line="$line ${h##*.}=${used}G/${trainers}t"
+      [[ "$unit_state" =~ ^(active|activating)$ ]] || failed_units=$((failed_units+1))
+      line="$line ${h##*.}=${used}G/${trainers}t/${unit_state}"
     else
       line="$line ${h##*.}=unreachable"
     fi
   done
+  if [ "$failed_units" -ne 0 ]; then
+    echo ">>> $failed_units systemd rank unit(s) failed — stopping ALL RANKS" >&2
+    if ! rollback_attempted_ranks; then
+      echo "FATAL: whole-job rollback was incomplete; manual intervention is required" >&2
+    fi
+    exit 1
+  fi
+  if [ "$alive" -eq 4 ] && [ "$ENV_VERIFIED" -eq 0 ]; then
+    verify_all_rank_environments_or_rollback || exit 1
+    ENV_VERIFIED=1
+    echo ">>> LIVE ENVIRONMENT VERIFIED ON ALL 4 RANKS"
+  fi
   # master's latest step / status line. "FIRST STEP:" prints ONLY after the first
   # optimizer step COMPLETES (trainer:1410) — the fp32 run never reached it (OOM-died
   # at the step). That line + its grads= breakdown is the definitive fit signal.
-  st=$(ssh -o ConnectTimeout=5 spark@"$MASTER" \
+  st=$(ssh -o ConnectTimeout=5 "${SPARK_USER}@${MASTER}" \
        'grep -aE "FIRST STEP:|params=.*grads=|\[step [0-9]|Starting: steps|OOM|out of memory|Traceback|Error" '"$LOGDIR"'/r0.log 2>/dev/null | tail -1' 2>/dev/null)
-  step_num=$(ssh -o ConnectTimeout=5 spark@"$MASTER" \
+  step_num=$(ssh -o ConnectTimeout=5 "${SPARK_USER}@${MASTER}" \
        'grep -aoE "\[step [0-9]+\]" '"$LOGDIR"'/r0.log 2>/dev/null | tail -1 | tr -cd "0-9"' \
        2>/dev/null)
   echo "[$t] alive=$alive/4 used:$line | ${st:0:100}"
   case "$st" in
     *OOM*|*"out of memory"*|*Traceback*|*ERROR:*)
-       echo ">>> FAILURE signal in master log — stopping monitor"; break;;
+      echo ">>> FAILURE signal in master log — stopping ALL RANKS" >&2
+      if ! rollback_attempted_ranks; then
+        echo "FATAL: whole-job rollback was incomplete; manual intervention is required" >&2
+      fi
+      exit 1
+      ;;
   esac
   if [[ "$step_num" =~ ^[0-9]+$ ]]; then
+    if [ "$ENV_VERIFIED" -ne 1 ]; then
+      echo "ERROR: optimizer step appeared before the all-rank live environment gate" >&2
+      if ! rollback_attempted_ranks; then
+        echo "FATAL: whole-job rollback was incomplete; manual intervention is required" >&2
+      fi
+      exit 1
+    fi
     STEP_SEEN=1
     echo ">>> OPTIMIZER STEP $step_num COMPLETED — 27B IS TRAINING (fit confirmed). Full grads= breakdown:"
-    ssh -o ConnectTimeout=5 spark@"$MASTER" 'grep -aE "FIRST STEP:|params=.*grads=.*optim=" '"$LOGDIR"'/r0.log | tail -2' 2>/dev/null
+    ssh -o ConnectTimeout=5 "${SPARK_USER}@${MASTER}" 'grep -aE "FIRST STEP:|params=.*grads=.*optim=" '"$LOGDIR"'/r0.log | tail -2' 2>/dev/null
     break
   fi
   sleep 30
 done
 echo "=== monitor end $(date -u +%H:%M:%S) step_seen=$STEP_SEEN ==="
-[ "$STEP_SEEN" -eq 1 ] || {
+if [ "$STEP_SEEN" -ne 1 ]; then
   echo "ERROR: no completed optimizer step was observed; launch is not admissible." >&2
+  if ! rollback_attempted_ranks; then
+    echo "FATAL: whole-job rollback was incomplete; manual intervention is required" >&2
+  fi
   exit 1
-}
+fi
