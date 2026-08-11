@@ -288,6 +288,24 @@ STATUS = {
                                                                  "sft_module3/quarantined_module3_invented_action_vocab_v1.jsonl, whose training "
                                                                  "preceded the tuned checkpoint electing ZERO tools on a unit the untuned base "
                                                                  "completed unaided. NEVER TRAINED."),
+    # --- Aug-6 conductor background-agent batch: UNSANCTIONED, Jesse-to-dispose (tutor 2026-08-11) ---
+    # Provenance stated by the owning author (conductor, 2026-08-11), not inferred from filenames:
+    # these 8 are conductor background-agent output from 2026-08-06 — the CLI-generates-training that
+    # JESSE STOPPED. Conductor's words: "NOT canonical and NOT sanctioned ... must-NOT-train,
+    # Jesse-to-dispose ... that is me owning an over-reach." Classified QUARANTINED because that is
+    # the status that means NEVER TRAIN while remaining reversible: quarantine preserves Jesse's
+    # disposition authority, deletion would pre-empt it. They also sit under the same open question
+    # as the GB10 design_rule candidates (question-2b2d9104): whether the Chats-develop-the-pairs
+    # directive is general or was scoped to the taeys-hands round. Do NOT admit, do NOT cite as
+    # sanctioned material in any Chats packet.
+    "ui/ui_toolthink_conductor_2026-08-06.candidate.jsonl":      ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; CLI-generated training that Jesse STOPPED. Owning author (conductor) states must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch1_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch as ui_toolthink_conductor. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch2_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch2b_2026-08-06.candidate.jsonl": ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch3_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch4_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch5_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch6_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
     "ui/ui_reasoned_rows_v1.jsonl":               ("superseded", "reasoning in VISIBLE content (wrong channel); replaced by thinking_v2"),
     "ui/ui_thinking_rows_v1.jsonl":               ("QUARANTINED","5-lane verdict DO NOT TRAIN: narrated fake retrieval + dup/conflicting targets -> confabulation"),
     "ui/ui_thinking_rows_v2.jsonl":               ("QUARANTINED","was labelled canonical as 'native <think> + real tool-call trajectories; the "
