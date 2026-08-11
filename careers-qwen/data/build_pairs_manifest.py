@@ -288,6 +288,61 @@ STATUS = {
                                                                  "sft_module3/quarantined_module3_invented_action_vocab_v1.jsonl, whose training "
                                                                  "preceded the tuned checkpoint electing ZERO tools on a unit the untuned base "
                                                                  "completed unaided. NEVER TRAINED."),
+    # --- needs-review: measured, NOT adjudicated (tutor 2026-08-11) ---
+    # These four were "unclassified/missing" — i.e. the registry held NOTHING on them. needs-review is
+    # not a promotion: it still FAILS the build by design. It records what was measured so the next
+    # reader does not re-derive it, and names what is missing to adjudicate. I did not assign a real
+    # status to any of them because the evidence available is the file describing ITSELF, and a file
+    # vouching for itself is form, not truth — the same error I made calling two of these "canonical"
+    # in the taeys-hands capability packet (corrected 1aaae83).
+    "sft_orchestrator_v1.jsonl": ("needs-review",
+        "345 rows, mtime 2026-08-04, untracked in the store. A FORMAT REBUILD, not new authorship: every row "
+        "carries derived_from=<source row hash> plus original_answer_sha256/source_row_sha256, and meta.format_rebuild "
+        "cites careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md. Sources are six store files, ALL already classified "
+        "(practice_rows_v1 derived 135, repo_usage_family_horizon_v1 canonical 37, spec_train_rows_v1 derived 35, "
+        "orchestration_rows_v1 derived 29, repo_usage_orchestrator_v1 canonical 18, repo_usage_isma_v1 canonical 15). "
+        "Schemas operator_orchestrator_reasoned_v1 235 / operator_orchestrator_tool_trajectory_v1 110. "
+        "'derived' is the likely status but that is an ADJUDICATION and needs the author. infra disclaims it."),
+    "ui/design_rule_candidates/ui_sft_design_rule_pairs_2026-08-05.candidate.jsonl": ("needs-review",
+        "19 rows, mtime 2026-08-05, .candidate in both the directory and the filename. Unadmitted BY CONSTRUCTION: "
+        "meta.provenance.claim states 'design-backed rule only; no production trace or tool result'; source_class=design_rule; "
+        "lane=ui_supervised_design_rule_v1; each row names a validator under consultation_v2/validators/. "
+        "frozen_regression 17 False / 2 True. SHAPE DEFECT: schema is nested at meta.schema "
+        "(ui_sft_design_rule_pair_v1) with NO top-level schema key — the same missing-discriminator defect found in the "
+        "GB10 candidates on 2026-08-11. BLOCKED pending question-2b2d9104 (whether Jesse's Chats-develop-the-pairs "
+        "directive is general or was scoped to the taeys-hands round). infra disclaims it."),
+    "ui/consult_seat_iteration3_capability_walks_v1.jsonl": ("needs-review",
+        "129 rows, mtime 2026-08-03, untracked in the store. 129/129 meta.executed_accepted=True, uniform "
+        "operator_consult_trajectory_v1 / surface=consult_action / tool_contract=consult_action, source_trace "
+        "2026-08-03-taey-seat-batch across all five Chat platforms (claude 30, grok 33, perplexity 27, gemini 22, "
+        "chatgpt 17). executed_accepted is SELF-DECLARED IN THE DATA and is not independent verification — settling "
+        "this needs the execution receipts or the owning author. Was wrongly listed 'canonical' in the taeys-hands "
+        "capability packet; corrected 1aaae83."),
+    "trajectories/operator_lane_v1_ui_action_68.jsonl": ("needs-review",
+        "68 rows, mtime 2026-08-03, untracked in the store. Uniform operator_ui_trajectory_v1 / tool_contract=ui_action / "
+        "thinking=False; rows carry real apply-bundle refs (e.g. aledade_... step_01_tree.txt, at 2026-07-28T12:06Z). "
+        "NOTE THE ASYMMETRY vs consult_seat_iteration3 above: this file carries NO acceptance marker at all — no "
+        "executed_accepted, no source_trace. Weaker evidence, not equal evidence; do not classify the two together. "
+        "Was wrongly listed 'canonical' in the taeys-hands capability packet; corrected 1aaae83."),
+
+    # --- Aug-6 conductor background-agent batch: UNSANCTIONED, Jesse-to-dispose (tutor 2026-08-11) ---
+    # Provenance stated by the owning author (conductor, 2026-08-11), not inferred from filenames:
+    # these 8 are conductor background-agent output from 2026-08-06 — the CLI-generates-training that
+    # JESSE STOPPED. Conductor's words: "NOT canonical and NOT sanctioned ... must-NOT-train,
+    # Jesse-to-dispose ... that is me owning an over-reach." Classified QUARANTINED because that is
+    # the status that means NEVER TRAIN while remaining reversible: quarantine preserves Jesse's
+    # disposition authority, deletion would pre-empt it. They also sit under the same open question
+    # as the GB10 design_rule candidates (question-2b2d9104): whether the Chats-develop-the-pairs
+    # directive is general or was scoped to the taeys-hands round. Do NOT admit, do NOT cite as
+    # sanctioned material in any Chats packet.
+    "ui/ui_toolthink_conductor_2026-08-06.candidate.jsonl":      ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; CLI-generated training that Jesse STOPPED. Owning author (conductor) states must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch1_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch as ui_toolthink_conductor. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch2_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch2b_2026-08-06.candidate.jsonl": ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch3_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch4_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch5_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
+    "ui/ui_toolthink_sonnet_batch6_2026-08-06.candidate.jsonl":  ("QUARANTINED","UNSANCTIONED conductor background-agent output 2026-08-06; same batch. Must-NOT-train, Jesse-to-dispose. Never trained."),
     "ui/ui_reasoned_rows_v1.jsonl":               ("superseded", "reasoning in VISIBLE content (wrong channel); replaced by thinking_v2"),
     "ui/ui_thinking_rows_v1.jsonl":               ("QUARANTINED","5-lane verdict DO NOT TRAIN: narrated fake retrieval + dup/conflicting targets -> confabulation"),
     "ui/ui_thinking_rows_v2.jsonl":               ("QUARANTINED","was labelled canonical as 'native <think> + real tool-call trajectories; the "
