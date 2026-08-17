@@ -400,6 +400,16 @@ case "$CPT_DATA" in
     # quarantine/fabricated. Credential axis clear on two independent grounds (flagged files are
     # under treasurer, and are .jsonl which this corpus does not admit).
     *cpt_prod_v2_packed_16384.jsonl) EXPECT_CORPUS_SHA=04fea4b0ed130ea5b14b1703835dcc0a0171bf2b2ead9c9a72a40be71a6633c9 ;;
+    # prod_v3 @ 8192, 2026-08-17. SAME ten-repo production set and SAME extractor as prod_v1/v2 —
+    # only the repo content is newer (Jesse: "the same CPT content as current model in production
+    # with updated production repo content"). Ten repos fetched to their pinned production refs;
+    # taey-presence -> c05d8be, apply-machine -> 13a1b60, governance -> 1f1415f.
+    # 1,167 docs / 322 blocks / 2,637,824 tokens, tail_dropped=0. Packer shrinkage gate PASSED at
+    # 96% (322 vs the 334 the current production model trained on) and the pack is deterministic —
+    # two independent runs emitted this identical digest.
+    # THE NAME WAS ALREADY ADMITTED by the cpt_prod_v[0-9]* glob above; without this row the
+    # content pin would silently skip, which is the allow-list-as-bypass shape abfd463 hardened.
+    *cpt_prod_v3_packed_8192.jsonl) EXPECT_CORPUS_SHA=3ec3587eb155731bfba395c7f270ca6afcc3f2c7fb14bac232984ba60b3ea61e ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;

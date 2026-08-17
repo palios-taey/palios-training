@@ -39,7 +39,7 @@ capabilities:
 
   corpus_pack:
     content_sha:
-      careers-qwen/pack_production_corpus.py: 1c0d304a8102597155ee2b708dc09b6bbac2cd7f3d483d4148817c651717cad9
+      careers-qwen/pack_production_corpus.py: 420bc706f5fd491fcc1b529139e880fbf0a126b2ede69e14c99138588af8532d
     status: ADJUDICATED
     entrypoint: careers-qwen/pack_production_corpus.py
     receipt:
@@ -67,7 +67,7 @@ capabilities:
 
   cpt_27b_4node:
     content_sha:   # verified byte-identical to the NODE copies that produced the receipts
-      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 060a81893028b1730fef853981bc27eede1c143fa90af1cd9c2d589771dcc2ef
+      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: d19e7db34c91a4fa9c1a9265118fe3bf0bceeda759dd11a030c3b9cc4ec94d0b
       dense-9b/trainers/train_fsdp_dense_9b.py: 10e2db9dd6c1c2d3989c049c136bdc6bf8dc53403877dbc9ec58ada7b38e36b6
       dense-9b/recipes/run_4node_27b_cpt.sh: bd2ea9e3146d54c72c1e1972bcb74fd469908787c4e30010eb425d599ca751a3
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
