@@ -295,14 +295,20 @@ STATUS = {
     # status to any of them because the evidence available is the file describing ITSELF, and a file
     # vouching for itself is form, not truth — the same error I made calling two of these "canonical"
     # in the taeys-hands capability packet (corrected 1aaae83).
-    "sft_orchestrator_v1.jsonl": ("needs-review",
-        "345 rows, mtime 2026-08-04, untracked in the store. A FORMAT REBUILD, not new authorship: every row "
-        "carries derived_from=<source row hash> plus original_answer_sha256/source_row_sha256, and meta.format_rebuild "
-        "cites careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md. Sources are six store files, ALL already classified "
-        "(practice_rows_v1 derived 135, repo_usage_family_horizon_v1 canonical 37, spec_train_rows_v1 derived 35, "
-        "orchestration_rows_v1 derived 29, repo_usage_orchestrator_v1 canonical 18, repo_usage_isma_v1 canonical 15). "
-        "Schemas operator_orchestrator_reasoned_v1 235 / operator_orchestrator_tool_trajectory_v1 110. "
-        "'derived' is the likely status but that is an ADJUDICATION and needs the author. infra disclaims it."),
+    "sft_orchestrator_v1.jsonl": ("derived",
+        "345 rows, rebuilt 2026-08-04T15:36:28Z. ADJUDICATED 2026-08-17 on the SIDECAR RECEIPT "
+        "sft_orchestrator_v1.manifest.json, not on the file describing itself — that distinction is why "
+        "this one could be classified while the other needs-review files could not. Four independent checks, "
+        "all passing: (1) the receipt's sha256 633acaf1f101fee3b3f8602e5a3a4c7f3af27968f690e42960b8da5294ac6ec0 "
+        "matches the file byte-for-byte; (2) its 14 per-source counts sum to 345 == rows_emitted == rows_source, "
+        "a 1:1 transform with no fabrication; (3) ALL 14 source files are themselves classified here — 11 "
+        "canonical, 3 derived, zero unclassified; (4) the pre-rebuild input survives at "
+        "/tmp/sft_orchestrator_v1.flat_before_rebuild_20260804.jsonl with its claimed sha 103441f270471768, so the "
+        "transform is reversible against its own input. builder='structural transform over existing "
+        "build_module_corpus.py output'; preserved_final_assistant_content=True. Schemas "
+        "operator_orchestrator_reasoned_v1 235 / operator_orchestrator_tool_trajectory_v1 110. "
+        "NO SEAT IS NAMED in any artifact — authorship remains Unknown; 'derived' records WHAT IT IS, and does "
+        "not admit it to training. Treasurer sanction and tutor dose are separate gates and neither is granted."),
     "ui/design_rule_candidates/ui_sft_design_rule_pairs_2026-08-05.candidate.jsonl": ("needs-review",
         "19 rows, mtime 2026-08-05, .candidate in both the directory and the filename. Unadmitted BY CONSTRUCTION: "
         "meta.provenance.claim states 'design-backed rule only; no production trace or tool result'; source_class=design_rule; "
