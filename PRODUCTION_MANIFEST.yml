@@ -39,7 +39,7 @@ capabilities:
 
   corpus_pack:
     content_sha:
-      careers-qwen/pack_production_corpus.py: aa00208a6de861052424813b0610101ee9dd1beb93aca0ce420c7f16032740b7
+      careers-qwen/pack_production_corpus.py: 1c0d304a8102597155ee2b708dc09b6bbac2cd7f3d483d4148817c651717cad9
     status: ADJUDICATED
     entrypoint: careers-qwen/pack_production_corpus.py
     receipt:
@@ -67,9 +67,9 @@ capabilities:
 
   cpt_27b_4node:
     content_sha:   # verified byte-identical to the NODE copies that produced the receipts
-      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 37c620d26f591d49bd6588f8dd5b5f05ee03fa5d4d622bf4f22a1c89094c16ca
-      dense-9b/trainers/train_fsdp_dense_9b.py: 9e73ce7da868a9ed61bb6d3a9b93c658b544707392e5930b83de17d49928972e
-      dense-9b/recipes/run_4node_27b_cpt.sh: e5ed69683b833ffd9bcdcd515b29e8be5d360fea0ad253c707265dee3991279a
+      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 060a81893028b1730fef853981bc27eede1c143fa90af1cd9c2d589771dcc2ef
+      dense-9b/trainers/train_fsdp_dense_9b.py: 10e2db9dd6c1c2d3989c049c136bdc6bf8dc53403877dbc9ec58ada7b38e36b6
+      dense-9b/recipes/run_4node_27b_cpt.sh: bd2ea9e3146d54c72c1e1972bcb74fd469908787c4e30010eb425d599ca751a3
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
     status: ADJUDICATED
     entrypoint: dense-9b/recipes/run_4node_27b_cpt.sh          # OPERATOR entrypoint (orchestrator)
@@ -232,7 +232,7 @@ capabilities:
     content_sha:
       dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
       dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
-      careers-qwen/post_cpt_pipeline.sh: 5aa70614884e01c0ba04faf6c44210bd5ba9c4def49b82d3a3894f5fc67e164f
+      careers-qwen/post_cpt_pipeline.sh: 53f676fd330b8fd2787207f7b392a53cc3cab2d74c4fff6be6aa4318bc3a44a8
     entrypoint: careers-qwen/post_cpt_pipeline.sh   # OPERATOR entrypoint; takes DCP_DIR
     internal_stages_note: >
       bake_27b.sh is NOT the top-level entrypoint — it is this pipeline's internal coordinated
@@ -240,7 +240,7 @@ capabilities:
       first draft promoted the internal stage to entrypoint, which would have had an operator
       run a fragment of the pipeline and skip the graft and the tensor-count gates.
     content_sha:   # verified byte-identical to the NODE copies that produced the receipts
-      careers-qwen/post_cpt_pipeline.sh: 5aa70614884e01c0ba04faf6c44210bd5ba9c4def49b82d3a3894f5fc67e164f
+      careers-qwen/post_cpt_pipeline.sh: 53f676fd330b8fd2787207f7b392a53cc3cab2d74c4fff6be6aa4318bc3a44a8
       dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
       dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
     status: ADJUDICATED
