@@ -234,9 +234,22 @@ are 1199 tensors and both are `Qwen3_5ForConditionalGeneration` / `model_type qw
 either way is architecturally valid and the tensor-count gates pass either way. All 851 language
 tensors are replaced regardless, so the ONLY thing the donor contributes is the vision tower, the mtp
 head and the config. On cpt_qwen38_v3 the run's own source was used, per this runbook.
-A pinned donor that does not follow the run's base model is the same defect shape as a cache keyed by
-run name instead of source digest: correct until the day the lineage changes, then silently wrong
-with every gate still green.
+
+**And the two vision towers are NOT the same weights — measured, not assumed.** sha256 of the raw
+tensor bytes, three vision tensors sampled across the tower:
+
+| tensor | run's own source | `module5_merged` (the pin) |
+|---|---|---|
+| `model.visual.blocks.0.attn.proj.bias` | `ea9264ae519e8a02` | `54d0cecb31e424a8` |
+| `model.visual.blocks.15.attn.proj.bias` | `848c549105fae0b4` | `03a381eecb0992cc` |
+| `model.visual.patch_embed.proj.bias` | `8acebc63dfde0d75` | `f5250290478a5bfc` |
+
+Three of three differ. So the pin is not a harmless default — following it on a new base model
+grafts a **foreign vision tower** onto the trained language weights. Tensor count is still 1199,
+visual is still 333, mtp is still 15, the name sets still match and **every gate in this runbook
+still passes.** Nothing mechanical catches it. That is the same defect shape as a cache keyed by run
+name instead of source digest: correct until the day the lineage changes, then silently wrong with
+every gate green. **Resolve the donor from the run's base model, never from a fixed path.**
 **Never fix this by stamping the base config onto the 851-tensor bake.** That declares a vision
 tower the tensors lack; vLLM then refuses, or worse initialises it randomly and serves a garbage
 tower — failing *plausibly* instead of clean.
