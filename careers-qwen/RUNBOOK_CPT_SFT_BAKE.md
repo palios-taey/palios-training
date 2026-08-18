@@ -1,4 +1,12 @@
 # RUNBOOK — CPT / SFT / bake, in order
+
+> **ENTRYPOINT NOTE (2026-08-18).** This runbook is authoritative for CPT/SFT/bake PROCEDURE. It is
+> NOT a second entrypoint. Where it names drivers such as `run_till_done_v3.sh` or
+> `run_refresh_gate.sh`, those are INTERNAL drivers in the same sense `PRODUCTION_MANIFEST.yml`
+> records for `bake_27b.sh` — "NOT the top-level entrypoint ... this pipeline's internal stage".
+> The single legal door is `scripts/taey-train`, per the PRODUCTION AUTHORITY section of
+> `CLAUDE.md`, which wins over this file on entrypoint questions.
+
 **Canonical as of 2026-07-30.** Written after a null CPT run and an unservable bake in the same 24h.
 Every step here exists because skipping it has cost us something real, and the cost is named.
 
@@ -66,8 +74,21 @@ python3 careers-qwen/corpus_manifest.py verify --corpus <corpus>.jsonl --manifes
 ## 2. CPT — via the canonical wrapper
 
 ```bash
-bash dense-9b/recipes/run_till_done_v3.sh      # sets all eight; prefer this
+scripts/taey-train cpt_27b_4node [VAR=val ...]     # the ONE door — verifies content shas
 ```
+
+**AN UNRESOLVED TENSION, STATED RATHER THAN PAPERED OVER (2026-08-18).** `run_till_done_v3.sh`
+exists because it sets the eight variables below correctly, and that is real value — the launcher
+hard-aborts on ZERO variables and silently ASSIGNS legacy values for 13 of them
+(`run_4node_27b_cpt.sh:27-32,142,146`: `TOTAL_STEPS:=3000`, `MAX_SEQ:=2560`, `SESSION_LIMIT:=200`).
+So "always use `taey-train`" and "always use the wrapper that sets the eight" are BOTH good advice
+and they currently point at different commands.
+
+The resolution is a code change, not a doc edit: either `taey-train` gains a capability that wraps
+the parameter-setting driver, or the driver is invoked through `taey-train`. Until that lands:
+**go through `taey-train`, and set the eight explicitly and verify them**, because the gate that
+checks the code is worth more than the convenience that sets the parameters — and an unset variable
+here does not fail, it runs a different campaign. Tracked as P1/P2 in `docs/REMEDIATION_PLAN.md`.
 If you must parameterise, these are the eight the wrapper sets and **all of them matter**:
 ```
 TOTAL_STEPS=<campaign horizon>   SESSION_LIMIT=<burst>   SAVE_EVERY=$SESSION_LIMIT

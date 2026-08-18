@@ -1,3 +1,21 @@
+> # ⚠ DEPRECATED — DO NOT EXECUTE FROM THIS FILE
+>
+> **Deprecated 2026-08-18** after a five-lens Family review found this repository specified three
+> mutually exclusive production entrypoints. This file was one of them.
+>
+> **Two concrete hazards, both verified in this file:**
+> - `:18` routes CPT at `launch_cpt_qwen36_27b_fsdp.sh` via `run_4node_27b_cpt.sh` — a STAGE, not
+>   the entrypoint. The entrypoint is `scripts/taey-train`, which is what verifies the content shas.
+> - `:30` routes SFT at `moe-35b/trainers/train_fsdp_v3.py`, which is NOT the sanctioned trainer.
+>   Following that line is how a parallel path gets rebuilt from scratch.
+>
+> **Use instead:** `CLAUDE.md` PRODUCTION AUTHORITY section → `scripts/taey-train` →
+> `PRODUCTION_MANIFEST.yml` → `careers-qwen/RUNBOOK_CPT_SFT_BAKE.md`.
+>
+> **Kept rather than deleted** because it carries measured receipts (topology, step timings,
+> historical run outcomes) that remain true and are cited elsewhere. Read it for MEASUREMENTS.
+> Never for PROCEDURE.
+
 # CANONICAL TRAINING RECIPES — read this BEFORE touching any training run
 
 **Jesse, 2026-07-21: *"We need both recipes stable Claude. We cannot keep doing this."***
