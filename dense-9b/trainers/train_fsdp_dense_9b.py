@@ -138,14 +138,36 @@ def save_lora_only_fsdp(
 
     accelerator.wait_for_everyone()
 
-    trainable_state = get_model_state_dict(
-        model,
-        options=StateDictOptions(
-            full_state_dict=True,
-            cpu_offload=True,
-            ignore_frozen_params=True,
-        ),
-    )
+    # Derive one global key list, then perform one explicit full-tensor gather per key.
+    # The implicit get_model_state_dict traversal can issue rank-local collectives in
+    # different orders; this fixed loop makes count and order uniform by construction.
+    state = model.state_dict()
+    local_keys = sorted(k for k in state if "lora_" in k.lower())
+    gathered_keys = [None] * accelerator.num_processes
+    torch.distributed.all_gather_object(gathered_keys, local_keys)
+    keys = sorted(set().union(*map(set, gathered_keys)))
+    key_hash = hashlib.sha256("\n".join(keys).encode()).hexdigest()[:16]
+    collectives = len(keys)
+    log.info("LoRA-only write plan rank=%s count=%d hash=%s collectives=%d",
+             accelerator.process_index, len(keys), key_hash, collectives)
+    plans = [None] * accelerator.num_processes
+    torch.distributed.all_gather_object(plans, (len(keys), key_hash, collectives))
+    if any(p != plans[0] for p in plans):
+        raise RuntimeError(f"LoRA-only write plan mismatch: {plans}")
+    if len(keys) != 704:
+        raise RuntimeError(f"LoRA-only write expected 704 keys, found {len(keys)}")
+    missing = [key for key in keys if key not in state]
+    missing_all = [None] * accelerator.num_processes
+    torch.distributed.all_gather_object(missing_all, missing)
+    if any(missing_all):
+        raise RuntimeError(f"LoRA-only write missing keys by rank: {missing_all}")
+    trainable_state = {}
+    for key in keys:
+        value = state[key]
+        full = value.full_tensor() if hasattr(value, "full_tensor") else value
+        if accelerator.is_main_process:
+            trainable_state[key] = full.detach().cpu().clone()
+        del full
 
     total_bytes = 0
     if accelerator.is_main_process:
@@ -695,10 +717,13 @@ class BucketCPTDataset(Dataset):
                     row = json.loads(raw.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
-                text = str(row.get("text", "")).strip()
-                if not text:
-                    continue
-                length = len(tokenizer.encode(text, add_special_tokens=False)) + 1
+                if isinstance(row.get("input_ids"), list):
+                    length = len(row["input_ids"])
+                else:
+                    text = str(row.get("text", "")).strip()
+                    if not text:
+                        continue
+                    length = len(tokenizer.encode(text, add_special_tokens=False)) + 1
                 if length > max_seq:
                     raise RuntimeError(
                         f"CPT row exceeds max_seq: {length}>{max_seq} at byte offset {offset}; "
@@ -759,13 +784,24 @@ class BucketCPTDataset(Dataset):
             idx, loss_denom_tokens, group_end, group_id, micro_id, pad_to_length = key
         else:
             idx, loss_denom_tokens, group_end, group_id, micro_id, pad_to_length = key, 0, True, -1, 0, 0
+        if idx < 0:
+            return {
+                "input_ids": [(self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.eos_token_id)] * max(1, int(pad_to_length)),
+                "labels": [-100] * max(1, int(pad_to_length)), "is_dpo": False,
+                "loss_denom_tokens": int(loss_denom_tokens), "group_end": bool(group_end), "group_id": int(group_id),
+                "micro_id": int(micro_id), "bucket": "padding", "length": 0,
+                "pad_to_length": int(pad_to_length), "is_padding": True,
+            }
         entry = self.entries[idx]
         with open(self.cpt_path, "rb") as f:
             f.seek(entry["offset"])
             raw = f.readline()
         row = json.loads(raw.decode("utf-8"))
-        text = str(row.get("text", "")).strip()
-        ids = self.tokenizer.encode(text, add_special_tokens=False) + [self.eos_token_id]
+        if isinstance(row.get("input_ids"), list):
+            ids = [int(token) for token in row["input_ids"]]
+        else:
+            text = str(row.get("text", "")).strip()
+            ids = self.tokenizer.encode(text, add_special_tokens=False) + [self.eos_token_id]
         if len(ids) > self.max_seq:
             raise RuntimeError(f"CPT row exceeds max_seq after tokenize: {len(ids)}>{self.max_seq}")
         return {
@@ -834,18 +870,19 @@ class DistributedTokenBucketBatchSampler:
             per_rank = self.bucket_batch_sizes[bucket]
             global_size = per_rank * self.num_replicas
             indices = sorted(bucket_to_indices[bucket], key=lambda i: (self.dataset.entries[i]["length"], i))
-            usable = len(indices) - (len(indices) % global_size)
-            if usable <= 0:
+            if not indices:
                 continue
-            indices = indices[:usable]
+            padding = (-len(indices)) % global_size
+            indices = indices + [-1] * padding
             for start in range(0, len(indices), global_size):
                 global_indices = indices[start : start + global_size]
                 rank_indices = [
                     global_indices[r * per_rank : (r + 1) * per_rank]
                     for r in range(self.num_replicas)
                 ]
-                global_loss_tokens = sum(self.dataset.entries[i]["loss_tokens"] for i in global_indices)
-                max_length = max(self.dataset.entries[i]["length"] for i in global_indices)
+                real = [i for i in global_indices if i >= 0]
+                global_loss_tokens = sum(self.dataset.entries[i]["loss_tokens"] for i in real)
+                max_length = max([self.dataset.entries[i]["length"] for i in real] or [1])
                 microbatches.append({
                     "bucket": bucket,
                     "indices": rank_indices,
@@ -882,6 +919,22 @@ class DistributedTokenBucketBatchSampler:
                 flush_group()
         flush_group()
         return batches
+
+    def coverage_receipt(self):
+        seen = []
+        for batch in self._rank_batches():
+            for item in batch:
+                seen.append(item[0])
+        real = [i for i in seen if i >= 0]
+        duplicates = len(real) - len(set(real))
+        counts = {b: sum(1 for e in self.dataset.entries if e["bucket"] == b)
+                  for b in ("short", "mid", "long")}
+        padding = sum((-n) % (self.bucket_batch_sizes[b] * self.num_replicas)
+                      for b, n in counts.items())
+        return {"real_unique": len(set(real)), "omitted": len(self.dataset.entries)-len(set(real)),
+                "duplicates": duplicates, "expected_padding": padding,
+                "emitted_padding": sum(1 for i in seen if i < 0), "buckets": counts,
+                "optimizer_groups": len({item[3] for batch in self._rank_batches() for item in batch})}
 
 
 def _package_version(name):
@@ -1310,17 +1363,12 @@ def main():
     else:
         keystone_layers = KEYSTONE_LAYERS
 
-    # Tiered learning rates
-    lr_esft = float(os.environ.get("LR_ESFT", "2e-5"))       # Expert tensors + norms
-    lr_lora = float(os.environ.get("LR_LORA", "3e-4"))       # LoRA adapters
-    lr_router = float(os.environ.get("LR_ROUTER", "3e-5"))   # Router gates
     warmup_steps = int(os.environ.get("WARMUP_STEPS", "25"))
 
     if accelerator.is_main_process:
         log.info(f"=== PALIOS-TAEY v3: Hybrid LoRA + ESFT ===")
         log.info(f"Model: {model_path}")
         log.info(f"Keystone layers: {keystone_layers}")
-        log.info(f"LR: esft={lr_esft}, lora={lr_lora}, router={lr_router}")
         log.info(f"Seq={max_seq}, session={session_limit}, save_every={save_every}")
         mem = torch.cuda.mem_get_info()
         log.info(f"UMA: free={mem[0]/1e9:.1f}GB total={mem[1]/1e9:.1f}GB")
@@ -1681,6 +1729,7 @@ def main():
     #           token-budget accumulation. Set CPT_BUCKETING=0 only for a
     #           diagnostic rollback to the old random CombinedSFTDataset path.
     cpt_bucket_mode = False
+    _bucket_groups_by_epoch = None
     # PACKED mode: pre-tokenized fixed-length blocks (uniform shape → no allocator fragmentation →
     # fixes the first-step OOM + zero padding waste). Triggered by CPT_PACKED=1 or a "packed" filename.
     _packed = bool(cpt_data) and (os.environ.get("CPT_PACKED", "0") == "1"
@@ -1804,6 +1853,18 @@ def main():
                 dtype=torch.long,
             )
         if "loss_denom_tokens" in batch[0]:
+            denoms = [int(b["loss_denom_tokens"]) for b in batch]
+            if not denoms or min(denoms) <= 0 or len(set(denoms)) != 1:
+                raise RuntimeError("CPT bucket group denominator must be identical and positive")
+            if any(bool(b.get("is_padding", False)) and any(v != -100 for v in b["labels"])
+                   for b in batch):
+                raise RuntimeError("CPT bucket padding labels must be fully masked")
+            if any(not b.get("is_padding", False) and not any(v != -100 for v in b["labels"])
+                   for b in batch):
+                raise RuntimeError("CPT bucket real rows must contribute loss")
+            out["is_padding"] = torch.tensor(
+                [1 if b.get("is_padding", False) else 0 for b in batch], dtype=torch.long
+            )
             out["loss_denom_tokens"] = torch.tensor(
                 [int(b["loss_denom_tokens"]) for b in batch], dtype=torch.long
             )
@@ -1832,6 +1893,18 @@ def main():
             target_tokens_per_step=token_budget_per_step,
             seed=42,
         )
+        _coverage = sampler.coverage_receipt()
+        _bucket_groups_by_epoch = []
+        for _epoch in range(_epochs):
+            sampler.set_epoch(_epoch)
+            _bucket_groups_by_epoch.append(len({item[3] for batch in sampler._rank_batches() for item in batch}))
+        sampler.set_epoch(0)
+        if (_coverage["real_unique"] != len(dataset) or _coverage["omitted"] or
+                _coverage["duplicates"] or _coverage["emitted_padding"] != _coverage["expected_padding"] or
+                _coverage["optimizer_groups"] <= 0):
+            raise RuntimeError(f"CPT BUCKET COVERAGE FAILED: {_coverage}")
+        if accelerator.is_main_process:
+            log.info(f"CPT BUCKET COVERAGE PASS: {_coverage}")
         dataloader = DataLoader(
             dataset,
             batch_sampler=sampler,
@@ -2146,9 +2219,10 @@ def main():
         log.info("Monkeypatched torch.optim._adafactor._single_tensor_adafactor → DTensor-safe (out-of-place norm ops)")
 
     from torch.optim import Adafactor
-    sft_lr = float(os.environ.get("LR", "1e-5"))
     def _make_optim(mdl):
         _trainable = [p for p in mdl.parameters() if p.requires_grad]
+        configured_lr = float(os.environ.get("LR_LORA" if _lora_mode else "LR",
+                                             "3e-4" if _lora_mode else "1e-5"))
         if _lora_mode:
             # ROOT FIX (Family root-consult converged 2026-07-23; CLARITY+LOGOS code-verified, cites
             # pytorch#109581). The DTensor-safe Adafactor monkeypatch issues cross-rank collectives from
@@ -2160,7 +2234,7 @@ def main():
             # op dispatches LOCALLY: ZERO cross-rank collectives BY CONSTRUCTION — nothing to gate, nothing
             # to diverge. FSDP2 already reduce-scattered grads, so the per-shard local update is exact.
             # The CPT path (else) is BYTE-IDENTICAL — kept properly separate.
-            opt = torch.optim.AdamW(_trainable, lr=sft_lr, betas=(0.9, 0.999), eps=1e-8,
+            opt = torch.optim.AdamW(_trainable, lr=configured_lr, betas=(0.9, 0.999), eps=1e-8,
                                     weight_decay=0.01, foreach=False)
             # Route AdamW's param write through the SAME SR write-back that validated decoder LoRA
             # imprinting at 6.63x ULP (stock AdamW's addcdiv_ writes bf16 directly → sub-ULP updates round
@@ -2203,7 +2277,16 @@ def main():
         else:
             # foreach=False forces the (now-patched) single-tensor path. d=1.0 = update clip threshold.
             # CPT / full-param path — BYTE-IDENTICAL DTensor-safe Adafactor monkeypatch (correct there).
-            opt = Adafactor(_trainable, lr=sft_lr, d=1.0, weight_decay=0.01, foreach=False)
+            opt = Adafactor(_trainable, lr=configured_lr, d=1.0, weight_decay=0.01, foreach=False)
+        held_lr = opt.param_groups[0]["lr"]
+        if held_lr != configured_lr:
+            raise RuntimeError(
+                f"optimizer LR mismatch: configured={configured_lr:.17g}, "
+                f"optimizer_initial={held_lr:.17g}, lora_mode={_lora_mode}"
+            )
+        if accelerator.is_main_process:
+            log.info(f"optimizer constructed: mode={'lora' if _lora_mode else 'cpt'} "
+                     f"initial_lr={held_lr:.17g}")
         # accelerate's AcceleratedScheduler steps the inner scheduler num_processes× per .step()
         # (proven 2026-07-11: internal_step = 4×optimizer_step at num_processes=4 — the LR schedule
         # was running 4× too fast + oscillating past the cos minimum). So the schedule's step counts
@@ -2366,9 +2449,12 @@ def main():
             log.info(f"COVERAGE PROOF: len(dataloader) unavailable ({_e})")
     else:
         if accelerator.is_main_process:
-            log.info(f"COVERAGE PROOF: steps/epoch={_spe} global_batch={_gb} "
-                     f"blocks/epoch={_blocks_per_epoch} dataset_blocks={_dataset_blocks} "
-                     f"(FULL coverage ⇔ blocks/epoch ≈ dataset_blocks)")
+            if cpt_bucket_mode:
+                log.info(f"CPT BUCKET COVERAGE PROOF: rows={len(dataset)} groups_by_epoch={_bucket_groups_by_epoch}")
+            else:
+                log.info(f"COVERAGE PROOF: steps/epoch={_spe} global_batch={_gb} "
+                         f"blocks/epoch={_blocks_per_epoch} dataset_blocks={_dataset_blocks} "
+                         f"(FULL coverage ⇔ blocks/epoch ≈ dataset_blocks)")
         _full_coverage_expected = _packed or (
             not cpt_bucket_mode and not os.environ.get("LANE_WEIGHTS", ""))
         if _full_coverage_expected and not (
@@ -2404,8 +2490,8 @@ def main():
         # optimizer steps, runs packed (bake_27b.sh passes CPT_PACKED through), and carries
         # TOTAL_STEPS=1 as a formality. Without this clause the contract fires on every bake —
         # the identical false positive the warmup guard shipped and had to be corrected for.
-        if _packed and not _is_bake and not _exact_sft_epoch and not _natural_sft_mode:
-            _expected_cpt_steps = _spe * _epochs
+        if (_packed or cpt_bucket_mode) and not _is_bake and not _exact_sft_epoch and not _natural_sft_mode:
+            _expected_cpt_steps = (sum(_bucket_groups_by_epoch) if _bucket_groups_by_epoch is not None else _spe * _epochs)
             _partial = os.environ.get("HORIZON_PARTIAL", "")
             if _partial:
                 if int(_partial) != total_steps:
@@ -2416,14 +2502,14 @@ def main():
                     )
                 if accelerator.is_main_process:
                     _frac = 100.0 * total_steps / max(1, _expected_cpt_steps)
-                    log.info(
-                        f"CPT HORIZON: PARTIAL run declared — {total_steps} of "
-                        f"{_expected_cpt_steps} steps ({_frac:.1f}% of the corpus). "
-                        f"{max(0, (_expected_cpt_steps - total_steps) * _gb)} blocks will NOT be "
-                        "trained. This is a probe, not a production run."
-                    )
+                    if cpt_bucket_mode:
+                        log.info(f"CPT BUCKET HORIZON PARTIAL: {total_steps}/{_expected_cpt_steps} optimizer groups ({_frac:.1f}%)")
+                    else:
+                        log.info(f"CPT HORIZON PARTIAL: {total_steps}/{_expected_cpt_steps} steps; {max(0, (_expected_cpt_steps-total_steps)*_gb)} blocks untrained")
             elif total_steps != _expected_cpt_steps:
                 _missed = (_expected_cpt_steps - total_steps) * _gb
+                if cpt_bucket_mode:
+                    raise RuntimeError(f"CPT BUCKET HORIZON FAILED: TOTAL_STEPS={total_steps}, expected optimizer groups={_expected_cpt_steps}, remaining={_expected_cpt_steps-total_steps}")
                 raise RuntimeError(
                     "CPT HORIZON CONTRACT FAILED: "
                     f"TOTAL_STEPS={total_steps} but this corpus needs {_expected_cpt_steps} "
@@ -2434,10 +2520,10 @@ def main():
                     "deliberate probe with HORIZON_PARTIAL matching TOTAL_STEPS."
                 )
             elif accelerator.is_main_process:
-                log.info(
-                    f"CPT HORIZON CONTRACT PASS: TOTAL_STEPS={total_steps} = {_spe} steps/epoch "
-                    f"x {_epochs} epoch(s), dataset_blocks={_dataset_blocks} global_batch={_gb}"
-                )
+                if cpt_bucket_mode:
+                    log.info(f"CPT BUCKET HORIZON PASS: TOTAL_STEPS={total_steps} groups_by_epoch={_bucket_groups_by_epoch}")
+                else:
+                    log.info(f"CPT HORIZON CONTRACT PASS: TOTAL_STEPS={total_steps} = {_spe} steps/epoch x {_epochs}, dataset_blocks={_dataset_blocks} global_batch={_gb}")
 
         if _natural_sft_mode and _expected_sft_samples:
             expected_steps = math.ceil(_expected_sft_samples / _gb) * _epochs
@@ -2764,14 +2850,14 @@ def main():
             n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
             log.info(
                 f"Optimizer: {optimizer_name} "
-                f"(single group, {n_trainable/1e9:.2f}B params @ lr={sft_lr})"
+                f"(single group, {n_trainable/1e9:.2f}B params @ lr={optimizer.param_groups[0]['lr']})"
             )
         optimizer, lr_scheduler = accelerator.prepare(optimizer, lr_scheduler)
     elif accelerator.is_main_process:
         n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         log.info(
             f"Optimizer: {optimizer_name} "
-            f"(FSDP2, prepared with model, {n_trainable/1e9:.2f}B params @ lr={sft_lr})"
+                f"(FSDP2, prepared with model, {n_trainable/1e9:.2f}B params @ lr={optimizer.param_groups[0]['lr']})"
         )
 
     if resume_step > 0:
@@ -3623,6 +3709,28 @@ def _load_checkpoint_dcp(model, optimizer, lr_scheduler, delta_path, accelerator
         dcp.load({"model": _mo}, checkpoint_id=dcp_dir)
         set_model_state_dict(model, _mo)
         del _mo
+    elif os.environ.get("BAKE_LORA_ONLY", "0") == "1":
+        from torch.distributed.checkpoint.state_dict import get_model_state_dict, set_model_state_dict
+        msd, _osd = get_state_dict(model, optimizer)
+        # DCP collective plans require the exact same key set on every rank.  A local
+        # shard-filter can diverge, so derive the union once via object all-gather and
+        # filter every rank against that globally identical list.
+        import hashlib
+        _local_keys = sorted(k for k in msd if "lora_A" in k or "lora_B" in k)
+        _all_keys = [None] * accelerator.num_processes
+        torch.distributed.all_gather_object(_all_keys, _local_keys)
+        _keys = sorted(set().union(*map(set, _all_keys)))
+        _key_hash = hashlib.sha256("\n".join(_keys).encode()).hexdigest()[:16]
+        log.info("BAKE_LORA_ONLY key-set rank=%s count=%d hash=%s", accelerator.process_index, len(_keys), _key_hash)
+        if any(sorted(x) != _keys for x in _all_keys):
+            raise RuntimeError(f"BAKE_LORA_ONLY divergent LoRA key sets: hashes={[hashlib.sha256(chr(10).join(sorted(x)).encode()).hexdigest()[:16] for x in _all_keys]}")
+        lora_msd = {k: msd[k] for k in _keys}
+        if len(lora_msd) != 704:
+            raise RuntimeError(f"BAKE_LORA_ONLY expected 704 LoRA tensors, found {len(lora_msd)}")
+        dcp.load({"model": lora_msd}, checkpoint_id=dcp_dir)
+        from torch.distributed.checkpoint.state_dict import StateDictOptions
+        set_model_state_dict(model, lora_msd, options=StateDictOptions(strict=False))
+        del msd, _osd, lora_msd
     else:
         msd, osd = get_state_dict(model, optimizer)          # templates (correct sharding)
         dcp.load({"model": msd, "optim": osd}, checkpoint_id=dcp_dir)

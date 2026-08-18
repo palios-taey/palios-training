@@ -67,8 +67,26 @@ capabilities:
 
   cpt_27b_4node:
     content_sha:   # verified byte-identical to the NODE copies that produced the receipts
-      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: d19e7db34c91a4fa9c1a9265118fe3bf0bceeda759dd11a030c3b9cc4ec94d0b
-      dense-9b/trainers/train_fsdp_dense_9b.py: 10e2db9dd6c1c2d3989c049c136bdc6bf8dc53403877dbc9ec58ada7b38e36b6
+      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1
+      # 2026-08-18: re-pinned to the BUCKET-PATH trainer, git blob 04ddb577 =
+      # codex/no-pack-bucket-coverage:dense-9b/trainers/train_fsdp_dense_9b.py (tip == aa9979d).
+      # PROVENANCE, and why this is not self-certification: that branch is UNMERGED to origin/main,
+      # but it is the code that trained s213 — the model Thor1 is serving right now. Its log emits
+      # `CPT BUCKET COVERAGE PROOF` and `CPT BUCKET HORIZON PARTIAL`, strings that exist ONLY on
+      # that branch (origin/main count = 0). origin/main's trainer is missing the whole bucket
+      # path: no `optimizer_groups` accounting, no `CPT BUCKET COVERAGE PASS`, no fail-closed
+      # horizon gate (raise at :2512), and no `input_ids` branches in BucketCPTDataset — so a
+      # pre-tokenized corpus cannot reach bucketing at all, and a bucketed run cannot be sized
+      # from its own printed numbers. `COVERAGE PROOF: steps/epoch=N global_batch=G` on main counts
+      # MICROBATCHES with G = BATCH_SIZE_PER_RANK x ranks, which is correct for the flat path and
+      # wrong for buckets (short is 16, not G). Reading it as optimizer steps is what mis-sized
+      # this night's launch. Restoring the branch trainer is a REVERT to the production-proven
+      # path, not a new artifact.
+      # SCOPE: trainer file only. The same branch also fixes RUN_ENV allowlist gaps in
+      # run_4node_27b_cpt.sh (BAKE_LORA_ONLY, EXPORT_DCP, NCCL tuning vars silently dropped before
+      # the ssh) — real defects, but they belong to bake/export/fabric and are deliberately NOT
+      # bundled here. run_4node_27b_cpt.sh and the config stay at their existing pins.
+      dense-9b/trainers/train_fsdp_dense_9b.py: b0c5e00ff4b5a34b11e3c4ffc34956ef5a32e9b3acd11d78280faaa5180fad66
       dense-9b/recipes/run_4node_27b_cpt.sh: bd2ea9e3146d54c72c1e1972bcb74fd469908787c4e30010eb425d599ca751a3
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
     status: ADJUDICATED

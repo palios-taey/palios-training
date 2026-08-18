@@ -364,6 +364,27 @@ case "$CPT_DATA" in
         # can be baked or served, and no treasurer sanction is implied or claimed. A corpus
         # intended to produce a servable artifact must be sanctioned and pinned on its own row.
         ;;
+      *cpt_qwen38_v[0-9]*_nopack_[0-9]*.jsonl)
+          # QWEN3.8 BASE-SWAP CORPUS, 2026-08-18. Jesse: "the last CPT round with the production
+          # repos updated with the current content."
+          #
+          # IDENTICAL BLEND to cpt_clean_identity_v1_nopack_8192 — the corpus the model currently in
+          # production (s213) actually trained on, per its own live-captured run_config.env
+          # (CPT_PATH_FROM_LOG). Same six registered inputs, same document-preserving no-pack builder
+          # (cpt_nopack_document_chunks_v2, builder sha ff14a6b4), same MAX_SEQ=8192.
+          # FIVE of six inputs are byte-identical to that run's manifest receipts:
+          #   cpt_identity_v1 17r@ebdd56e8   cpt_raw_corpus_v4 946r@fd64cb08
+          #   cpt_careers_kb_v1 385r@4743ee60   cpt_careers_db_worldmodel_v1 32r@02c203a3
+          #   cpt_strategy_research_delta_v1_SCRUBBED 147r@0a81a0af
+          # ONLY cpt_public_repos_v2 is refreshed: 1098r@155dc385 -> 1372r@70a1cb24, rebuilt by the
+          # production extractor (build_corpus_slices.py public-repos-v2) after fetching every repo to
+          # its pinned production ref. 0 NAMED credentials, 0 rows from bundles/, 0 from quarantine.
+          #
+          # RE-TOKENIZED with the Qwen3.8 tokenizer rather than reusing Qwen3.6-tokenized bytes:
+          # vocab.json and merges.txt are byte-identical across the two bases, tokenizer.json and
+          # tokenizer_config.json are NOT, and this corpus stores input_ids. Re-tokenizing costs
+          # minutes; reusing ids across a changed tokenizer is unverifiable from the artifact after.
+          ;;
     *)
         echo "ERROR: CPT_DATA is not an allow-listed superseded-clean corpus: $CPT_DATA" >&2
         echo "       Allowed: cpt_raw_corpus_train_no_superseded*, cpt_base_clean_packed_*." >&2
@@ -413,6 +434,16 @@ case "$CPT_DATA" in
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;
+    # 2,922 rows / 5,510,467 tokens / max_seq 8192 / eos 248046. Sidecar manifest carries all six
+    # input receipts and its output_sha256 matches these bytes. Verified 4/4 on every rank.
+    *cpt_qwen38_v1_nopack_8192.jsonl) EXPECT_CORPUS_SHA=a00ee598a6f6613f1e23e4f2ffaac80ae0b8103c76777cfd237d1978331d489c ;;
+    # v2, 2026-08-18 — THE TEN PRODUCTION REPOS (Jesse 2026-08-02, reconfirmed 08-18): apply-machine,
+    # claude-code-fleet-notify, claude-code-fleet-orchestrator, dcm, governance, isma-core, linkedin,
+    # palios-training, taey-presence, taeys-hands. v1 above used the 19-repo cpt_public_repos_v2 set
+    # because the previous CPT round did; that carried taey-ed/local-doge/merge-grade-oss and omitted
+    # apply-machine and linkedin. The later directive governs, not the older artifact.
+    # 2,717 rows / 5,334,849 tokens. Repo slice 1167r@779b4234 (0 NAMED credentials, 0 bundles rows).
+    *cpt_qwen38_v2_nopack_8192.jsonl) EXPECT_CORPUS_SHA=3973c2af608974191c7db2568c008510aa1711bdb714eede31a33fe414576e97 ;;
     *) EXPECT_CORPUS_SHA="" ;;
 esac
 if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then
