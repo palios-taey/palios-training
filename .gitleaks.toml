@@ -5,8 +5,30 @@ useDefault = true
 
 [allowlist]
 description = "Documented false positives (benign high-entropy strings, not secrets)"
+# regexTarget = "line" is LOAD-BEARING. By default gitleaks matches these regexes against the
+# captured SECRET (the bare hex), not the source line — so an identifier-anchored pattern like
+# '"pubkey_ed25519_hex": "<hex>"' silently never matches and the finding stays red. Anchoring to
+# the identifier is the whole point (see the note below), and that requires seeing the line.
+regexTarget = "line"
+# EVERY ENTRY IS ANCHORED TO THE IDENTIFIER IT EXEMPTS, never to the bare value shape.
+# A blanket '''[0-9a-f]{64}''' would exempt every 64-hex string in the repo, including a real
+# key — that turns the allowlist into the bypass it exists to prevent. Each regex below binds
+# the hex to a specific variable name, so an actual credential elsewhere still trips the scan.
 regexes = [
   # `max_seq_length=4096` in a trainer docstring — a sequence-length comment,
   # flagged generic-api-key purely on entropy. Not a credential.
   '''max_seq_length=4096''',
+
+  # An ed25519 PUBLIC key in a test fixture (careers-qwen/failure_triage_verify.py).
+  # A public key is not secret material by definition, and the two lines above it in the
+  # source say so: "fixture ... is used ONLY inside this file's probe/self-check helpers
+  # to prove the wire; it is not a production seat key." Flagged generic-api-key on the
+  # 64-hex entropy alone. Verified 2026-08-18.
+  '''"pubkey_ed25519_hex":\s*"[0-9a-f]{64}"''',
+
+  # A content sha256 authorization pin in careers-qwen/run_stage2_sft_ddp_till_done.sh.
+  # It is a GATE value, not a credential — the script compares it against the literal
+  # string UNQUALIFIED two lines later. Flagged generic-api-key on 64-hex entropy alone.
+  # Verified 2026-08-18.
+  '''QUALIFIED_QUALIFICATION_AUTHORIZATION_SHA=[0-9a-f]{64}''',
 ]
