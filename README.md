@@ -74,6 +74,19 @@ been measured misleading here. Only *executed and verified* cannot be faked.
 5. **Capture the live config while it runs.** `/proc/<pid>/environ` is ground truth and cannot be
    reconstructed after the process exits. A script's defaults are a *copy* of the run; the captured
    `run_config.env` **is** the run, and the post-CPT pipeline reads it rather than defaulting.
+   **Capture it once per SESSION, not once per run.** A multi-session run exits and relaunches at
+   every `FRAGMENTATION EXIT`, so a capture taken during session 1 describes a process that no
+   longer exists by session 3. Missed on cpt_qwen38_v3 (2026-08-18): captured for an abandoned
+   first attempt, never for the three sessions that produced the artifact, and by the time the gap
+   was noticed every process had exited — permanently unrecoverable, exactly as this rule warns.
+   What partially survived it: `final/trainer_meta.pt` carries step, epoch, num_ranks, max_seq and
+   the scheduler state (`base_lrs`, `_last_lr`, `_step_count`), and the run log names the corpus and
+   base. Those are artifact-grade and worth reading. Everything else — batch shape, Adafactor
+   settings, token budget — existed only in the process environment and is now only a launch
+   argument, which is INTENT, not proof the process received it. If you reconstruct a
+   `run_config.env` after the fact, tag every line with its provenance and say plainly that it is
+   not a Rule 5 capture. The s213 record carried an UNVERIFIED warmup value for months for exactly
+   this reason.
 
 Rule 4 exists because of a specific, repeatable failure: **a run can execute every step, hold flat
 memory, sustain full throughput, save a clean checkpoint, and move the weights by 1/5000th of what

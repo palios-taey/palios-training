@@ -42,6 +42,26 @@ for n in $SPARK_NODES; do ssh spark@$PRIVATE_MGMT_IP "sha256sum <SPARK_HOME>/<co
   receipt. A later `CORPUS_INPUTS` environment value is a cross-check, never the lineage source.
   This would have stopped CPT v7's first provenance record, which named post-scrub sources even
   though the packed artifact had been built from their pre-scrub predecessors.
+- **A NOPACK corpus needs that same receipt, and until 2026-08-18 its builder did not write one.**
+  `build_cpt_nopack_corpus.py` emitted its facts under builder-local key names
+  (`format`/`output_sha256`/`output_bytes`/`rows`), while `corpus_manifest.verify_manifest`
+  requires `schema: palios.cpt_packed_corpus.v1` with `corpus_sha256`/`corpus_bytes`/`corpus_rows`
+  and rejects anything else — *"unsupported corpus manifest schema: None"*. The name says packed;
+  the contract is not packing-specific and applies to every CPT corpus. So a nopack corpus trained
+  fine and then could not be baked, and each one needed a hand-written sidecar. The served model's
+  corpus carries exactly such a hand-made receipt, marked `regenerated_note`.
+  The builder now emits the canonical shape. For a corpus whose bytes are already final:
+```bash
+python3 careers-qwen/build_cpt_nopack_corpus.py --manifest-only \
+  --slices-dir <slices> --out <corpus>.jsonl <slice>.jsonl ...
+python3 careers-qwen/corpus_manifest.py verify --corpus <corpus>.jsonl --manifest <corpus>.jsonl.manifest.json
+```
+  It recomputes SHA, byte count and row count from the corpus file and the input receipts from the
+  registered slices; nothing is hand-entered, and it refuses if the corpus bytes differ from what
+  the prior sidecar described. **The builder itself was untracked until 2026-08-18** — it existed
+  only on the nodes, had drifted between ranks (rank 0 edited in place, three ranks on the prior
+  version), and produced every production corpus including the served model's. It is committed now;
+  edit it in the repo and ship it, never in place on a node.
 
 ## 2. CPT — via the canonical wrapper
 
@@ -75,6 +95,20 @@ means final-only — **no mid-run saves, they break things** (Jesse, standing).
 DCP_DIR=<completed-run> bash careers-qwen/post_cpt_pipeline.sh
 ```
 
+**CHECK THE CHECKPOINT IT PICKED. Read the launch banner before you walk away.** The wrapper prints
+`checkpoint selection: ...` and then `27B BAKE launch <time> — <path> →`. That path is the model you
+are shipping. Until 2026-08-18 the selector globbed `checkpoint-*` and sorted numerically, but
+`train_fsdp_dense_9b.py:3643` names a COMPLETED run's save `final`, not `checkpoint-<step>`:
+`ckpt_name = "final" if final else f"checkpoint-{step}"`. So the glob could not see the finished
+model and silently chose the last INTERMEDIATE checkpoint. Observed on cpt_qwen38_v3, which held
+checkpoint-73, checkpoint-146 and final(step=218): it selected 146 and launched the bake on
+two-thirds of the run. **Every downstream gate passed** — the artifact handed to them was internally
+consistent, just the wrong model. The defect had been latent since the pipeline was written because
+every prior bake ran on an INTERRUPTED run, whose last save genuinely was `checkpoint-<N>`; the
+adjudicated receipt (cpt_v7_eps1fix, checkpoint-148) is one of those. **A run that completes is the
+one that exposes it.** Fixed: `final/` wins when present, its step read from its own
+`trainer_meta.pt`, and the pipeline aborts rather than defaulting a completed-step it cannot read.
+
 `fleet.env` supplies the controller artifact store, off-cluster conversion host/root, immutable
 conversion-image digest, and 1199-tensor serving donor. The wrapper refuses if any are absent.
 It verifies the packed-corpus input manifest and checkpoint, reboots all four nodes and proves
@@ -107,6 +141,84 @@ and retires the reproducible transients only after candidate verification.
 The text-only conversion emits **851 tensors**. Production serves **1199**. Training loads
 `AutoModelForCausalLM`, so the vision tower is never in the model, optimizer state, or DCP.
 
+## 3a. ARTIFACT MOVEMENT — bake node-local, Thors FIRST, Expansion LAST
+
+**Jesse-directed 2026-08-18, verbatim: "You finish training, you bake it in the most efficient manner
+possible, and you get it on Thors and then you can back it up on Expansion." And: "When something
+finishes training, we need to get it off Sparks and on Thors so we can do next round of training as
+fast as possible."** The Sparks are the scarce resource — every hour an artifact sits on them is an
+hour the next run cannot start. Backup is durability, not delivery, and durability is never on the
+critical path.
+
+**THE ORDER:**
+
+1. **Bake on ONE Spark, node-local.** The conversion and the graft are single-process, single-machine
+   CPU work. They do not need four nodes, a controller, or an off-cluster host. Put the exported
+   artifact, the training base, the donor and the tools on one node and run both steps there.
+2. **Push the finished servable STRAIGHT to the Thors,** Spark → Thor directly. Do not stage through
+   the controller first.
+3. **Then** copy to Expansion for durable backup, off the critical path, with the model already live.
+
+**MEASURED, on cpt_qwen38_v3 (2026-08-18), so this is not a preference:**
+
+| step | where | measured |
+|---|---|---|
+| DCP → HF convert (851) | one Spark, node-local | **107 s** (20:46:41 → 20:48:28) |
+| graft 851 → 1199 | same Spark, node-local | **50 s** (20:56:20 → 20:57:10) |
+| servable → Thor1, 52G | Spark → Thor direct rsync | **112 MB/s, ~8 min** |
+| the same 52G via the controller artifact store | USB-attached | **19 MB/s, ~46 min each way** |
+
+Routing a 52G artifact through the controller store costs roughly an hour and a half of round trip to
+move bytes that never needed to go there. The direct path is ~8 minutes.
+
+**WHY THE PIPELINE STILL ROUTES THROUGH THE CONTROLLER, stated plainly rather than left to be
+rediscovered.** `post_cpt_pipeline.sh` requires `ARTIFACT_STORE` (`:20`) and derives both
+`LOCAL_ARTIFACT` and `LOCAL_BASE` under it (`:97-98`), so every artifact lands on controller storage
+before conversion. That design predates the Thors being the destination and treats the controller as
+the hub. It is not wrong about durability — it is wrong about ORDER. Changing it is a production edit
+to a GOLDEN_PATH surface and is tracked as such, not hand-patched mid-run.
+
+**MEASURE YOUR OWN PROCESSES BEFORE BLAMING THE NETWORK.** During this transfer the rate fell from
+112 MB/s to 7.5 MB/s and the ETA jumped from 4 minutes to 90. The cause was not the fabric or the
+Thor — it was `scp` and two `safetensors` reads this seat was running against the receiving host at
+that moment. It recovered to 112 MB/s within 75 seconds of stopping them. A receiving host that is
+also serving a 27B model has no spare IO to lend; do not read from it while a transfer lands.
+
+## 3b. THE WEIGHT-DIFF BASE MUST SHARE NAMING WITH THE BAKE OUTPUT
+
+`measure_cpt_delta.py` selects decoder tensors from the names COMMON to base and candidate
+(`:86-90`). Hand it two artifacts that name the same weights differently and the intersection is
+empty, and it exits `ABORT: no decoder mlp/attn weights found — check the model layout`. **That abort
+is about the pair you gave it, not about the model.** Observed on cpt_qwen38_v3: base and candidate
+were both exactly 851 tensors and the common-name count was **1** (`lm_head.weight`).
+
+The cause is benign and worth knowing, because the instinct is to suspect the bake:
+
+```
+851 training base (derived) :  model.layers.N.*          causal-LM naming
+bake output (save_pretrained):  model.language_model.N.*  SERVING naming
+```
+
+`Qwen3_5ForCausalLM.__init__` does `self.model = Qwen3_5TextModel(config)`, so the model's own
+state_dict keys are `model.layers.N.*` — which is what both the training base and the DCP use
+(`dcp key = "model." + state_dict key`, verified: `model.model.layers.22.mlp.up_proj.weight`). The
+load path matches exactly. It is `save_pretrained` that applies the reverse checkpoint-conversion
+mapping on the way out and writes the SERVING names. **The output being serving-named is correct and
+is exactly what the graft wants** — it is not a defect to be fixed.
+
+**So compare against the run's own 1199-tensor SOURCE model, not against the derived 851 base.** The
+source shares all 851 language names with the bake output, needs no mapping, and is the artifact
+training actually started from:
+
+```bash
+python3 careers-qwen/measure_cpt_delta.py \
+  --base <SPARK_HOME>/models/<the model the run loaded> \   # 1199-tensor source
+  --cand <bake output>
+```
+
+**Do not "fix" this by renaming tensors in either artifact to make the tool agree.** Renaming to
+satisfy a comparison is how a diff gets computed between weights that were never the same weights.
+
 ## 4. GRAFT — mandatory, or the artifact cannot serve
 
 ```bash
@@ -114,6 +226,17 @@ python3 careers-qwen/graft_cpt_into_servable.py \
   --base <SPARK_HOME>/models/Qwen3.6-27B \        # 1199-tensor structural donor
   --cpt  <bake output> --out <servable> [--dry-run]
 ```
+
+**THE DONOR FOLLOWS THE RUN'S BASE MODEL — and `fleet.env` does not.** This runbook has always said
+the donor is the run's own source model (above). `fleet.env` pins
+`POST_CPT_GRAFT_BASE=<serve-models>/module5_merged`, a fixed artifact from an earlier lineage. Both
+are 1199 tensors and both are `Qwen3_5ForConditionalGeneration` / `model_type qwen3_5`, so a graft
+either way is architecturally valid and the tensor-count gates pass either way. All 851 language
+tensors are replaced regardless, so the ONLY thing the donor contributes is the vision tower, the mtp
+head and the config. On cpt_qwen38_v3 the run's own source was used, per this runbook.
+A pinned donor that does not follow the run's base model is the same defect shape as a cache keyed by
+run name instead of source digest: correct until the day the lineage changes, then silently wrong
+with every gate still green.
 **Never fix this by stamping the base config onto the 851-tensor bake.** That declares a vision
 tower the tensors lack; vLLM then refuses, or worse initialises it randomly and serves a garbage
 tower — failing *plausibly* instead of clean.
