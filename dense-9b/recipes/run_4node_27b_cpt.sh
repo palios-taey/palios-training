@@ -24,12 +24,55 @@ export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_su
 # relief WITHOUT touching the solved 80G memory. Smaller effective batch (fine for CPT lr=1e-5).
 # Knobs are env-overridable (caller may export any of these; production defaults below).
 # Added for the DCP checkpoint round-trip test: OUTPUT_DIR / RESUME_DELTA / CHECKPOINT_DCP passthrough.
+# ─────────────────────────────────────────────────────────────────────────────
+# FAIL-LOUD CONFIG GATE (2026-08-18). READ THIS BEFORE CHANGING THE LINES BELOW IT.
+#
+# Every `: "${VAR:=default}"` below ASSIGNS its default. That is not the same as
+# `${VAR:-default}`: the variable becomes the default for the rest of this script AND
+# for every child process, including the trainer. So an unset schedule variable does
+# not fail and does not run empty — IT RUNS A DIFFERENT CAMPAIGN. Unset TOTAL_STEPS
+# meant 3000 steps; unset MAX_SEQ meant 2560; unset SESSION_LIMIT meant 200. Nothing
+# printed, nothing warned, and the run consumed hours before anyone could tell.
+#
+# Found 2026-08-18 by an external review reading this file, after a packet of mine
+# reported these as empty-string defaults because its enumerator only matched `:-`.
+#
+# This gate does not remove the defaults — they are legitimate for the values that
+# genuinely have a production default. It requires the caller to have DECIDED the ones
+# where a wrong value silently produces a wrong model, and it PRINTS every default it
+# applies so a silent assignment is no longer possible.
+if [ -z "${BAKE_TO_HF:-}" ] && [ -z "${EXPORT_DCP:-}" ]; then   # training mode only
+  _missing=""
+  for _v in TOTAL_STEPS SESSION_LIMIT MAX_SEQ LR WARMUP_STEPS; do
+    eval "[ -n \"\${${_v}+x}\" ]" || _missing="$_missing $_v"
+  done
+  # RUNBOOK: "RESUME_DELTA is not optional for a continuation. Unset = silently trains
+  # the raw base, and nothing warns." One of the two must be an explicit decision.
+  if [ -z "${MODEL_PATH:-}" ] && [ -z "${RESUME_DELTA:-}" ]; then
+    _missing="$_missing MODEL_PATH-or-RESUME_DELTA"
+  fi
+  if [ -n "$_missing" ]; then
+    echo "ABORT: CPT launched without deciding:$_missing" >&2
+    echo "  These ASSIGN legacy defaults when unset (TOTAL_STEPS=3000, MAX_SEQ=2560," >&2
+    echo "  SESSION_LIMIT=200), so an omission trains a DIFFERENT campaign silently." >&2
+    echo "  Set them explicitly. There is no bypass flag and none may be added." >&2
+    exit 1
+  fi
+fi
 : "${MAX_SEQ:=2560}"; : "${TOKEN_BUDGET_PER_STEP:=65536}"; : "${TOTAL_STEPS:=3000}"
 : "${SESSION_LIMIT:=200}"; : "${SAVE_EVERY:=66}"; : "${CHECKPOINT_DCP:=1}"
 : "${CPT_SHORT_BATCH:=8}"; : "${CPT_MID_BATCH:=4}"; : "${CPT_LONG_BATCH:=1}"
 # PACKED mode (fixed-length, uniform shape → no fragmentation): set CPT_DATA to a *packed* corpus +
 # BATCH_SIZE_PER_RANK (bucket vars are then ignored by the trainer's else-branch dataloader).
 : "${BATCH_SIZE_PER_RANK:=1}"; : "${CPT_PACKED:=0}"
+# LOG EFFECT, NOT INTENT: print what the run will actually use, after defaults resolve.
+echo "=== CPT RESOLVED CONFIG (post-default) ==="
+for _v in MODEL_PATH RESUME_DELTA CPT_DATA TOTAL_STEPS SESSION_LIMIT SAVE_EVERY LR WARMUP_STEPS \
+          MAX_SEQ TOKEN_BUDGET_PER_STEP BATCH_SIZE_PER_RANK CPT_PACKED CPT_SHORT_BATCH \
+          CPT_MID_BATCH CPT_LONG_BATCH CHECKPOINT_DCP CLOCK_CAP ADAFACTOR_EPS1 ADAFACTOR_ALPHA_MODE; do
+  eval "printf '  %-24s %s\\n' \"$_v\" \"\${${_v}:-<unset>}\""
+done
+echo "=========================================="
 RUN_ENV="CPT_DATA=$CPT_DATA MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK CPT_PACKED=$CPT_PACKED CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
 # TOPOLOGY MUST BE FORWARDED — the nodes do not have fleet.env.
 # This script sources fleet.env on MIRA, but fleet.env is gitignored and is NOT deployed to the
