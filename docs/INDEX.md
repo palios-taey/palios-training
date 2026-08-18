@@ -90,6 +90,7 @@ section of `CLAUDE.md` wins, then `PRODUCTION_MANIFEST.yml`, then `README.md`, t
 
 ## `docs`
 
+- [INDEX.md](INDEX.md)
 - [METRICS_PROVENANCE.md](METRICS_PROVENANCE.md)
 - [REMEDIATION_PLAN.md](REMEDIATION_PLAN.md)
 - [SPARK_TOPOLOGY.md](SPARK_TOPOLOGY.md)

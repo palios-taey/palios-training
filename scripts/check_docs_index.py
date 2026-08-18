@@ -60,6 +60,70 @@ EXEMPT = {
 }
 
 
+
+# ── DEAD REFERENCE CHECK ──────────────────────────────────────────────────────
+# A document that cites a path which no longer exists is not merely untidy: it sends a reader to
+# something that is not there, and the reader cannot tell whether the doc is stale or the file was
+# moved. Measured 2026-08-18: 51 dead in-repo citations across 12 documents, out of 143 citations.
+#
+# The debt is FROZEN, not ignored. Existing offenders are recorded in DEAD_REF_BASELINE with their
+# count. The check fails when a document exceeds its baseline or a new document joins the list, so
+# the debt can shrink and cannot grow. Lower a number when you fix references; never raise one.
+#
+# Citations into OTHER repositories are counted separately. They are not stale — they are
+# cross-repo pointers, and per CLAUDE.md a pointer into a private repo is its own defect class.
+DEAD_REF_BASELINE = {
+    "README.md": 1,
+    "careers-qwen/CPT_REFRESH_RECIPE_v0.9.md": 1,
+    "careers-qwen/SFT_RECIPE_RECONCILE_v1.md": 1,
+    "careers-qwen/TAEY_TRAINING_DOCTRINE.md": 1,
+    "careers-qwen/TRAINING_BACKLOG.md": 5,
+    "careers-qwen/data/TRAINING_BACKLOG.md": 1,
+    "dense-9b/plans/build_launcher_spec.md": 1,
+    "docs/METRICS_PROVENANCE.md": 33,
+    "docs/SPARK_TOPOLOGY.md": 1,
+    "docs/postmortem/PART1_measured_timeline.md": 2,
+    "docs/postmortem/RUN_STATE_cpt_qwen38_v3.md": 1,
+    "docs/proof_of_run/nccl_synth_probe_results.md": 3,
+}
+
+FOREIGN_REPO_PREFIXES = (
+    "the-conductor/", "treasurer/", "isma-core/", "taeys-hands/", "apply-machine/",
+    "claude-code-fleet", "doge/", "OPERATOR_HOME", "data/corpus/",
+)
+
+PATH_CITATION = re.compile(
+    r"(?<![\w/])((?:[\w.-]+/)+[\w.-]+\.(?:py|sh|md|yml|yaml|json|jinja))"
+)
+
+
+def dead_references(paths, tracked):
+    """Per-document count of cited repo paths that resolve to nothing.
+
+    Resolves each citation BOTH repo-root-relative and relative to the citing document, because a
+    naive root-only check reports a doc's own working relative links as broken -- which it did on
+    the first run of this very function, and would have reported 19 stale documents instead of 12.
+    """
+    out = {}
+    for d in paths:
+        if "/system_prompt/versions/" in d:
+            continue  # historical snapshots cite the past on purpose
+        base = os.path.dirname(d)
+        text = open(d, encoding="utf-8", errors="replace").read()
+        missing = set()
+        for m in set(PATH_CITATION.findall(text)):
+            if m.startswith(("http", "<", ".")):
+                continue
+            if any(f in m for f in FOREIGN_REPO_PREFIXES):
+                continue
+            if m in tracked or os.path.exists(m) or os.path.exists(os.path.normpath(os.path.join(base, m))):
+                continue
+            missing.add(m)
+        if missing:
+            out[d] = missing
+    return out
+
+
 def tracked_markdown():
     out = subprocess.run(["git", "ls-files", "*.md"], capture_output=True, text=True, check=True)
     return sorted(p for p in out.stdout.split("\n") if p.strip())
@@ -96,6 +160,26 @@ def main():
 
     paths = tracked_markdown()
     failures = []
+
+    tracked = set(
+        subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+    )
+    dead = dead_references(paths, tracked)
+    for doc, missing in sorted(dead.items()):
+        allowed = DEAD_REF_BASELINE.get(doc, 0)
+        if len(missing) > allowed:
+            shown = ", ".join(sorted(missing)[:3])
+            failures.append(
+                f"DEAD REFS      {doc} cites {len(missing)} path(s) that do not exist "
+                f"(baseline {allowed}): {shown}"
+            )
+    for doc, allowed in sorted(DEAD_REF_BASELINE.items()):
+        actual = len(dead.get(doc, ()))
+        if actual < allowed:
+            failures.append(
+                f"BASELINE STALE {doc} now has {actual} dead refs, baseline says {allowed}. "
+                f"Lower it to {actual} so the debt cannot silently grow back."
+            )
 
     desired = build_index(paths)
     if a.fix_index:
