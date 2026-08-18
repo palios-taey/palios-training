@@ -41,9 +41,25 @@ export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_su
 # genuinely have a production default. It requires the caller to have DECIDED the ones
 # where a wrong value silently produces a wrong model, and it PRINTS every default it
 # applies so a silent assignment is no longer possible.
-if [ -z "${BAKE_TO_HF:-}" ] && [ -z "${EXPORT_DCP:-}" ]; then   # training mode only
+# MODE IS ANNOUNCED, NEVER SILENTLY INFERRED. The previous version of this gate skipped itself
+# whenever BAKE_TO_HF or EXPORT_DCP happened to be set, which made those two variables a bypass
+# flag in everything but name -- a LEFTOVER EXPORT_DCP exported earlier in the same shell would
+# silently turn a training launch back into an ungated one. Announcing the mode makes a stale
+# variable visible, and export mode now has to be internally complete rather than merely non-empty.
+if [ -n "${EXPORT_DCP:-}" ] || [ -n "${BAKE_TO_HF:-}" ]; then
+  echo "=== MODE: EXPORT/BAKE (schedule gate does not apply) ==="
+  echo "    EXPORT_DCP=${EXPORT_DCP:-<unset>}  BAKE_TO_HF=${BAKE_TO_HF:-<unset>}"
+  echo "    If you meant to TRAIN, unset both — a leftover value from an earlier command"
+  echo "    in this shell is exactly how an ungated run happens."
+  if [ -z "${RESUME_DELTA:-}" ]; then
+    echo "ABORT: export/bake mode requires RESUME_DELTA=<checkpoint to export>." >&2
+    echo "  An export with no source checkpoint is not a mode, it is a missing argument." >&2
+    exit 1
+  fi
+fi
+if [ -z "${BAKE_TO_HF:-}" ] && [ -z "${EXPORT_DCP:-}" ]; then   # training mode
   _missing=""
-  for _v in TOTAL_STEPS SESSION_LIMIT MAX_SEQ LR WARMUP_STEPS; do
+  for _v in LR WARMUP_STEPS; do   # TOTAL_STEPS/SESSION_LIMIT/MAX_SEQ are enforced by :? above
     eval "[ -n \"\${${_v}+x}\" ]" || _missing="$_missing $_v"
   done
   # RUNBOOK: "RESUME_DELTA is not optional for a continuation. Unset = silently trains
@@ -55,16 +71,49 @@ if [ -z "${BAKE_TO_HF:-}" ] && [ -z "${EXPORT_DCP:-}" ]; then   # training mode 
     echo "ABORT: CPT launched without deciding:$_missing" >&2
     echo "  These ASSIGN legacy defaults when unset (TOTAL_STEPS=3000, MAX_SEQ=2560," >&2
     echo "  SESSION_LIMIT=200), so an omission trains a DIFFERENT campaign silently." >&2
-    echo "  Set them explicitly. There is no bypass flag and none may be added." >&2
+    echo "  Set them explicitly. Export/bake mode is announced, not silent, and needs" >&2
+    echo "  RESUME_DELTA of its own — so it cannot be used as a quiet way past this." >&2
     exit 1
   fi
 fi
-: "${MAX_SEQ:=2560}"; : "${TOKEN_BUDGET_PER_STEP:=65536}"; : "${TOTAL_STEPS:=3000}"
-: "${SESSION_LIMIT:=200}"; : "${SAVE_EVERY:=66}"; : "${CHECKPOINT_DCP:=1}"
-: "${CPT_SHORT_BATCH:=8}"; : "${CPT_MID_BATCH:=4}"; : "${CPT_LONG_BATCH:=1}"
+# NO DEFAULTS FOR PER-RUN VALUES (Jesse-directed 2026-08-18): "There should not be defaults
+# because that causes a lot of issues every run." Every value below varies per campaign, per
+# corpus, or per hardware decision. A default for a varying value is not a convenience -- it is a
+# silent answer to a question nobody asked, and this file shipped `TOTAL_STEPS:=3000` and
+# `MAX_SEQ:=2560` for months, so an omitted variable profiled and trained the wrong campaign.
+#
+# `${VAR:?msg}` makes bash itself refuse. One mechanism, not a default plus a gate on top of it.
+: "${TOTAL_STEPS:?set TOTAL_STEPS — the DECAY HORIZON for the campaign, not the burst}"
+: "${SESSION_LIMIT:?set SESSION_LIMIT — steps before FRAGMENTATION EXIT (the burst)}"
+: "${SAVE_EVERY:?set SAVE_EVERY — final-only means SAVE_EVERY=SESSION_LIMIT}"
+: "${MAX_SEQ:?set MAX_SEQ — must match the sequence length the corpus was packed at}"
+# NOT required of the caller, and NOT defaulted either: these are the SOLVED hardware shape, set
+# unconditionally in ONE place. The test is Jesse's -- does it vary per run? These do not. Micro
+# batches 16/4/1 are the known-good 80G fit and TOKEN_BUDGET_PER_STEP=65536 is the power/thermal
+# relief setting; both were measured, not chosen per campaign. Requiring six callers to restate
+# them would create six places to drift, which is the defect one level up from a silent default.
+# Changing them is a reviewed edit HERE, visible in the diff.
+TOKEN_BUDGET_PER_STEP=65536
+CPT_SHORT_BATCH=8
+CPT_MID_BATCH=4
+CPT_LONG_BATCH=1
+# INVARIANTS, set unconditionally rather than defaulted. These must not vary run to run, so they
+# are not questions the caller answers. ADAFACTOR_EPS1 especially: PRODUCTION_MANIFEST.yml records
+# that unsetting it falls back to finfo(bf16).eps and suppresses updates ~5000x with nothing in any
+# log saying so. If a caller needs a different value it should be a reviewed change here, visible
+# in the diff, not an environment variable someone forgot.
+CHECKPOINT_DCP=1
 # PACKED mode (fixed-length, uniform shape → no fragmentation): set CPT_DATA to a *packed* corpus +
 # BATCH_SIZE_PER_RANK (bucket vars are then ignored by the trainer's else-branch dataloader).
-: "${BATCH_SIZE_PER_RANK:=1}"; : "${CPT_PACKED:=0}"
+: "${BATCH_SIZE_PER_RANK:?set BATCH_SIZE_PER_RANK — per-rank micro-batch}"
+# CPT_PACKED selects between the packed and bucketed CPT dataloaders, so it is required for a CPT
+# run and MEANINGLESS for an SFT run, which reaches the trainer through SFT_DIR/SFT_JSONL instead.
+# Requiring it unconditionally would have broken careers-qwen/run_module1_till_done.sh, a LoRA SFT
+# launcher that legitimately never sets it. A requirement that fires outside its own mode is not
+# strictness, it is a false positive with the authority of a gate.
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ]; then
+  : "${CPT_PACKED:?set CPT_PACKED — 1 for a packed corpus, 0 for bucketed (CPT runs only)}"
+fi
 # LOG EFFECT, NOT INTENT: print what the run will actually use, after defaults resolve.
 echo "=== CPT RESOLVED CONFIG (post-default) ==="
 for _v in MODEL_PATH RESUME_DELTA CPT_DATA TOTAL_STEPS SESSION_LIMIT SAVE_EVERY LR WARMUP_STEPS \

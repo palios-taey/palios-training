@@ -99,10 +99,17 @@ verified on the serving host — weight-diff in band, tensor counts gated, bytes
 
 ### 7. CONFIGURATION CAN RUN THE WRONG CAMPAIGN SILENTLY
 
-`run_4node_27b_cpt.sh` hard-aborts on **zero** variables, and 13 of them ASSIGN legacy values when
-unset (`:27-32,142,146`): `TOTAL_STEPS:=3000`, `MAX_SEQ:=2560`, `SESSION_LIMIT:=200`,
-`ADAFACTOR_EPS1:=fp32` among them. **A dropped variable does not fail and does not run empty — it
-runs a different campaign.** Verify the resolved config against the run's intent before walking away.
+13 variables in `run_4node_27b_cpt.sh` ASSIGN legacy values when unset (`:62-67`, and `:142,146`):
+`TOTAL_STEPS:=3000`, `MAX_SEQ:=2560`, `SESSION_LIMIT:=200`, `ADAFACTOR_EPS1:=fp32` among them.
+**A dropped variable does not run empty — it runs a different campaign.**
+
+Since `150ceff` the launcher REFUSES to train unless the caller has decided `TOTAL_STEPS`,
+`SESSION_LIMIT`, `MAX_SEQ`, `LR`, `WARMUP_STEPS` and one of `MODEL_PATH`/`RESUME_DELTA`
+(`:60-78`), announces export/bake mode out loud instead of inferring it silently (`:49-59`), and
+prints the resolved config after defaults apply. Export mode is not a way past the gate: it
+requires `RESUME_DELTA` of its own. **This paragraph said "hard-aborts on zero variables" for
+several hours after that landed — a compass describing code that had already changed. If you find
+this section disagreeing with the code, the CODE wins and this section is the bug.**
 
 ---
 

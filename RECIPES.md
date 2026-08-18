@@ -45,7 +45,7 @@ full-parameter path, where every tensor is large and uniformly sharded. It is co
 
 | | |
 |---|---|
-| **trainer** | `moe-35b/trainers/train_fsdp_v3.py` *(directory name is legacy — it runs the 27B)* |
+| **trainer** | **DO NOT USE** — `moe-35b/trainers/train_fsdp_v3.py` is NOT sanctioned; see this file's header |
 | **launcher** | `moe-35b/recipes/launch_production_sft.sh` |
 | **optimizer** | **transformers** `transformers.optimization.Adafactor` — **stock, NO monkeypatch** |
 | **checkpoint** | `trainable_weights.safetensors` + `trainer_meta.pt`; "universal resume covers ALL configs" |

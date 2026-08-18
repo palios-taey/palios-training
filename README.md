@@ -42,7 +42,7 @@ scripts/taey-train <capability> [VAR=val ...]
 | `corpus_pack` | ADJUDICATED | yes |
 | `cpt_27b_4node` | ADJUDICATED | yes |
 | `bake_export` | ADJUDICATED | yes |
-| `sft_stage2_lora` | CANDIDATE_PENDING_QUALIFICATION | **no — gate has not passed** |
+| `sft_stage2_lora` | QUALIFIED_AWAITING_0_TO_50_AUTHORIZATION | **no — awaiting authorization** |
 | `sft_27b_fullparam` | CONTESTED | **no — not adjudicated** |
 
 It refuses an unknown capability, a status that is not `ADJUDICATED`, a file named in the manifest

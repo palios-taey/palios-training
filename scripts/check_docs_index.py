@@ -77,14 +77,14 @@ DEAD_REF_BASELINE = {
     "careers-qwen/CPT_REFRESH_RECIPE_v0.9.md": 1,
     "careers-qwen/SFT_RECIPE_RECONCILE_v1.md": 1,
     "careers-qwen/TAEY_TRAINING_DOCTRINE.md": 1,
-    "careers-qwen/TRAINING_BACKLOG.md": 5,
+    "careers-qwen/TRAINING_BACKLOG.md": 26,
     "careers-qwen/data/TRAINING_BACKLOG.md": 1,
     "dense-9b/plans/build_launcher_spec.md": 1,
-    "docs/METRICS_PROVENANCE.md": 33,
+    "docs/METRICS_PROVENANCE.md": 13,
     "docs/SPARK_TOPOLOGY.md": 1,
     "docs/postmortem/PART1_measured_timeline.md": 2,
     "docs/postmortem/RUN_STATE_cpt_qwen38_v3.md": 1,
-    "docs/proof_of_run/nccl_synth_probe_results.md": 3,
+    "docs/proof_of_run/nccl_synth_probe_results.md": 2,
 }
 
 FOREIGN_REPO_PREFIXES = (

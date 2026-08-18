@@ -58,6 +58,23 @@ CAPDIR=$(cat /tmp/mira_capture_dir 2>/dev/null)
 echo "  capture dir: $CAPDIR"
 echo "  UPS sample: $(tail -1 "$CAPDIR/ups.csv" 2>/dev/null)"
 
+# THIS HARNESS LAUNCHES A REAL TRAINING RUN. Until 2026-08-18 it passed NO schedule, so
+# run_4node_27b_cpt.sh:62-64 assigned its legacy defaults and this instrumented capture silently
+# profiled a 3000-step / 2560-seq campaign nobody asked for. The launcher now refuses that, which
+# is correct; the fix belongs HERE, at the caller that failed to decide.
+_cap_missing=""
+for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZE_PER_RANK CPT_PACKED; do
+  eval "[ -n \"\${${_v}+x}\" ]" || _cap_missing="$_cap_missing $_v"
+done
+if [ -n "$_cap_missing" ]; then
+  echo "ABORT: capture_run.sh launches a REAL training run and was given no schedule:$_cap_missing" >&2
+  echo "  Export them before running this harness, e.g." >&2
+  echo "    TOTAL_STEPS=218 SESSION_LIMIT=73 SAVE_EVERY=73 MAX_SEQ=8192 LR=1e-5 \\" >&2
+  echo "    WARMUP_STEPS=15 BATCH_SIZE_PER_RANK=1 CPT_PACKED=0 \\" >&2
+  echo "    MODEL_PATH=<base> bash dense-9b/instrumentation/capture_run.sh" >&2
+  exit 1
+fi
+
 echo "=== [5/5] LAUNCH 27B training (instrumented) ==="
 echo "  -> $REPO/dense-9b/recipes/run_4node_27b_cpt.sh"
 echo "  (monitor: node telem = ${SPARK_HOME}/telemetry/telem_*.csv ; Mira = $CAPDIR/{ups.csv,netconsole.log})"
