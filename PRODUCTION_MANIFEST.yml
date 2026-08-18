@@ -247,20 +247,21 @@ capabilities:
       accumulation splits batches, so it cannot reduce a batch of one.
 
   bake_export:
-    content_sha:
+    # ONE content_sha block, deliberately. Until 2026-08-18 this capability carried TWO, and YAML
+    # silently keeps only the last — so the first was decorative and the two had to be hand-synced
+    # to stay honest. They happened to agree (same three files, same three shas), which is why it
+    # never bit; a single one-sided edit would have left a losing block that still READ like a pin.
+    # A gate whose text and whose effect can disagree is not a gate. Do not reintroduce a second one.
+    content_sha:   # verified byte-identical to the NODE copies that produced the receipts
+      careers-qwen/post_cpt_pipeline.sh: d7be89c9011682e8c01036849f79f700c0d1412829d85bf9ff1e61b4d6025eb2
       dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
       dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
-      careers-qwen/post_cpt_pipeline.sh: d7be89c9011682e8c01036849f79f700c0d1412829d85bf9ff1e61b4d6025eb2
     entrypoint: careers-qwen/post_cpt_pipeline.sh   # OPERATOR entrypoint; takes DCP_DIR
     internal_stages_note: >
       bake_27b.sh is NOT the top-level entrypoint — it is this pipeline's internal coordinated
       EXPORT_DCP stage, followed by bake_dcp_offline.py, graft, delta and provenance. tutor's
       first draft promoted the internal stage to entrypoint, which would have had an operator
       run a fragment of the pipeline and skip the graft and the tensor-count gates.
-    content_sha:   # verified byte-identical to the NODE copies that produced the receipts
-      careers-qwen/post_cpt_pipeline.sh: d7be89c9011682e8c01036849f79f700c0d1412829d85bf9ff1e61b4d6025eb2
-      dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
-      dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
     status: ADJUDICATED
     stages:
       - name: coordinated sharded export
