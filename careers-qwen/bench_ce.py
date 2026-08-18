@@ -28,7 +28,7 @@ measure contention, not the kernels.
 """
 from __future__ import annotations
 
-import argparse, sys, time
+import argparse, os, sys, time
 
 import torch
 import torch.nn.functional as F
@@ -70,8 +70,10 @@ def baseline(h, w, t):
 
 
 def make_chunked(chunk):
-    sys.path.insert(0, "/home/spark/palios-training/careers-qwen")
-    sys.path.insert(0, "/home/mira/palios-training/careers-qwen")
+    # chunked_ce.py sits beside this file. Two hardcoded absolute guesses (one per host) were a
+    # guess at where that is; the file already knows. Derive it, and the import works from any
+    # checkout on any host without either path existing.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from chunked_ce import chunked_cross_entropy
     def f(h, w, t):
         return chunked_cross_entropy(h, w, t, chunk_size=chunk)

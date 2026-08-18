@@ -79,8 +79,8 @@ NEVER:     serve an ungrafted 851-tensor bake; stamp a config to claim 1199 with
 ---
 
 PROCESS:   Training-pair authoring and registration
-PLAN:      /home/mira/.claude/skills/taey-training-trigger/SKILL.md
-           (governed store: /home/mira/treasurer/foundations/careers/training_data/careers_qwen)
+PLAN:      $OPERATOR_HOME/.claude/skills/taey-training-trigger/SKILL.md
+           (governed store: $OPERATOR_HOME/treasurer/foundations/careers/training_data/careers_qwen)
 LAUNCH:    the seat that OWNS the failing surface authors the rows — not tutor. Write to the
            governed store, then: cd careers-qwen/data && TRAINING_DATA_ROOT=<store>
            python3 build_pairs_manifest.py
