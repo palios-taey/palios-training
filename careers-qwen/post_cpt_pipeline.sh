@@ -178,9 +178,9 @@ verify_checkpoint(){
   for rank in 0 1 2 3; do
     node=${NODES[$rank]}
     receipt=$(ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"$node" \
-      "test -f '$DCP_DIR/checkpoint-$CKPT/COMPLETE' &&
-       test -f '$DCP_DIR/checkpoint-$CKPT/dcp/__${rank}_0.distcp' &&
-       shard_bytes=\$(stat -c %s '$DCP_DIR/checkpoint-$CKPT/dcp/__${rank}_0.distcp') &&
+      "test -f '$DCP_DIR/$CKPT_NAME/COMPLETE' &&
+       test -f '$DCP_DIR/$CKPT_NAME/dcp/__${rank}_0.distcp' &&
+       shard_bytes=\$(stat -c %s '$DCP_DIR/$CKPT_NAME/dcp/__${rank}_0.distcp') &&
        trainers=\$(ps -eo args= | awk '/[t]orchrun|[t]rain_fsdp_dense_9b.py/{n++} END{print n+0}') &&
        free_bytes=\$(df -B1 --output=avail '$DCP_DIR' | tail -1 | tr -d ' ') &&
        printf '%s %s %s\\n' \"\$shard_bytes\" \"\$trainers\" \"\$free_bytes\"")
@@ -266,12 +266,37 @@ deploy_export_runtime(){
   done
 }
 
-CKPT=$(ssh -o BatchMode=yes spark@"${SPARK_MASTER}" \
-  "ls -d '$DCP_DIR'/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1")
-: "${CKPT:?no checkpoint found under $DCP_DIR}"
+# CHECKPOINT SELECTION — the run's FINAL artifact wins, and a glob cannot find it.
+# train_fsdp_dense_9b.py:3643 names a COMPLETED run's save `final`, not `checkpoint-<step>`:
+#     ckpt_name = "final" if final else f"checkpoint-{step}"
+# So `ls -d checkpoint-*` is blind to the finished model and silently selects the last
+# INTERMEDIATE checkpoint — baking a partially-trained model and shipping it as the product,
+# with every downstream gate passing because the artifact it was handed is internally consistent.
+# OBSERVED 2026-08-18: cpt_qwen38_v3 held checkpoint-73, checkpoint-146 and final (step=218).
+# The glob chose 146 and the bake launched on two-thirds of the run. Caught only because the
+# launch line printed the path. This is why the run that COMPLETES is the one that breaks:
+# every prior bake ran on an interrupted run whose last save really was checkpoint-<N>.
+# CKPT_NAME is the directory to read; CKPT stays the completed-STEP number provenance records.
+if ssh -o BatchMode=yes spark@"${SPARK_MASTER}" "test -f '$DCP_DIR/final/COMPLETE'" 2>/dev/null; then
+  CKPT_NAME=final
+  CKPT=$(ssh -o BatchMode=yes spark@"${SPARK_MASTER}" \
+    "python3 -c \"import torch; print(torch.load('$DCP_DIR/final/trainer_meta.pt', map_location='cpu', weights_only=False)['step'])\"" 2>/dev/null)
+  [ -n "$CKPT" ] || {
+    echo "ABORT: $DCP_DIR/final exists but its trainer_meta.pt yields no step." >&2
+    echo "The completed-step is provenance, not decoration — refusing to guess it." >&2
+    exit 1
+  }
+  echo "  checkpoint selection: final/ (completed run, step $CKPT)"
+else
+  CKPT=$(ssh -o BatchMode=yes spark@"${SPARK_MASTER}" \
+    "ls -d '$DCP_DIR'/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1")
+  : "${CKPT:?no checkpoint found under $DCP_DIR}"
+  CKPT_NAME="checkpoint-$CKPT"
+  echo "  checkpoint selection: $CKPT_NAME (no final/ present — run did not reach its horizon)"
+fi
 
 echo "=== RUN CONFIG — captured from the live trainer ==="
-printf '  %-18s %s\n' training-base "$TRAIN_BASE" corpus "$CORPUS" checkpoint "$CKPT" \
+printf '  %-18s %s\n' training-base "$TRAIN_BASE" corpus "$CORPUS" checkpoint "$CKPT_NAME (step $CKPT)" \
   total-steps "$PROV_TOTAL_STEPS" warmup "$PROV_WARMUP_STEPS" local-artifact "$LOCAL_ARTIFACT" \
   local-base "$LOCAL_BASE" convert-root "$CONVERT_ROOT" graft-base "$GRAFT_BASE"
 echo "  slices: $(tr ',' ' ' <<<"$CORPUS_INPUTS" | wc -w) (0 voice)"
@@ -335,7 +360,7 @@ else
       cd dense-9b/recipes
       RESET_INCOMPLETE_EXPORT=1 \
       EXPORT_DCP="$EXPORT_DIR" \
-      RESUME_DELTA="$DCP_DIR/checkpoint-$CKPT" \
+      RESUME_DELTA="$DCP_DIR/$CKPT_NAME" \
       OUTPUT_DIR="$DCP_DIR" \
       BASE_MODEL="$TRAIN_BASE" \
       CPT_DATA="$CORPUS" \
