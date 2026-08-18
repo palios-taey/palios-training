@@ -1,5 +1,7 @@
 # Qwen3.8-27B CPT — state at handoff, 2026-08-18
 
+> **This document does not decide the entrypoint.** It is a dated RECORD of one run. It names production scripts because it reports what they did. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`../INDEX.md`](../INDEX.md) for the full authority order.
+
 > **Published copy of the operator run record for cpt_qwen38_v3.** This is the primary receipt
 > PART1 cites. It was written during the run as a working record, so it is first-person and includes
 > corrections made in flight. Operator home prefixes were replaced with `$SPARK_HOME` /

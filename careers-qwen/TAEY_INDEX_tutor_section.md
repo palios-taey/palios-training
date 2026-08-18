@@ -1,5 +1,7 @@
 # Taey system-prompt INDEX — tutor's section (training + the Sparks)
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../docs/INDEX.md) for the full authority order.
+
 Every pointer below was `stat`ed on 2026-07-28 before sending. Paths are relative to the
 `palios-training` repo unless absolute. Repo is public; training DATA is never in it.
 

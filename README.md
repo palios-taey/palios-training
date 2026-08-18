@@ -187,6 +187,13 @@ capacity: [`docs/SPARK_TOPOLOGY.md`](docs/SPARK_TOPOLOGY.md).
 
 ## 8. Layout
 
+**[`docs/INDEX.md`](docs/INDEX.md) lists every document in this repository.** Nothing is reachable
+only by grep. If you are deciding HOW TO RUN something, the authority order is the PRODUCTION
+AUTHORITY section of [`CLAUDE.md`](CLAUDE.md), then [`PRODUCTION_MANIFEST.yml`](PRODUCTION_MANIFEST.yml),
+then this file, then [`careers-qwen/RUNBOOK_CPT_SFT_BAKE.md`](careers-qwen/RUNBOOK_CPT_SFT_BAKE.md).
+Every other document is a RECORD, not an instruction.
+
+
 - **`dense-9b/recipes/`** — the launchers that ran on the production cluster, with the full NCCL
   dual-rail RoCEv2 fabric setup
 - **`dense-9b/trainers/`** — FSDP2 CPT/SFT trainer, the DTensor-safe Adafactor patch, SR write-back

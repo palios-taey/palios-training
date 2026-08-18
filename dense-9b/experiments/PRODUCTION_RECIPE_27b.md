@@ -1,5 +1,7 @@
 # PRODUCTION RECIPE — Qwen3.6-27B revenue-model CPT (validated 2026-07-14)
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../../docs/INDEX.md) for the full authority order.
+
 Everything below is EVIDENCE-VALIDATED, not proposed. Optimizer: gate-3 weight-diff PASS +
 in-run AF-DOSE PASS. Bake: Artifact-B path proven (coherent offline convert). Corpus: zero-truncation
 packed from treasurer-registered slices. This is the recipe to run once treasurer registers the

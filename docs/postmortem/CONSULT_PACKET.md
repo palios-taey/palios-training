@@ -34,6 +34,8 @@ available_context_inventory:
 
 # Consult packet — CPT training and bake, PALIOS-TAEY
 
+> **This document does not decide the entrypoint.** It is a dated RECORD of one run. It names production scripts because it reports what they did. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`../INDEX.md`](../INDEX.md) for the full authority order.
+
 ## Ground truth
 
 **Source of truth:** https://github.com/palios-taey/palios-training

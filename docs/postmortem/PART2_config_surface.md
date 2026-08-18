@@ -1,5 +1,7 @@
 # Qwen3.8-27B CPT and bake: the configuration surface
 
+> **This document does not decide the entrypoint.** It is a dated RECORD of one run. It names production scripts because it reports what they did. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`../INDEX.md`](../INDEX.md) for the full authority order.
+
 Part 2 of 2. Scope: the non-public configuration inputs the training and bake paths read, and what a
 reader holding only the public repository can and cannot determine. The measured run timeline is
 Part 1 and is outside this scope.

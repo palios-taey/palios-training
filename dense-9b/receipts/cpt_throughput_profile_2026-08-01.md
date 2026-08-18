@@ -1,5 +1,7 @@
 # Per-rank intra-step profile — 27B dense CPT, 4× GB10, MAX_SEQ=8192
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../../docs/INDEX.md) for the full authority order.
+
 **Date**: 2026-08-01
 **Seat**: tutor
 **Why**: four Family lanes fetched the repo at `6de4a11` and independently converged on the same

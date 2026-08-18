@@ -1,5 +1,7 @@
 # Qwen3.8-27B CPT and bake: measured timeline
 
+> **This document does not decide the entrypoint.** It is a dated RECORD of one run. It names production scripts because it reports what they did. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`../INDEX.md`](../INDEX.md) for the full authority order.
+
 Part 1 of 2. This section is limited to the measured run, artifact, gate, repository, and CI record. The separate configuration analysis is outside its scope.
 
 All timestamps are UTC. `Observed` means a value was read from an artifact, log, repository object, or GitHub Actions receipt. `Inferred` means arithmetic over observed values. `Unknown` means the source needed for a fresh measurement was not present in the authorized local evidence set.

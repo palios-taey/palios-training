@@ -1,5 +1,7 @@
 # Continuous small-batch training — the system and the recipe
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../docs/INDEX.md) for the full authority order.
+
 **Status:** derived from a 5/5 Family consult (2026-07-28), every seat code-grounded with file:line
 citations against the public repo. Supersedes ad-hoc per-run decisions.
 
