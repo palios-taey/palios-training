@@ -6,8 +6,10 @@ date: 2026-08-18
 available_context_inventory:
   - INCLUDED: docs/postmortem/PART1_measured_timeline.md — measured run, gate, artifact and CI record
   - INCLUDED: docs/postmortem/PART2_config_surface.md — the configuration surface, from call sites
-  - INCLUDED: docs/postmortem/RUN_STATE_cpt_qwen38_v3.md — the operator run record PART1 cites,
-    published so PART1's citations are checkable; home prefixes replaced, nothing else altered
+  - EXCLUDED: docs/postmortem/RUN_STATE_cpt_qwen38_v3.md — the operator run record PART1 cites.
+    It is published in the repository so PART1's citations are checkable, and it is excluded from
+    this packet's evidence set for the same reason as the postmortem: it is a first-person operator
+    record that names causes. It is not a fact-only document.
   - INCLUDED: fleet.env — complete in Appendix A, values verbatim, comment narrative removed
   - INCLUDED: the read surface of all three production entrypoints — Appendix B
   - INCLUDED: fleet.env.example — the publicly declared subset, in the repository
@@ -47,14 +49,13 @@ the exercise.
 
 ### The record, in the repository
 
-[Observed] Three documents carry Observed / Inferred / Unknown on every claim with `file:line` and
+[Observed] Two documents carry Observed / Inferred / Unknown on every claim with `file:line` and
 commit citations:
 
 - `docs/postmortem/PART1_measured_timeline.md` — what ran, when, what it emitted, what each gate
   said; session boundaries, artifact receipts, gate results, and the public CI record.
 - `docs/postmortem/PART2_config_surface.md` — every non-public input the training and bake paths
   read, enumerated from call sites, with unset-behaviour per variable.
-- `docs/postmortem/RUN_STATE_cpt_qwen38_v3.md` — the operator run record PART1 cites.
 
 [Observed] `PRODUCTION_MANIFEST.yml` states what is production, gated on content shas.
 [Observed] The three legal surfaces are corpus pack, CPT, and bake/export.
@@ -290,10 +291,6 @@ becomes the empty string.
 [Unknown] Which parts of the elapsed span were inherent to the work and which were not.
 [Unknown] Whether the process as documented and the process as coded agree; nobody outside this lane
 has checked.
-[Unknown] Whether the gates in place measure what they are taken to measure.
-
-We are describing a process and asking what you see in it. We are not asking you to confirm a
-diagnosis, and this packet deliberately does not contain one.
 
 ## Constraints
 
