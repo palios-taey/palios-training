@@ -123,93 +123,97 @@ addresses and 4 distinct fabric addresses.
 
 ### Appendix B — every environment variable each production surface READS
 
-[Observed] Enumerated from the call sites, not from any declaration list. `abort` means the
-script exits with a stated message when the variable is unset. `default=''` means it silently
-becomes the empty string.
+[Observed] Enumerated from the call sites. Whole-line comments are stripped before matching,
+so bash-style default syntax quoted inside prose is not counted as code.
+
+[Constraint] Bash has THREE default forms and they behave differently:
+  `${VAR:?msg}` aborts when unset · `${VAR:-x}` uses x without setting it ·
+  **`${VAR:=x}` ASSIGNS x** — the variable becomes x for the rest of the script and every
+  child process. A dropped variable therefore runs with a concrete value, not an empty one.
 
 ### CPT — dense-9b/recipes/run_4node_27b_cpt.sh
 
-[Observed] reads 73 distinct variables; 0 abort when unset.
+[Observed] reads 73 distinct variables · 0 abort · 13 ASSIGN a default · 47 use a default
 
 | variable | unset behaviour |
 |---|---|
-| `AC_LAYER_CLS` | default=`''` (empty) |
-| `AC_LAYER_GRANULAR` | default=`''` (empty) |
-| `ADAFACTOR_ALPHA_MODE` | default=`''` (empty) |
-| `ADAFACTOR_DOSE_LOG` | default=`''` (empty) |
-| `ADAFACTOR_EPS1` | read, no default declared |
+| `AC_LAYER_CLS` | uses `''` (empty) |
+| `AC_LAYER_GRANULAR` | uses `''` (empty) |
+| `ADAFACTOR_ALPHA_MODE` | uses `''` (empty) |
+| `ADAFACTOR_DOSE_LOG` | **ASSIGNS** `1` |
+| `ADAFACTOR_EPS1` | **ASSIGNS** `fp32` |
 | `ALL` | read, no default declared |
-| `BAKE_TO_HF` | default=`''` (empty) |
-| `BATCH_SIZE_PER_RANK` | read, no default declared |
-| `CHECKPOINT_DCP` | read, no default declared |
-| `CLOCK_CAP` | default=`2000` |
-| `CPT_DATA` | default=`/var/spark/isma/training/cpt_raw_corpus_train_no_superseded.` |
-| `CPT_LONG_BATCH` | read, no default declared |
-| `CPT_MID_BATCH` | read, no default declared |
-| `CPT_PACKED` | read, no default declared |
-| `CPT_SHORT_BATCH` | read, no default declared |
-| `DISABLE_FLA` | default=`''` (empty) |
-| `EPOCHS` | default=`''` (empty) |
-| `EXACT_SFT_EPOCH` | default=`''` (empty) |
-| `EXPECTED_REAL_SAMPLES` | default=`''` (empty) |
-| `EXPECTED_SFT_SAMPLES` | default=`''` (empty) |
-| `FP32_MASTER` | default=`''` (empty) |
-| `FP8` | default=`''` (empty) |
-| `GATE_PREFLIGHT` | default=`1` |
+| `BAKE_TO_HF` | uses `''` (empty) |
+| `BATCH_SIZE_PER_RANK` | **ASSIGNS** `1` |
+| `CHECKPOINT_DCP` | **ASSIGNS** `1` |
+| `CLOCK_CAP` | uses `2000` |
+| `CPT_DATA` | uses `/var/spark/isma/training/cpt_raw_corpus_` |
+| `CPT_LONG_BATCH` | **ASSIGNS** `1` |
+| `CPT_MID_BATCH` | **ASSIGNS** `4` |
+| `CPT_PACKED` | **ASSIGNS** `0` |
+| `CPT_SHORT_BATCH` | **ASSIGNS** `8` |
+| `DISABLE_FLA` | uses `''` (empty) |
+| `EPOCHS` | uses `''` (empty) |
+| `EXACT_SFT_EPOCH` | uses `''` (empty) |
+| `EXPECTED_REAL_SAMPLES` | uses `''` (empty) |
+| `EXPECTED_SFT_SAMPLES` | uses `''` (empty) |
+| `FP32_MASTER` | uses `''` (empty) |
+| `FP8` | uses `''` (empty) |
+| `GATE_PREFLIGHT` | uses `1` |
 | `GEMM_FAILURES` | read, no default declared |
 | `GEMM_MEDIAN` | read, no default declared |
-| `GEMM_PREFLIGHT_MIN_PEER_RATIO` | default=`0.80` |
-| `GEMM_PREFLIGHT_ONLY` | default=`0` |
+| `GEMM_PREFLIGHT_MIN_PEER_RATIO` | uses `0.80` |
+| `GEMM_PREFLIGHT_ONLY` | uses `0` |
 | `GEMM_TFLOPS` | read, no default declared |
-| `HORIZON_PARTIAL` | default=`''` (empty) |
-| `LANE_WEIGHTS` | default=`''` (empty) |
-| `LIGER` | default=`''` (empty) |
+| `HORIZON_PARTIAL` | uses `''` (empty) |
+| `LANE_WEIGHTS` | uses `''` (empty) |
+| `LIGER` | uses `''` (empty) |
 | `LOGDIR` | read, no default declared |
-| `LORA_ALPHA` | default=`''` (empty) |
-| `LORA_DROPOUT` | default=`''` (empty) |
-| `LORA_MODE` | default=`''` (empty) |
-| `LORA_R` | default=`''` (empty) |
-| `LORA_TARGET_MODULES` | default=`''` (empty) |
-| `LR_LORA` | default=`''` (empty) |
+| `LORA_ALPHA` | uses `''` (empty) |
+| `LORA_DROPOUT` | uses `''` (empty) |
+| `LORA_MODE` | uses `''` (empty) |
+| `LORA_R` | uses `''` (empty) |
+| `LORA_TARGET_MODULES` | uses `''` (empty) |
+| `LR_LORA` | uses `''` (empty) |
 | `MASTER` | read, no default declared |
-| `MAX_SEQ` | read, no default declared |
-| `MODEL_PATH` | default=`''` (empty) |
-| `NCCL_DEBUG` | default=`''` (empty) |
-| `NCCL_DEBUG_FILE` | default=`''` (empty) |
-| `NCCL_DEBUG_SUBSYS` | default=`''` (empty) |
-| `NSYS_OUT_DIR` | default=`''` (empty) |
-| `NSYS_PROFILE_ALL_RANKS` | default=`''` (empty) |
-| `NSYS_PROFILE_STEP` | default=`''` (empty) |
-| `OUTPUT_DIR` | default=`''` (empty) |
-| `QUARANTINE_DIGESTS` | default=`''` (empty) |
+| `MAX_SEQ` | **ASSIGNS** `2560` |
+| `MODEL_PATH` | uses `''` (empty) |
+| `NCCL_DEBUG` | uses `''` (empty) |
+| `NCCL_DEBUG_FILE` | uses `''` (empty) |
+| `NCCL_DEBUG_SUBSYS` | uses `''` (empty) |
+| `NSYS_OUT_DIR` | uses `''` (empty) |
+| `NSYS_PROFILE_ALL_RANKS` | uses `''` (empty) |
+| `NSYS_PROFILE_STEP` | uses `''` (empty) |
+| `OUTPUT_DIR` | uses `''` (empty) |
+| `QUARANTINE_DIGESTS` | uses `''` (empty) |
 | `RECIPE_DIR` | read, no default declared |
-| `REQUIRE_LORA_INIT_PARITY` | default=`''` (empty) |
-| `RESUME_DELTA` | default=`''` (empty) |
-| `RESUME_MODEL_ONLY` | default=`''` (empty) |
+| `REQUIRE_LORA_INIT_PARITY` | uses `''` (empty) |
+| `RESUME_DELTA` | uses `''` (empty) |
+| `RESUME_MODEL_ONLY` | uses `''` (empty) |
 | `RUN_ENV` | read, no default declared |
-| `SAVE_EVERY` | read, no default declared |
-| `SESSION_LIMIT` | read, no default declared |
-| `SFT_DIR` | default=`''` (empty) |
-| `SFT_JSONL` | default=`''` (empty) |
+| `SAVE_EVERY` | **ASSIGNS** `66` |
+| `SESSION_LIMIT` | **ASSIGNS** `200` |
+| `SFT_DIR` | uses `''` (empty) |
+| `SFT_JSONL` | uses `''` (empty) |
 | `SORTED_TFLOPS` | read, no default declared |
 | `SPARK_HOME` | read, no default declared |
 | `SPARK_MASTER` | read, no default declared |
 | `SPARK_MGMT_IPS` | read, no default declared |
 | `SPARK_RAIL_MASTER` | read, no default declared |
 | `STEP_SEEN` | read, no default declared |
-| `TINY_LANE_CAP` | default=`''` (empty) |
-| `TINY_LANE_THRESHOLD` | default=`''` (empty) |
-| `TOKEN_BUDGET_PER_STEP` | read, no default declared |
-| `TORCH_COMPILE` | default=`''` (empty) |
-| `TORCH_COMPILE_MODE` | default=`''` (empty) |
-| `TORCH_NCCL_TRACE_BUFFER_SIZE` | default=`''` (empty) |
-| `TOTAL_STEPS` | read, no default declared |
-| `WARMUP_STEPS` | default=`''` (empty) |
+| `TINY_LANE_CAP` | uses `''` (empty) |
+| `TINY_LANE_THRESHOLD` | uses `''` (empty) |
+| `TOKEN_BUDGET_PER_STEP` | **ASSIGNS** `65536` |
+| `TORCH_COMPILE` | uses `''` (empty) |
+| `TORCH_COMPILE_MODE` | uses `''` (empty) |
+| `TORCH_NCCL_TRACE_BUFFER_SIZE` | uses `''` (empty) |
+| `TOTAL_STEPS` | **ASSIGNS** `3000` |
+| `WARMUP_STEPS` | uses `''` (empty) |
 | `WORKERS` | read, no default declared |
 
 ### BAKE — careers-qwen/post_cpt_pipeline.sh
 
-[Observed] reads 58 distinct variables; 10 abort when unset.
+[Observed] reads 58 distinct variables · 10 abort · 0 ASSIGN a default · 10 use a default
 
 | variable | unset behaviour |
 |---|---|
@@ -225,7 +229,7 @@ becomes the empty string.
 | `CONVERT_IMAGE` | **abort** |
 | `CONVERT_ROOT` | **abort** |
 | `CONVERT_SSH` | **abort** |
-| `CONVERT_TOOLS` | default=`${POST_CPT_CONVERT_TOOLS:-${CONVERT_ROOT%/` |
+| `CONVERT_TOOLS` | uses `${POST_CPT_CONVERT_TOOLS:-${CONVERT_ROOT` |
 | `CORPUS` | read, no default declared |
 | `CORPUS_INPUTS` | read, no default declared |
 | `CORPUS_MANIFEST` | read, no default declared |
@@ -236,8 +240,8 @@ becomes the empty string.
 | `EXPORT_DIR` | read, no default declared |
 | `EXPORT_RUNTIME` | read, no default declared |
 | `EXPORT_TOOL` | read, no default declared |
-| `FLEET_ENV` | default=`"$REPO_ROOT/fleet.env"` |
-| `FRESH_UPTIME_MAX` | default=`180` |
+| `FLEET_ENV` | uses `"$REPO_ROOT/fleet.env"` |
+| `FRESH_UPTIME_MAX` | uses `180` |
 | `GRAFT_BASE` | read, no default declared |
 | `HF_OUT` | read, no default declared |
 | `HF_STAGE` | read, no default declared |
@@ -260,11 +264,11 @@ becomes the empty string.
 | `REMOTE_PY_TOOLS` | read, no default declared |
 | `REPO_ROOT` | read, no default declared |
 | `RUN_TAG` | read, no default declared |
-| `SANCTION` | default=`${POST_CPT_SANCTION:-"treasurer task-dfa3fd75 2026-07-28"` |
+| `SANCTION` | uses `${POST_CPT_SANCTION:-"treasurer task-dfa` |
 | `SERVABLE_OUT` | read, no default declared |
 | `SERVABLE_STAGE` | read, no default declared |
 | `SOURCE_SHARD_BYTES` | read, no default declared |
-| `SPACE_MARGIN_BYTES` | default=`10737418240` |
+| `SPACE_MARGIN_BYTES` | uses `10737418240` |
 | `SPARK_HOME` | **abort** |
 | `SPARK_MASTER` | **abort** |
 | `SPARK_MGMT_IPS` | **abort** |
@@ -274,14 +278,13 @@ becomes the empty string.
 
 ### CORPUS PACK — careers-qwen/pack_production_corpus.py
 
-[Observed] reads 4 distinct variables; 0 abort when unset.
+[Observed] reads 3 distinct variables · 0 abort · 0 ASSIGN a default · 3 use a default
 
 | variable | unset behaviour |
 |---|---|
-| `ALLOW_SHRINK` | read, no default declared |
-| `MAX_SEQ` | default=`4096` |
-| `PACK_SEQ` | read, no default declared |
-| `PREV_CORPUS` | read, no default declared |
+| `ALLOW_SHRINK` | uses `''` (empty) |
+| `PACK_SEQ` | uses `2560` |
+| `PREV_CORPUS` | uses `''` (empty) |
 
 
 ## Problem statement

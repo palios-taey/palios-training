@@ -43,14 +43,41 @@ Counted mechanically over `${VAR:?…}` (hard abort) and `${VAR:-…}` (silent d
 
 | surface | hard-abort if unset | silent default | register |
 |---|---:|---:|---|
-| `run_4node_27b_cpt.sh` (CPT) | **0** | 47 | Observed |
+| `run_4node_27b_cpt.sh` (CPT) | **0** | 59 (13 of them ASSIGN a value) | Observed |
 | `post_cpt_pipeline.sh` (bake) | **10** | 10 | Observed |
 
-**Observed:** the CPT launcher has no required variable. Of its 47 defaults, **42 default to the
-empty string** — among them `MODEL_PATH`, `LR`, `EPOCHS`, `WARMUP_STEPS`, `OUTPUT_DIR`,
-`HORIZON_PARTIAL`, `FP32_MASTER`, `LORA_MODE`, `LORA_R`, `RESUME_MODEL_ONLY`, `BAKE_TO_HF`.
-Five default to a value: `CLOCK_CAP=2000`, `GATE_PREFLIGHT=1`, `GEMM_PREFLIGHT_ONLY=0`,
-`GEMM_PREFLIGHT_MIN_PEER_RATIO=0.80`, and `CPT_DATA` to an absolute node corpus path.
+**Observed:** the CPT launcher has no required variable. Bash has THREE default forms and they do
+not behave alike — `${VAR:?msg}` aborts, `${VAR:-x}` uses `x` without setting it, and **`${VAR:=x}`
+ASSIGNS** `x` for the rest of the script and every child process.
+
+| form | count | meaning when the variable is unset |
+|---|---:|---|
+| `${VAR:?}` | 0 | nothing aborts |
+| **`${VAR:=v}`** | **13** | **runs with a concrete value the caller never chose** |
+| `${VAR:-v}` | 5 | uses a value without exporting it |
+| `${VAR:-}` | 41 | empty string |
+
+**Observed:** the 13 assigned values are `TOTAL_STEPS=3000`, `MAX_SEQ=2560`, `SESSION_LIMIT=200`,
+`TOKEN_BUDGET_PER_STEP=65536`, `SAVE_EVERY=66`, `BATCH_SIZE_PER_RANK=1`, `CPT_SHORT_BATCH=8`,
+`CPT_MID_BATCH=4`, `CPT_LONG_BATCH=1`, `CPT_PACKED=0`, `CHECKPOINT_DCP=1`, `ADAFACTOR_EPS1=fp32`,
+`ADAFACTOR_DOSE_LOG=1` (`dense-9b/recipes/run_4node_27b_cpt.sh:27-32,142,146`).
+
+**Observed:** a dropped `TOTAL_STEPS` therefore does not fail and does not run empty — it runs 3000
+steps. A dropped `MAX_SEQ` runs at 2560.
+
+**Observed:** these are genuinely empty when unset: `MODEL_PATH`, `LR`, `EPOCHS`, `WARMUP_STEPS`,
+`OUTPUT_DIR`, `HORIZON_PARTIAL`, `FP32_MASTER`, `LORA_MODE`, `LORA_R`, `RESUME_MODEL_ONLY`,
+`BAKE_TO_HF`. The five that use a value without assigning it are `CLOCK_CAP=2000`,
+`GATE_PREFLIGHT=1`, `GEMM_PREFLIGHT_ONLY=0`, `GEMM_PREFLIGHT_MIN_PEER_RATIO=0.80`, and `CPT_DATA`.
+
+**CORRECTION, 2026-08-18.** An earlier revision of this document reported 47 defaults with 42 empty
+and did not distinguish `:=` from `:-` at all — the enumerator matched only `:-` and `:?`. It
+therefore reported `TOTAL_STEPS`, `MAX_SEQ`, `SESSION_LIMIT` and `ADAFACTOR_EPS1` as empty-string
+defaults when they assign concrete legacy values. Found by an external reviewer reading the source,
+not by the tool. A second defect in the same enumerator matched bash default syntax quoted inside a
+Python COMMENT (`careers-qwen/pack_production_corpus.py:34`) and reported a `MAX_SEQ` default of
+4096 for the corpus packer; that line is prose, and the packer's actual default is
+`SEQ = int(os.environ.get("PACK_SEQ", "2560"))` at `:44`. Both are corrected above and in Appendix B.
 
 **Observed:** the bake pipeline aborts with a stated message when any of `ARTIFACT_STORE`, `CKPT`,
 `CONVERT_GRAFT_BASE`, `CONVERT_IMAGE`, `CONVERT_ROOT`, `CONVERT_SSH`, `DCP_DIR`, `SPARK_HOME`,
@@ -71,10 +98,13 @@ the case where neither exists.
 | `SPARK_HOME` | `run_4node_27b_cpt.sh`, `post_cpt_pipeline.sh` | node-side root for models, corpora, outputs | bake aborts; CPT does not |
 | `SPARK_MASTER`, `SPARK_MGMT_IPS`, `SPARK_RAIL_MASTER` | both surfaces | rank-0 election and the two fabrics (`<SPARK_NODE_N_MGMT>` / `<SPARK_NODE_N_RAIL>`) | bake aborts; CPT does not |
 | `MODEL_PATH` | `run_4node_27b_cpt.sh` | the base the trainer loads | **empty string** |
-| `TOTAL_STEPS`, `EPOCHS`, `LR`, `WARMUP_STEPS` | `run_4node_27b_cpt.sh` | the entire schedule | **empty string** |
+| `TOTAL_STEPS` | `run_4node_27b_cpt.sh:27` | total optimizer steps | **ASSIGNS 3000** |
+| `EPOCHS`, `LR`, `WARMUP_STEPS` | `run_4node_27b_cpt.sh` | the rest of the schedule | empty string |
+| `MAX_SEQ` | `run_4node_27b_cpt.sh:27` | sequence length | **ASSIGNS 2560** |
 | `HORIZON_PARTIAL` | `run_4node_27b_cpt.sh` | suppresses the fail-closed horizon gate | **empty string** (gate active) |
-| `SESSION_LIMIT` | `run_4node_27b_cpt.sh` | steps before `FRAGMENTATION EXIT` | **empty string** |
-| `FP32_MASTER`, `ADAFACTOR_EPS1`, `ADAFACTOR_ALPHA_MODE` | `run_4node_27b_cpt.sh` | optimizer master-weight and normalisation path | **empty string** |
+| `SESSION_LIMIT` | `run_4node_27b_cpt.sh:28` | steps before `FRAGMENTATION EXIT` | **ASSIGNS 200** |
+| `FP32_MASTER`, `ADAFACTOR_ALPHA_MODE` | `run_4node_27b_cpt.sh` | optimizer master-weight and normalisation path | empty string |
+| `ADAFACTOR_EPS1` | `run_4node_27b_cpt.sh:142` | optimizer epsilon; unset falls back to `finfo(bf16).eps` | **ASSIGNS `fp32`** |
 | `CLOCK_CAP` | `run_4node_27b_cpt.sh` | `nvidia-smi -lgc` cap, which PERSISTS across jobs | defaults `2000` |
 | `ARTIFACT_STORE` / `POST_CPT_ARTIFACT_STORE` | `post_cpt_pipeline.sh:13,20,97,98` | where Artifact B and the training base are staged before conversion | aborts |
 | `CONVERT_SSH` / `POST_CPT_CONVERT_SSH` | `post_cpt_pipeline.sh` | the off-cluster conversion host (`<CONVERT_HOST_SSH>`) | aborts |
