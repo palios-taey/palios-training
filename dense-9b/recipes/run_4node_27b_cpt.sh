@@ -27,7 +27,7 @@ export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_su
 # ─────────────────────────────────────────────────────────────────────────────
 # FAIL-LOUD CONFIG GATE (2026-08-18). READ THIS BEFORE CHANGING THE LINES BELOW IT.
 #
-# Every `: "${VAR:=default}"` below ASSIGNS its default. That is not the same as
+# This file USED to assign per-run defaults with `: "${VAR:=default}"`, which ASSIGNS. Unlike
 # `${VAR:-default}`: the variable becomes the default for the rest of this script AND
 # for every child process, including the trainer. So an unset schedule variable does
 # not fail and does not run empty — IT RUNS A DIFFERENT CAMPAIGN. Unset TOTAL_STEPS
@@ -231,11 +231,13 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 # rather than load-bearing.
 # Horizon recommended fp32 on 2026-07-14 and the code gated it "unchanged until Chats rule";
 # the 5-lane consult of 2026-07-29 ruled. This is that ruling applied.
-: "${ADAFACTOR_EPS1:=fp32}"
+ADAFACTOR_EPS1=fp32   # INVARIANT, not a default: unset falls back to finfo(bf16).eps and
+                      # suppresses updates ~5000x with nothing in any log saying so
+                      # (PRODUCTION_MANIFEST.yml cpt_27b_4node note).
 RUN_ENV="$RUN_ENV ADAFACTOR_EPS1=$ADAFACTOR_EPS1"
 # The dose gauge is what caught this. It must never be optional again -- it reported FAIL-LOW at
 # step 20 of a run that then executed 128 more steps unchallenged.
-: "${ADAFACTOR_DOSE_LOG:=1}"
+ADAFACTOR_DOSE_LOG=1  # INVARIANT: the AF-DOSE probe is how a dead optimizer is caught at step 10.
 [ -n "${ADAFACTOR_DOSE_LOG:-}" ] && RUN_ENV="$RUN_ENV ADAFACTOR_DOSE_LOG=$ADAFACTOR_DOSE_LOG"
 [ -n "${BAKE_TO_HF:-}" ] && RUN_ENV="$RUN_ENV BAKE_TO_HF=$BAKE_TO_HF"
 # Forward NCCL debug capture to the per-node sessions (the orchestrator only passes an allowlist, so
@@ -345,7 +347,9 @@ fi
 # limit (-pl N/A) but supports graphics-clock lock (-lgc); cap the max graphics clock to hold boards
 # below the shutdown point. The cap does NOT persist across reboot, so it MUST be applied here on
 # every launch (the production launcher previously omitted it -> the crashes). CLOCK_CAP=0 disables.
-CLOCK_CAP="${CLOCK_CAP:-2000}"
+: "${CLOCK_CAP:?set CLOCK_CAP — nvidia-smi -lgc PERSISTS ACROSS JOBS, so an unset value silently
+inherits whatever the previous run left. README section 7 records a run executing its whole
+length at a third of its clock with nothing in any log saying so.}"
 if [ "$CLOCK_CAP" != "0" ]; then
   echo "  thermal: capping graphics clock <= ${CLOCK_CAP}MHz on all 4 nodes (prevents ~94C hard-crash)"
   for h in "${ALL[@]}"; do

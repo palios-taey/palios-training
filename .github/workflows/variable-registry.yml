@@ -1,0 +1,15 @@
+# The variable registry must describe the launcher, in both directions.
+# A knob the code reads that nobody classified is a knob that got lost -- which is exactly how
+# TOTAL_STEPS:=3000 and MAX_SEQ:=2560 survived for months. A registry entry for a knob that no
+# longer exists is rot. Both fail here.
+name: variable-registry
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.x' }
+      - run: pip install --quiet pyyaml
+      - run: python3 scripts/check_variable_registry.py
