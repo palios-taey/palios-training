@@ -9,11 +9,11 @@ Every pointer below was `stat`ed on 2026-07-28 before sending. Paths are relativ
 
 PROCESS:   CPT — continued pretraining, full-parameter, 4-node
 PLAN:      careers-qwen/CONTINUOUS_TRAINING_RECIPE.md
-LAUNCH:    tutor runs, on Mira: CPT_DATA=<packed corpus> CPT_PACKED=1 MAX_SEQ=2560
+LAUNCH:    tutor runs, on Mira: scripts/taey-train cpt_27b_4node CPT_DATA=<packed corpus> CPT_PACKED=1 MAX_SEQ=2560
            BATCH_SIZE_PER_RANK=4 MODEL_PATH=<serving merged model> TOTAL_STEPS=<derived>
            WARMUP_STEPS=<10% of total> SESSION_LIMIT=<=TOTAL_STEPS SAVE_EVERY=<=SESSION_LIMIT
-           CHECKPOINT_DCP=1 OUTPUT_DIR=<ckpt dir> bash dense-9b/recipes/run_4node_27b_cpt.sh
-           Multi-session horizons: DRIVER_TARGETS="..." bash dense-9b/recipes/run_till_done_v3.sh
+           CHECKPOINT_DCP=1 OUTPUT_DIR=<ckpt dir>
+           Multi-session horizons still go through the same door; do not invoke run_till_done_v3.sh.
 EXPECT:    log line `COVERAGE PROOF: steps/epoch=N ... dataset_blocks=M` where N equals
            TOTAL_STEPS for a one-epoch run and N*global_batch >= M; then `Starting: steps 0->N`;
            then step lines whose lr equals base_lr * (step/warmup) during warmup. Done = a
@@ -67,8 +67,8 @@ NEVER:     pack an input whose sha does not match the registry; rename a corpus 
 
 PROCESS:   Post-CPT bake and vision graft
 PLAN:      careers-qwen/post_cpt_pipeline.sh
-LAUNCH:    tutor runs, on Mira: DCP_DIR=<ckpt dir> HF_OUT=<hf dir> SERVABLE_OUT=<servable dir>
-           GRAFT_BASE=<existing 1199-tensor servable> bash careers-qwen/post_cpt_pipeline.sh
+LAUNCH:    tutor runs, on Mira: scripts/taey-train bake_export DCP_DIR=<ckpt dir>
+           Graft donor is the run's own 1199-tensor source, not a fleet-pinned foreign tower.
 EXPECT:    bake yields exactly 851 tensors (text-only — training loads AutoModelForCausalLM so
            the vision tower is never checkpointed); graft yields exactly 1199 (851 patched + 348
            preserved: visual 333 + mtp 15). Both counts are hard aborts. Done =

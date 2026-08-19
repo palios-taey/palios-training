@@ -63,14 +63,14 @@ epoch boundary; a 121-step epoch = e.g. 90 then 31, or 40 then 81):
    CLOCK_CAP=1000 ADAFACTOR_ALPHA_MODE=absolute ADAFACTOR_EPS1=fp32 LR=1e-5 WARMUP_STEPS=15 \
    CPT_DATA=/var/spark/isma/training/cpt_production_v1_packed_2560.jsonl CPT_PACKED=1 \
    BATCH_SIZE_PER_RANK=4 MAX_SEQ=2560 TOTAL_STEPS=363 SESSION_LIMIT=<N> SAVE_EVERY=<N>  # MUST BE EQUAL \
-   OUTPUT_DIR=<SPARK_HOME>/training_outputs/production_v1 bash run_4node_27b_cpt.sh
+   OUTPUT_DIR=<SPARK_HOME>/training_outputs/production_v1 scripts/taey-train cpt_27b_4node
    ```
    Verify env in the live proc. SESSION-1 IS THE SMOKE TEST (Gaia mandate): watch [AF-DOSE] live
    (floor_frac<0.05, U_hat 0.3–1.5, eps1_actual=1.192e-7) — halt if out-of-band before burning the run.
 2. At epoch-N boundary: write Artifact A (resume ckpt, unchanged) FIRST. Then run the production
    post-CPT wrapper; it fresh-reboots all four and writes Artifact B via `EXPORT_DCP`
    (gloo-coordinated, no full gather).
-3. `DCP_DIR=<completed-run> bash careers-qwen/post_cpt_pipeline.sh` atomically collects Artifact B
+3. `DCP_DIR=<completed-run> scripts/taey-train bake_export` atomically collects Artifact B
    plus the exact training base to durable controller storage, retires the transient Spark export,
    stages both to Thor1, and converts in the immutable torch 2.10 / transformers 5.3 image named in
    `fleet.env`. The weight-diff gate runs before graft or handoff. The wrapper never launches SFT.

@@ -27,3 +27,5 @@ jobs:
       - run: pip install --quiet pyyaml
       - name: PRODUCTION_MANIFEST.yml must describe this tree
         run: python3 scripts/check_manifest_pins.py
+      - name: prove the gate can fail for the right reason
+        run: python3 scripts/check_manifest_pins.py --self-test

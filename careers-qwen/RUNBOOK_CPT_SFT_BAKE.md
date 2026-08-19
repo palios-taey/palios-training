@@ -113,7 +113,7 @@ means final-only — **no mid-run saves, they break things** (Jesse, standing).
 ## 3. BAKE — production is Artifact B, off the Sparks
 
 ```bash
-DCP_DIR=<completed-run> bash careers-qwen/post_cpt_pipeline.sh
+scripts/taey-train bake_export DCP_DIR=<completed-run>
 ```
 
 **CHECK THE CHECKPOINT IT PICKED. Read the launch banner before you walk away.** The wrapper prints

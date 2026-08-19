@@ -20,5 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Every doc indexed, every entrypoint mention attributed
+      - name: Every doc indexed, every entrypoint mention attributed, no inner-launch instruction
         run: python3 scripts/check_docs_index.py
+      - name: prove the gate can fail for the right reason
+        run: python3 scripts/check_docs_index.py --self-test

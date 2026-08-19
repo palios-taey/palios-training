@@ -128,6 +128,10 @@ capabilities:
     path_family_winner: careers-qwen/train_ddp_lora.py
     runner: careers-qwen/run_stage2_sft_ddp_till_done.sh
     qualifier: careers-qwen/qualify_stage2_sft_ddp.sh
+    content_sha:
+      careers-qwen/train_ddp_lora.py: e80e9ebfd73ff2554fe6e974c191fdd39eac9b5d2aa4a3c118f35e0d664e701e
+      careers-qwen/run_stage2_sft_ddp_till_done.sh: 38fd40df23f561b75301de090ff275f6ead7253fc8c8a4bedc36b02129e4b0bf
+      careers-qwen/qualify_stage2_sft_ddp.sh: fc0692fd062db9bf221c6157a800c1a412ad24a2f1a3bc91e7bca6d814b4d7e2
     receipts:
       - id: A
         what: full-run wrapper, session 0->50

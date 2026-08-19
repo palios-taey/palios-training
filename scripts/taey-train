@@ -80,6 +80,19 @@ while IFS= read -r line; do
   echo "  verified : $file  content matches receipt"
 done <<< "$RESOLVED"
 
+# NODE CORRESPONDENCE. Local pins matching the tree is necessary and not sufficient: production
+# has run on node copies that were not the bytes in git. When fleet.env is present we are on Mira
+# and can hash $SPARK_HOME/palios-training/<path> on each Spark. Absent fleet.env we are in CI or
+# on a laptop; skipping is announced, never silent. --deployed itself fails closed if it is asked
+# to run without fleet.env, so this branch is the only skip, and it is audible.
+if [ -f "$ROOT/fleet.env" ]; then
+  echo "  deployed : hashing node copies against the pins"
+  python3 "$ROOT/scripts/check_manifest_pins.py" --manifest "$MANIFEST" --deployed \
+    || die "NODE-DEPLOYED bytes do not match the pins. The repo can be right and the nodes wrong."
+else
+  echo "  deployed : skipped (no fleet.env) — CI/laptop cannot hash the Sparks; Mira must"
+fi
+
 # --check-only: prove the gate refuses or passes WITHOUT executing the capability. Added after a
 # "control" tampered a file and then LAUNCHED the real pipeline instead of gating it — the test
 # was the risk it was meant to catch.
