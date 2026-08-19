@@ -128,8 +128,36 @@ lenses on the exact head; one success is not a pass.** Nothing reaches `main` un
 lands on the head that is actually merged — and the head moves every time #12 or #13 lands, so the
 audit is re-run on the final head, not on an ancestor of it.
 
-Order: #12 and #13 into `tutor/requalify-manifest-shas` (merge gate below) → re-audit the resulting
-head with BOTH lenses → #11 into `main`. Conductor merges; tutor does not merge its own PR.
+Order: #12 and #13 into `tutor/requalify-manifest-shas` (merge gate below) → **re-pin, see below** →
+re-audit the resulting head with BOTH lenses → #11 into `main`. Conductor merges; tutor does not
+merge its own PR.
+
+**THE MERGE REQUIRES A RE-PIN COMMIT. This is arithmetic, not corruption.** Verified by constructing
+the merge (worktree at `577cda2`, merge `636cbdc`, merge `82f46e0` — **both clean, zero conflicts**),
+then running W6's checker on the result:
+
+```
+DRIFT  cpt_27b_4node: scripts/taey-train
+DRIFT  bake_export:   scripts/taey-train
+
+merged   scripts/taey-train  354ca3639a2d15f3
+82f46e0  scripts/taey-train  a0d96edefe67e231   (self-consistent with its own pin)
+636cbdc  scripts/taey-train  4f253644487f14fb
+```
+
+Both branches edit `scripts/taey-train` — #12 adds the `--deployed` invocation, #13 adds the
+lifecycle enforcement — and both pin it. The merged file contains both edits, so its sha matches
+neither pin. **Any merge of two branches that both modify a pinned file leaves that pin stale by
+construction.** Neither branch is defective.
+
+The merger re-pins in the merge, stating the reason: both edits are intended, which is exactly the
+condition the repo rule allows re-pinning under ("re-pin only when the change is intended, and say
+why"). Recorded here because a stale pin found *after* a merge is indistinguishable at a glance from
+the drift the gate exists to catch, and someone will otherwise hunt a corruption that is arithmetic.
+
+*(A related report — W6 flagging `sft_stage2_lora` as unpinned — was a simulation artifact: it came
+from running #12's checker against #13's manifest. `636cbdc` pins all three SFT structural files;
+`82f46e0` pins none. On the real merged tree the finding disappears.)*
 
 **Merge gate between #12 and #13, still live:** #13 downgrades `cpt_27b_4node` and `bake_export` to
 `CANDIDATE_PENDING_PRODUCTION_RUN`; #12's UNPINNED predicate keys on status. `636cbdc` extends it to
