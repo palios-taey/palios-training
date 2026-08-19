@@ -177,6 +177,25 @@ PACK_SETS = {
     "prod_v3": [
         ("cpt_public_repos_prod.jsonl", 1167, "779b4234936bc9fe"),
     ],
+    # PROD_V4, 2026-08-19. Same ten-repo PUBLIC_REPOS_PROD set, re-extracted from the repos as
+    # they stand today, on Jesse's instruction: "this is just the repos right now, no personal
+    # stuff job applications... Repos and the current documentation that is in them, not just the
+    # code." Personal/careers material is layered on in a later module, not this base.
+    #
+    # 1,226 rows / 857 docs / 10,719,871 chars, +59 rows vs prod_v3. Composition verified after
+    # extraction rather than assumed: exactly the 10 PROD repos, 31.7% documentation (.md 383,
+    # .txt 6) and 68.3% code/config (.py 645, .sh 117, .yml 35, .yaml 31, .toml 9). No careers,
+    # cover-letter, or bundles/ content — the personal slices are simply not in this pack set.
+    #
+    # KNOWN GAP, recorded rather than silently carried: linkedin contributes ONE row. Its repo
+    # tracks only .gitignore and CLAUDE.md; scripts/ and foundations/ are untracked or ignored, so
+    # the LinkedIn operational surface cannot reach a corpus built from git HEAD blobs. apply-machine
+    # and isma-core also have uncommitted CLAUDE.md/AGENTS.md edits that are invisible for the same
+    # reason. Extraction is commit-pinned by design; the fix is committing that work, not loosening
+    # the extractor.
+    "prod_v4": [
+        ("cpt_public_repos_prod.jsonl", 1226, "e549870b892d2f72"),
+    ],
 }
 
 

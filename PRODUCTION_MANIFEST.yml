@@ -39,7 +39,7 @@ capabilities:
 
   corpus_pack:
     content_sha:
-      careers-qwen/pack_production_corpus.py: 420bc706f5fd491fcc1b529139e880fbf0a126b2ede69e14c99138588af8532d
+      careers-qwen/pack_production_corpus.py: 3ee08afd28efc2a0154a3068c5c917634d9c82314cfdfe31004cf2e9a73996f8
     status: ADJUDICATED
     entrypoint: careers-qwen/pack_production_corpus.py
     receipt:
@@ -417,3 +417,40 @@ historical_lines:
       Training DATA for this line is deliberately excluded. The datasets under
       datasets/current/moe-35b/ are NOT restored and must not be: scripts and
       configurations are public, what is trained on never is.
+
+# ============================================================================
+# AUTHORIZATION — a named human act, bound to exact bytes, consumed by a receipt.
+#
+# NOT a status and NOT a --force. cpt_27b_4node stays CANDIDATE_PENDING_PRODUCTION_RUN, which is
+# the honest state: these bytes carry the W3/W5/W6 remediation and have never completed a
+# production run. This object permits ONE campaign on EXACTLY the bytes named below. Change one
+# byte of any of them and the authorization no longer describes what you are running, and the
+# resolver refuses. That binding — not a use-counter — is what keeps this from becoming a standing
+# path (shape designed by tutor-grok; both of tutor's earlier shapes were rejected, one of which
+# would have refused session 2 of a multi-session campaign).
+#
+# AUTHORIZED BY JESSE, 2026-08-19, verbatim: "So do the training run again on the base using the
+# full production infrastructure that you just cleaned up. This should include corpus generation,
+# tokenization, packing/chunking, max GPU util, vars, everthing all the way through baking." and
+# "Just do 1 epoch though and adjust variables accordingly."
+#
+# CONSUMPTION: campaign cpt_prod_v4_repos_1ep is spent the moment a receipt in this manifest
+# records that campaign_id. A second campaign requires a second authorization commit. After the
+# run, the promotion commit records the receipt AND DELETES THIS BLOCK — check_manifest_pins.py
+# fails if an authorization survives promotion (A1/A7), so a forgotten cleanup is caught by CI
+# rather than by whoever launches next.
+authorization:
+  capability: cpt_27b_4node
+  campaign_id: cpt_prod_v4_repos_1ep
+  authorized_by: Jesse
+  authorized_on: 2026-08-19
+  scope: >
+    ONE epoch over cpt_prod_v4_repos_packed_8192.jsonl (339 blocks x 8192 tok = 2,777,088 tok),
+    85 steps, from the 851-tensor causal-LM base. Corpus is the ten PUBLIC_REPOS_PROD repos only —
+    code AND their documentation, plus the UI surfaces. No personal or job-application material;
+    that is layered on in a later module.
+  content_sha:
+    dense-9b/recipes/run_4node_27b_cpt.sh: f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b
+    dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1
+    dense-9b/trainers/train_fsdp_dense_9b.py: b0c5e00ff4b5a34b11e3c4ffc34956ef5a32e9b3acd11d78280faaa5180fad66
+    dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
