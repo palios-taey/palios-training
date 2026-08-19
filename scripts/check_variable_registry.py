@@ -191,7 +191,7 @@ def main():
         defaults = [d for d in re.findall(rf"\$\{{{v}:?-([^}}]*)\}}", src_now) if d.strip()]
         if defaults:
             failures.append(
-                f"SUPPRESSOR     {v} carries a non-empty default '{m.group(1)}'. It disables a "
+                f"SUPPRESSOR     {v} carries {len(defaults)} non-empty default(s) {defaults}. It disables a "
                 f"fail-closed gate, so a default silently disables that gate for every caller who "
                 f"never asked for it. Unset is the only safe default."
             )
