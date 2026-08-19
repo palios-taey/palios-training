@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hub-decision-receipt.schema.json",
+  "title": "The Hub decision receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "campaign_id",
+    "campaign_spec_sha256",
+    "transition",
+    "decision",
+    "authority",
+    "authorization_plane",
+    "issued_at",
+    "evidence",
+    "subject"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "campaign_spec_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "transition": {
+      "type": "string",
+      "enum": [
+        "train",
+        "bake",
+        "promote"
+      ]
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "rejected"
+      ]
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "surface",
+        "actor_type",
+        "actor_id",
+        "signer_identity",
+        "signature_namespace",
+        "trust_policy_sha256"
+      ],
+      "properties": {
+        "surface": {
+          "const": "the-hub"
+        },
+        "actor_type": {
+          "type": "string",
+          "enum": [
+            "taey",
+            "family-chat"
+          ]
+        },
+        "actor_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "signer_identity": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "signature_namespace": {
+          "const": "taey-release"
+        },
+        "trust_policy_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "authorization_plane": {
+      "const": "taey-family-chats"
+    },
+    "issued_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "repository_commit",
+          "receipt_sha256"
+        ],
+        "properties": {
+          "repository_commit": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+          },
+          "receipt_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_sha256"
+      ],
+      "properties": {
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rollback_artifact_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "consumer_aliases": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {
+              "const": "taey"
+            },
+            {
+              "const": "ep3"
+            }
+          ],
+          "items": false
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "transition": {
+            "const": "promote"
+          }
+        },
+        "required": [
+          "transition"
+        ]
+      },
+      "then": {
+        "properties": {
+          "subject": {
+            "required": [
+              "artifact_sha256",
+              "rollback_artifact_sha256",
+              "consumer_aliases"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
