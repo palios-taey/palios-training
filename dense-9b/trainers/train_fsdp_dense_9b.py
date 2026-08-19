@@ -1251,6 +1251,109 @@ class CombinedSFTDataset(Dataset):
         return {"input_ids": tokens, "labels": labels, "is_dpo": False}
 
 
+# (emitted name, environment name). The emitted names are the CONTRACT: they are what
+# careers-qwen/post_cpt_pipeline.sh:47-54 and finalize_post_cpt_candidate.sh:44-48 read
+# back. The first six are REQUIRED by both consumers; the rest are provenance and unknown
+# keys are ignored by them.
+_RUN_CONFIG_KEYS = (
+    ("CPT_PATH_FROM_LOG", "CPT_DATA"),
+    ("TRAIN_BASE", "MODEL_PATH"),
+    ("TOTAL_STEPS", "TOTAL_STEPS"),
+    ("SESSION_LIMIT", "SESSION_LIMIT"),
+    ("WARMUP_STEPS", "WARMUP_STEPS"),
+    ("LR", "LR"),
+    ("LR_LORA", "LR_LORA"),
+    ("CORPUS_INPUTS", "CORPUS_INPUTS"),
+    ("MAX_SEQ", "MAX_SEQ"),
+    ("EPOCHS", "EPOCHS"),
+    ("RESUME_DELTA", "RESUME_DELTA"),
+    ("SAVE_EVERY", "SAVE_EVERY"),
+    ("CHECKPOINT_DCP", "CHECKPOINT_DCP"),
+)
+
+
+def _execed_environment():
+    """The environment this process was EXECed with, per README Rule 5.
+
+    os.environ is the LIVE mapping and any in-process assignment mutates it, so it can
+    disagree with what the worker actually received. /proc/self/environ is the exec-time
+    block and cannot be edited from inside the process, which is exactly why the rule
+    names it. The two disagreeing is a finding to record, not a difference to smooth over.
+    """
+    with open("/proc/self/environ", "rb") as handle:
+        raw = handle.read()
+    execed = {}
+    for entry in raw.split(b"\0"):
+        if not entry:
+            continue
+        name, separator, value = entry.partition(b"=")
+        if separator:
+            execed[name.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+    return execed
+
+
+def capture_run_config(output_dir):
+    """Write run_config.env beside the run's checkpoints. Rank 0, once per session.
+
+    This file IS the run. careers-qwen/post_cpt_pipeline.sh:41-45 refuses to bake without
+    it and states why: "The live trainer is the only authoritative source; this
+    configuration cannot be reconstructed." Four consumers read it and none may default a
+    value. Until now nothing wrote it -- four readers, zero producers -- so a completed run
+    could not be baked at all.
+
+    A key is emitted ONLY when this worker actually received it. Absence is preserved
+    deliberately so a dropped variable reaches the consumer as MISSING and it aborts. A
+    capture that filled in defaults would make a variable that never arrived read as
+    configured, which is the failure this file exists to detect: run_4node_27b_cpt.sh:58-60
+    records that LR and WARMUP_STEPS were not forwarded AT ALL until 2026-07-13, so every
+    run before that trained at the trainer default no matter what the operator set.
+
+    Failing to write is fatal on purpose. A run whose configuration was never captured
+    cannot be baked, so dying in the first seconds is strictly cheaper than discovering it
+    after the run has spent its hours -- which is what happened to cpt_prod_v4_repos_1ep.
+    """
+    execed = _execed_environment()
+    lines = [
+        "# run_config.env -- written by the trainer process that ran, from /proc/self/environ.",
+        "# README Rule 5: captured once per SESSION; it cannot be reconstructed after exit.",
+        "# A required name ABSENT here was never received by this worker. Do not add it by hand.",
+    ]
+    divergences = []
+    for emitted_name, environment_name in _RUN_CONFIG_KEYS:
+        if environment_name not in execed:
+            continue
+        value = execed[environment_name]
+        live = os.environ.get(environment_name)
+        if live is not None and live != value:
+            divergences.append(f"{environment_name} exec={value!r} live={live!r}")
+        lines.append(f"{emitted_name}={value}")
+    lines.extend(f"# DIVERGENCE {entry}" for entry in divergences)
+
+    os.makedirs(output_dir, exist_ok=True)
+    destination = os.path.join(output_dir, "run_config.env")
+    # A prior capture belongs to a prior session and is never silently overwritten: it is
+    # the only record of how that session was configured.
+    if os.path.exists(destination):
+        for index in range(1, 1000):
+            preserved = f"{destination}.session{index}"
+            if not os.path.exists(preserved):
+                os.rename(destination, preserved)
+                print(f"  CAPTURE: preserved earlier capture as {preserved}", flush=True)
+                break
+        else:
+            raise RuntimeError(f"cannot preserve prior {destination}: 999 sessions already kept")
+    partial = destination + ".partial"
+    with open(partial, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(partial, destination)
+    for entry in divergences:
+        print(f"  CAPTURE DIVERGENCE: {entry}", flush=True)
+    print(f"  CAPTURE: {destination} ({len(lines)} lines)", flush=True)
+    return destination
+
+
 def main():
     gc.collect(2)
     gc.freeze()
@@ -1315,6 +1418,13 @@ def main():
     _epochs = int(os.environ.get("EPOCHS", "1"))
     if _epochs < 1:
         raise RuntimeError(f"EPOCHS={_epochs} must be >= 1")
+    # Capture this session's configuration before anything else can fail, because it cannot
+    # be recovered afterwards. Guarded on _is_bake: a bake reloads a completed run and must
+    # never overwrite that run's capture with the bake's own environment -- the training
+    # capture is the provenance the bake is being judged against. RANK is what torchrun sets
+    # per worker, so exactly one process writes.
+    if not _is_bake and int(os.environ.get("RANK", "0")) == 0:
+        capture_run_config(output_dir)
     # MANDATORY for cumulative LoRA resume (tutor 2026-07-25). Opt-in was the defect.
     # Without this flag the adapter load is `if exists / elif exists` with NO else: a rank
     # that cannot find the adapter sets loaded_delta=False and SILENTLY CONTINUES, training
