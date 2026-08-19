@@ -40,14 +40,20 @@ REGISTRY = "dense-9b/recipes/VARIABLES.yml"
 # regex below cannot see them. Kept explicit rather than silently excluded.
 GATE_ENFORCED = {"LR", "WARMUP_STEPS", "MODEL_PATH", "RESUME_DELTA"}
 
-# NEVER DEFAULTED, checked independently of how the registry classifies them. Jesse, 2026-08-18:
-# "There should not be defaults because that causes a lot of issues every run." Misfiling one of
-# these as `optional` and giving it back a `:-3000` default would otherwise keep this check green
-# -- tutor-grok constructed that state. Classification cannot excuse a default on these.
-NEVER_DEFAULTED = {
-    "TOTAL_STEPS", "SESSION_LIMIT", "SAVE_EVERY", "MAX_SEQ",
-    "BATCH_SIZE_PER_RANK", "CPT_PACKED", "CLOCK_CAP", "LR", "WARMUP_STEPS",
-}
+# NO HAND-MAINTAINED DENYLIST. The previous version listed nine variables by name, and tutor-grok
+# walked straight past it: MODEL_PATH and RESUME_DELTA were never on the list, so either could be
+# handed a `:-/legacy` default and this check stayed green. A closed list is a list someone has to
+# remember to extend -- the same "lose track of it" failure this whole file exists to prevent.
+#
+# The rule is now DERIVED from the registry: anything classified dynamic_* varies per run, and a
+# variable that varies per run must not carry a default. Add a variable to a dynamic class and it is
+# automatically protected; no second place to update.
+def never_defaulted(reg):
+    out = set()
+    for cls, items in reg.items():
+        if cls.startswith("dynamic"):
+            out |= set(items or [])
+    return out
 
 
 def code_reads(path):
@@ -123,8 +129,8 @@ def main():
                 f"STALE ENTRY    {REGISTRY} lists {v} under '{cls}' but {LAUNCHER} never reads it."
             )
 
-    # 3b. NEVER_DEFAULTED holds regardless of class.
-    for v in sorted(NEVER_DEFAULTED):
+    # 3b. A variable that varies per run must not carry a default, derived from its class.
+    for v in sorted(never_defaulted(reg)):
         if v in forms["assigned"] or v in forms["optional"]:
             failures.append(
                 f"DEFAULT BANNED {v} carries a default in the code. It varies per run, so a default "
@@ -132,7 +138,35 @@ def main():
                 f"classifies it as."
             )
 
+    # 3c. A gate suppressor may be unset, but must never carry a NON-EMPTY default.
+    src_now = open(LAUNCHER).read()
+    for v in reg.get("gate_suppressor") or []:
+        m = re.search(rf"\$\{{{v}:-([^}}]*)\}}", src_now)
+        if m and m.group(1).strip():
+            failures.append(
+                f"SUPPRESSOR     {v} carries a non-empty default '{m.group(1)}'. It disables a "
+                f"fail-closed gate, so a default silently disables that gate for every caller who "
+                f"never asked for it. Unset is the only safe default."
+            )
+
     # 4. THE CLASS MUST BE TRUE OF THE CODE, not merely written down.
+    # dynamic_required_by_gate must ACTUALLY appear in the launcher's gate, not merely be listed.
+    # tutor-grok stripped LR from the gate's for-loop, left a forward-read so it still looked
+    # "read", and this check stayed green because nothing verified the gate contained it.
+    gate_loop = ""
+    m = re.search(r"for _v in ([A-Z_ ]+); do", open(LAUNCHER).read())
+    if m:
+        gate_loop = m.group(1)
+    launcher_src = open(LAUNCHER).read()
+    for v in reg.get("dynamic_required_by_gate") or []:
+        in_gate = v in gate_loop.split()
+        in_pair = v in ("MODEL_PATH", "RESUME_DELTA") and "MODEL_PATH-or-RESUME_DELTA" in launcher_src
+        if not (in_gate or in_pair):
+            failures.append(
+                f"GATE MISSING   {v} is registered dynamic_required_by_gate but the launcher's gate "
+                f"does not check it. Being read somewhere is not being enforced."
+            )
+
     for v in reg.get("dynamic_required_when_cpt") or []:
         if v not in forms["required_conditional"] and v not in forms["required"]:
             failures.append(

@@ -16,7 +16,14 @@ WORKERS=(${SPARK_MGMT_IPS#* })   # ranks 1,2,3
 ALL=("$MASTER" "${WORKERS[@]}")
 
 # Run knobs — bf16 + keep_low_precision_grads fit (commit c63bc2d); chunked2560 corpus.
-export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_superseded.chunked2560.jsonl}"
+# THE CORPUS IS THE RUN. This defaulted to a hardcoded legacy corpus path, so an unset CPT_DATA
+# silently trained on cpt_raw_corpus_train_no_superseded.chunked2560 -- a different corpus than
+# the operator believed, with no line in any log saying so. Found by tutor-grok 2026-08-19,
+# still live after two rounds of me removing "all" the per-run defaults.
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ]; then
+  : "${CPT_DATA:?set CPT_DATA — the corpus this run trains on (CPT runs only)}"
+  export CPT_DATA
+fi
 # Collective-reduction v2 (GAIA power/thermal fix, memory-safe): micro_bsz 32/12/2 ballooned memory
 # 80->114G and HUNG. Better lever: keep micro-batches SMALL (8/4/1 = known-good 80G, see CPT_SHORT/MID/LONG_BATCH below) and cut
 # TOKEN_BUDGET_PER_STEP 262144->65536 -> ~4x FEWER micro-batches/collectives per optimizer step

@@ -30,6 +30,7 @@ dynamic_required:
 #   branch. Registered separately because claiming it is unconditionally enforced would be false:
 #   an SFT run legitimately never sets it, and the launcher no longer forwards it in that mode.
 dynamic_required_when_cpt:
+  - CPT_DATA
   - CPT_PACKED
 
 dynamic_required_by_gate:
@@ -57,6 +58,14 @@ topology_from_fleet_env:
   - SPARK_MGMT_IPS
   - SPARK_RAIL_MASTER
 
+# GATE SUPPRESSOR — may be unset, but must NEVER carry a non-empty default
+#   A non-empty value here SUPPRESSES a fail-closed safety gate. Unset is the safe state, so the
+#   variable is legitimately optional; a DEFAULT would silently disable the gate for every caller
+#   who never asked. Classified separately because the derived dynamic_* rule does not reach an
+#   optional variable, and tutor-grok showed HORIZON_PARTIAL:-213 stayed green.
+gate_suppressor:
+  - HORIZON_PARTIAL
+
 # OPTIONAL — genuinely optional; empty is a valid and meaningful state
 #   Mostly diagnostics, profiling toggles, and LoRA/SFT knobs inert on a CPT run.
 optional:
@@ -66,7 +75,6 @@ optional:
   - AC_LAYER_GRANULAR
   - ADAFACTOR_ALPHA_MODE
   - BAKE_TO_HF
-  - CPT_DATA
   - DISABLE_FLA
   - EPOCHS
   - EXACT_SFT_EPOCH
@@ -76,7 +84,6 @@ optional:
   - FP32_MASTER
   - FP8
   - GATE_PREFLIGHT
-  - HORIZON_PARTIAL
   - LANE_WEIGHTS
   - LIGER
   - LORA_ALPHA
