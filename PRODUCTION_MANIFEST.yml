@@ -87,7 +87,7 @@ capabilities:
       # the ssh) — real defects, but they belong to bake/export/fabric and are deliberately NOT
       # bundled here. run_4node_27b_cpt.sh and the config stay at their existing pins.
       dense-9b/trainers/train_fsdp_dense_9b.py: b0c5e00ff4b5a34b11e3c4ffc34956ef5a32e9b3acd11d78280faaa5180fad66
-      dense-9b/recipes/run_4node_27b_cpt.sh: b77e5b22f93a0121d58ea08eb226374af3f86c9f3374838c6c00033cbcbc057f
+      dense-9b/recipes/run_4node_27b_cpt.sh: f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
       dense-9b/instrumentation/capture_run.sh: 6c9e95a1c4e538dcccb72254d46837a51f74d4cc44f858b891f72ba0fdeda44e
       dense-9b/recipes/run_refresh_gate.sh: 974689c2086e3ed9f96459eeb0f5c8b3699185222e870e77c918b4ba357997fe
