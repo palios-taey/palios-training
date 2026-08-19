@@ -129,7 +129,7 @@ STATUS = {
     # LABEL — 24 meta fields and zero role/speaker/author/turn — so it cannot distinguish Jesse's
     # words from the assistant's from third-party text he pasted in. Training it teaches an average
     # of every speaker present.
-    # Archived byte-verified to /home/mira/recovery/voice_corpus_deleted_2026-08-02/ before
+    # Archived byte-verified to $HOME/recovery/voice_corpus_deleted_2026-08-02/ before
     # deletion. That is an audit trail, NOT a staging area for re-adding it.
     # Side effect worth recording: 5 of the 7 files infra flagged in fl-cred-corpus-quarantine were
     # these voice files, so the deletion resolves most of that quarantine outright.

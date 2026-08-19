@@ -160,6 +160,23 @@ PACK_SETS = {
     "prod_v1": [
         ("cpt_public_repos_prod.jsonl", 1089, "82a117538c31ecac"),
     ],
+    # prod_v3, 2026-08-17 (Jesse: "train the Qwen3.8 the same CPT content as current model in
+    # production with updated production repo content"). SAME ten-repo set, SAME extractor, SAME
+    # exclusions as prod_v1 — only the repo content is newer. Named v3 because cpt_prod_v2_packed_*
+    # already exists on the nodes; a colliding name would overwrite a real artifact.
+    # Rebuilt by build_corpus_slices.py public-repos-prod after fetching all ten to their pinned
+    # production refs. Two moved: taey-presence -> c05d8be, apply-machine -> 13a1b60 (its
+    # ats-submit-subtraction override); governance -> 1f1415f.
+    # 1,167 rows / 815 docs / 10,199,092 chars, +78 vs prod_v1. Growth is where the work was:
+    # taeys-hands 280, palios-training 259, taey-presence 125.
+    # RE-VERIFIED with prod_v1's own methods rather than assumed to still hold:
+    #   bundles/ rows BY SOURCE PATH: 0    quarantine/fabricated: 0
+    #   treasurer/scripts/secret_scan.py: 0 NAMED, 6 ENTROPY — same count and class prod_v1 triaged,
+    #   all read and all Python identifiers (_strict_children, UniqueKeyLoader.add_constructor,
+    #   splitlines(), workday_job).
+    "prod_v3": [
+        ("cpt_public_repos_prod.jsonl", 1167, "779b4234936bc9fe"),
+    ],
 }
 
 

@@ -1,5 +1,7 @@
 # CPT packed-sequence-length measurement — 27B dense, 4× GB10
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../../docs/INDEX.md) for the full authority order.
+
 **Date**: 2026-08-01
 **Seat**: tutor
 **Purpose**: close the `cpt_window_2026-08-01` consult, which returned "no number can be

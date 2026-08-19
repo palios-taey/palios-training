@@ -1,0 +1,145 @@
+# VARIABLE REGISTRY — dense-9b/recipes/run_4node_27b_cpt.sh
+#
+# WHY THIS FILE EXISTS. Jesse, 2026-08-18: "ensure the dynamic variables are indeed dynamic and
+# that you don't lose track of them." Losing track is the documented failure here: this launcher
+# read 74 variables, 13 of which silently ASSIGNED legacy values when unset, and a packet written
+# about that surface missed an entire bash syntax and reported them as empty. Nothing connected the
+# code to a statement of what the code was supposed to read.
+#
+# THIS IS A CORRESPONDENCE CHECK, NOT A LIST. scripts/check_variable_registry.py reads the
+# LAUNCHER'S ACTUAL VARIABLE READS and compares them to this file IN BOTH DIRECTIONS:
+#   - a variable the code reads that is not classified here     -> FAIL (a new knob got lost)
+#   - a variable classified here that the code never reads      -> FAIL (this file went stale)
+# So the registry cannot drift from the code in either direction without CI saying so.
+#
+# THE CLASSES, and the test that decides them — does the value VARY PER RUN?
+
+# DYNAMIC — required, enforced by bash `${VAR:?}` before anything executes
+#   Vary per campaign or per corpus. No default exists. Omitting one aborts the launch.
+dynamic_required:
+  - CLOCK_CAP
+  - BATCH_SIZE_PER_RANK
+  - MAX_SEQ
+  - SAVE_EVERY
+  - SESSION_LIMIT
+  - TOTAL_STEPS
+
+# DYNAMIC — required, enforced by the launcher's own gate
+#   MODEL_PATH or RESUME_DELTA: exactly one must be an explicit decision. Unset RESUME_DELTA silently trains the raw base.
+# DYNAMIC — required, but only in CPT mode. Enforced by a ${VAR:?} nested inside the CPT-mode
+#   branch. Registered separately because claiming it is unconditionally enforced would be false:
+#   an SFT run legitimately never sets it, and the launcher no longer forwards it in that mode.
+dynamic_required_when_cpt:
+  - CPT_DATA
+  - CPT_PACKED
+  - OUTPUT_DIR
+
+dynamic_required_by_gate:
+  - LR
+  - MODEL_PATH
+  - RESUME_DELTA
+  - WARMUP_STEPS
+
+# INVARIANT — set unconditionally in ONE place, never defaulted, never asked of callers
+#   Do NOT vary per run. ADAFACTOR_EPS1 especially: unset falls back to finfo(bf16).eps and suppresses updates ~5000x.
+invariant:
+  - ADAFACTOR_DOSE_LOG
+  - ADAFACTOR_EPS1
+  - CHECKPOINT_DCP
+  - CPT_LONG_BATCH
+  - CPT_MID_BATCH
+  - CPT_SHORT_BATCH
+  - TOKEN_BUDGET_PER_STEP
+
+# TOPOLOGY — supplied by the gitignored fleet.env
+#   Never hardcoded. The launcher aborts under set -u if fleet.env did not load.
+topology_from_fleet_env:
+  - SPARK_HOME
+  - SPARK_MASTER
+  - SPARK_MGMT_IPS
+  - SPARK_RAIL_MASTER
+
+# GATE SUPPRESSOR — may be unset, but must NEVER carry a non-empty default
+#   A non-empty value here SUPPRESSES a fail-closed safety gate. Unset is the safe state, so the
+#   variable is legitimately optional; a DEFAULT would silently disable the gate for every caller
+#   who never asked. Classified separately because the derived dynamic_* rule does not reach an
+#   optional variable, and tutor-grok showed HORIZON_PARTIAL:-213 stayed green.
+gate_suppressor:
+  - HORIZON_PARTIAL
+
+# OPTIONAL — genuinely optional; empty is a valid and meaningful state
+#   Mostly diagnostics, profiling toggles, and LoRA/SFT knobs inert on a CPT run.
+optional:
+  - GEMM_PREFLIGHT_MIN_PEER_RATIO
+  - GEMM_PREFLIGHT_ONLY
+  - AC_LAYER_CLS
+  - AC_LAYER_GRANULAR
+  - ADAFACTOR_ALPHA_MODE
+  - BAKE_TO_HF
+  - DISABLE_FLA
+  - EPOCHS
+  - EXACT_SFT_EPOCH
+  - EXPECTED_REAL_SAMPLES
+  - EXPECTED_SFT_SAMPLES
+  - EXPORT_DCP
+  - FP32_MASTER
+  - FP8
+  - GATE_PREFLIGHT
+  - LANE_WEIGHTS
+  - LIGER
+  - LORA_ALPHA
+  - LORA_DROPOUT
+  - LORA_MODE
+  - LORA_R
+  - LORA_TARGET_MODULES
+  - LR_LORA
+  - NCCL_DEBUG
+  - NCCL_DEBUG_FILE
+  - NCCL_DEBUG_SUBSYS
+  - NSYS_OUT_DIR
+  - NSYS_PROFILE_ALL_RANKS
+  - NSYS_PROFILE_STEP
+  - QUARANTINE_DIGESTS
+  - REQUIRE_LORA_INIT_PARITY
+  - RESUME_MODEL_ONLY
+  - SFT_DIR
+  - SFT_JSONL
+  - TINY_LANE_CAP
+  - TINY_LANE_THRESHOLD
+  - TORCH_COMPILE
+  - TORCH_COMPILE_MODE
+  - TORCH_NCCL_TRACE_BUFFER_SIZE
+
+# LOCAL — shell variables the script computes; NOT configuration
+#   Listed so the checker can tell a computed local from an un-classified input.
+local_shell_not_config:
+  - ALL
+  - GEMM_FAILURES
+  - GEMM_MEDIAN
+  - GEMM_TFLOPS
+  - CPT_LIFECYCLE
+  - EXPECTED_FRAGMENTATION
+  - INITIAL_SESSION
+  - LAST_STATE
+  - LAST_EVENT
+  - LIFECYCLE_LOG
+  - LIFECYCLE_TOOL
+  - LOGDIR
+  - MASTER
+  - OBSERVED_CHECKPOINT
+  - OBSERVED_STEP
+  - PREVIOUS_STEP
+  - RECIPE_DIR
+  - RUN_TAG
+  - RUN_ENV
+  - SORTED_TFLOPS
+  - STEP_SEEN
+  - WORKERS
+
+# EXTERNAL — variables owned by a file other than the launcher
+#   The owning path is part of the class. The checker verifies the file reads every listed name
+#   and refuses any external-mode conditional that can precede or contain a manifest/content pin
+#   gate. These flags may have inert diagnostic defaults; they are not dynamic campaign inputs.
+external:
+  scripts/taey-train:
+    - TAEY_TRAIN_CHECK_ONLY

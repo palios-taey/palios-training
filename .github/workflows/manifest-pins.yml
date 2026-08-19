@@ -1,0 +1,37 @@
+# Does PRODUCTION_MANIFEST.yml describe the tree it ships with?
+#
+# scripts/taey-train verifies every content_sha at launch and has no force flag, so a drifted
+# manifest makes a capability UNRUNNABLE. Nothing checked that agreement until 2026-08-18, when
+# origin/main was measured drifted on 5 of its 12 pins — three of five capabilities unrunnable,
+# for 15 days, with every existing workflow green. The other workflows check for secrets, private
+# paths and data blobs. None checked whether the repository agreed with itself.
+#
+# Same script CI runs is the script you run locally. This repo already had a gate whose hook and
+# CI job enforced different rules, so commits passed locally and failed CI and everyone learned to
+# ignore CI. Not repeating that.
+name: manifest-pins
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # candidate_update pins are judged against git history of the named path.
+          # Default checkout is depth 1; that makes git log return only HEAD, and the
+          # checker must then ABORT rather than call the pin an orphan. Fetch everything
+          # so CI can actually look. The abort in the checker is the durable rule.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install --quiet pyyaml
+      - name: PRODUCTION_MANIFEST.yml must describe this tree
+        run: python3 scripts/check_manifest_pins.py
+      - name: prove the gate can fail for the right reason
+        run: python3 scripts/check_manifest_pins.py --self-test

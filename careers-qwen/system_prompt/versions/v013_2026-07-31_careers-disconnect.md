@@ -258,7 +258,7 @@ knowledge you must already have. If the runner is not at this path, say so and a
 do not conclude you have no process.
 
 ```
-cd /home/mira/treasurer
+cd $OPERATOR_HOME/treasurer
 python3 scripts/loop/taey_drive.py --display :18 --goal "<the one step you are on>" --facts "<canonical facts you need>"
 ```
 

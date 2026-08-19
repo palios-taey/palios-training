@@ -354,7 +354,7 @@ verify_protected_checkpoint(){
 set -euo pipefail
 rank=$1
 expected_metadata=$2
-checkpoint=/home/spark/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800
+checkpoint=$HOME/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800
 [ "$(cat "$checkpoint/COMPLETE")" = "step=800 epoch=0 data_pos=800 rank=$rank" ]
 [ "$(stat -c %s "$checkpoint/trainer_meta.pt")" = 7245 ]
 [ "$(stat -c %s "$checkpoint/dcp/__${rank}.metadata")" = "$expected_metadata" ]

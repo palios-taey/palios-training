@@ -19,7 +19,11 @@ say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$DLOG"; }
 
 latest_ckpt() {
   timeout 10 ssh -o ConnectTimeout=6 spark@"$MASTER" \
-    "ls -d $CKPT_DIR/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1" 2>/dev/null
+    "if test -f '$CKPT_DIR/final/COMPLETE'; then
+       python3 -c \"import torch; print(torch.load('$CKPT_DIR/final/trainer_meta.pt', map_location='cpu', weights_only=False)['step'])\";
+     else
+       ls -d '$CKPT_DIR'/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1;
+     fi" 2>/dev/null
 }
 
 reboot_all() {

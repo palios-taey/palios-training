@@ -1,5 +1,7 @@
 # 27B Bake / Export Architecture — UNANIMOUS Chats ruling (2026-07-14)
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../../docs/INDEX.md) for the full authority order.
+
 Source: `treasurer/consultations/consult_bake_architecture.md` (+2 addenda) → responses
 `bake_architecture_{gaia,horizon}.md`. Both lanes CONVERGE. This is the production export design.
 Jesse directives it satisfies: (1) bakes off the training cluster / no Spark downtime; (2) 1 epoch

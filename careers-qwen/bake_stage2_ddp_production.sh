@@ -286,7 +286,7 @@ if tmux has-session -t stage2-ddp-sft 2>/dev/null; then
   echo "REFUSE: training tmux still exists on rank$rank" >&2
   exit 1
 fi
-protected=/home/spark/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800
+protected=$HOME/training_outputs/cpt_v7_eps1fix_stage2_all_rows/checkpoint-800
 [ -s "$protected/COMPLETE" ]
 [ -s "$protected/trainer_meta.pt" ]
 [ -s "$protected/dcp/__${rank}_0.distcp" ]

@@ -24,7 +24,11 @@ say() { echo "[$(date -u +%H:%M:%S)] $*" | tee -a "$DLOG"; }
 
 latest_ckpt() {
   timeout 10 ssh -o ConnectTimeout=6 spark@"$MASTER" \
-    "ls -d $CKPT_DIR/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1" 2>/dev/null
+    "if test -f '$CKPT_DIR/final/COMPLETE'; then
+       python3 -c \"import torch; print(torch.load('$CKPT_DIR/final/trainer_meta.pt', map_location='cpu', weights_only=False)['step'])\";
+     else
+       ls -d '$CKPT_DIR'/checkpoint-* 2>/dev/null | sed 's/.*checkpoint-//' | sort -n | tail -1;
+     fi" 2>/dev/null
 }
 
 reboot_all() {
@@ -51,6 +55,24 @@ fabric_ok() {
 # cool in ~1min but the chassis does not). Enforce a minimum idle gap before each launch.
 COOLDOWN_S=${COOLDOWN_S:-1200}
 last_session_end=0
+# NO DEFAULTS HERE EITHER. Removing the per-run defaults from run_4node_27b_cpt.sh moved them one
+# level UP: until 2026-08-19 this wrapper still supplied CPT_DATA, MAX_SEQ, BATCH_SIZE_PER_RANK,
+# TOTAL_STEPS, LR and WARMUP_STEPS from its own `:-` defaults, so the launcher's ${VAR:?} was
+# satisfied by a value nobody chose. Found by tutor-grok after I had twice reported the defaults
+# removed. A wrapper that answers the launcher's questions for you is the same defect wearing a
+# different filename.
+_w_missing=""
+for _v in CPT_DATA TOTAL_STEPS MAX_SEQ BATCH_SIZE_PER_RANK LR WARMUP_STEPS; do
+  eval "[ -n \"\${${_v}+x}\" ]" || _w_missing="$_w_missing $_v"
+done
+if [ -n "$_w_missing" ]; then
+  echo "ABORT: run_till_done_v3.sh drives a real campaign and was given no:$_w_missing" >&2
+  echo "  This wrapper reboots four nodes and trains for hours. Decide the campaign first, e.g." >&2
+  echo "    CPT_DATA=<corpus> TOTAL_STEPS=693 MAX_SEQ=2560 BATCH_SIZE_PER_RANK=4 \\" >&2
+  echo "    LR=1e-5 WARMUP_STEPS=15 bash dense-9b/recipes/run_till_done_v3.sh" >&2
+  exit 1
+fi
+
 attempt=0
 while true; do
   cur=$(latest_ckpt)
@@ -91,10 +113,10 @@ while true; do
   for pid in $(ps -eo pid,args | awk '/^ *[0-9]+ bash thermal_watchdog.sh/{print $1}'); do kill "$pid" 2>/dev/null; done
   ( cd "$INSTR" && setsid bash -c "PULL_OFF=90 PERSIST=3 INTERVAL=8 LOG=watchdog_auto_a${attempt}.csv exec bash thermal_watchdog.sh" >> "$DLOG.watchdog" 2>&1 < /dev/null & )
 
-  CPT_DATA=${CPT_DATA:-/var/spark/isma/training/cpt_production_v2_packed_2560.jsonl} \
-  CPT_PACKED=1 MAX_SEQ=${MAX_SEQ:-2560} BATCH_SIZE_PER_RANK=${BATCH_SIZE_PER_RANK:-4} \
-  TOTAL_STEPS=${TOTAL_STEPS:-693} SESSION_LIMIT=$SL SAVE_EVERY=$SL CHECKPOINT_DCP=1 \
-  LR=${LR:-1e-5} WARMUP_STEPS=${WARMUP_STEPS:-15} \
+  CPT_DATA=$CPT_DATA \
+  CPT_PACKED=1 MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK \
+  TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SL SAVE_EVERY=$SL CHECKPOINT_DCP=1 \
+  LR=$LR WARMUP_STEPS=$WARMUP_STEPS \
   ${MODEL_PATH:+MODEL_PATH=$MODEL_PATH} \
   ADAFACTOR_ALPHA_MODE=absolute ADAFACTOR_EPS1=fp32 ADAFACTOR_DOSE_LOG=1 \
   OUTPUT_DIR=$CKPT_DIR \

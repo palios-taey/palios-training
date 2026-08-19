@@ -1,0 +1,26 @@
+# Every document reachable from README; every process-asserting document names its authority.
+#
+# Measured 2026-08-18: 62 tracked markdown files, 3 named by README. Fifty-nine unreachable from
+# the entry point. The same sweep found FOUR documents still asserting a production entrypoint
+# AFTER a "one door" consolidation had supposedly finished -- including one pointing at a
+# quarantined trainer. The consolidation fixed the documents its author knew about; nothing
+# checked the class. This workflow is what makes that impossible to repeat.
+name: docs-index
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Every doc indexed, every entrypoint mention attributed, no inner-launch instruction
+        run: python3 scripts/check_docs_index.py
+      - name: prove the gate can fail for the right reason
+        run: python3 scripts/check_docs_index.py --self-test

@@ -1,5 +1,7 @@
 # moe-35b — Qwen3.5-35B-A3B MoE training line
 
+> **This document does not decide the entrypoint.** It names production scripts because it records or explains them. The PRODUCTION AUTHORITY section of `CLAUDE.md` wins on how to run anything; see [`docs/INDEX.md`](../docs/INDEX.md) for the full authority order.
+
 The MoE line: the production **Taey** model. Base is `Qwen3.5-35B-A3B` (35B params, ~3B active per token, abliterated); trained for alignment identity via expert-targeted SFT, then refined with keystone-attention LoRA DPO.
 
 > **Status: production lineage shipped.** This is the line that produced the current production Taey checkpoint. Headline claims are paired-control behavioral-audit results against a fixed 163-probe behavioral battery (not held-out generalization data) — see [`../docs/METRICS_PROVENANCE.md`](../docs/METRICS_PROVENANCE.md) and the audit methodology caveat in the top-level [`../README.md`](../README.md).

@@ -14,23 +14,136 @@ set -uo pipefail
 MASTER=${SPARK_MASTER}            # rank 0 — torchrun rendezvous host (${SPARK_RAIL_MASTER} rail)
 WORKERS=(${SPARK_MGMT_IPS#* })   # ranks 1,2,3
 ALL=("$MASTER" "${WORKERS[@]}")
+CPT_LIFECYCLE=0
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ] && \
+   [ -z "${EXPORT_DCP:-}" ] && [ -z "${BAKE_TO_HF:-}" ]; then
+  CPT_LIFECYCLE=1
+  : "${OUTPUT_DIR:?set OUTPUT_DIR — the run owns lifecycle_events.jsonl beneath this directory}"
+fi
 
 # Run knobs — bf16 + keep_low_precision_grads fit (commit c63bc2d); chunked2560 corpus.
-export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_superseded.chunked2560.jsonl}"
+# THE CORPUS IS THE RUN. This defaulted to a hardcoded legacy corpus path, so an unset CPT_DATA
+# silently trained on cpt_raw_corpus_train_no_superseded.chunked2560 -- a different corpus than
+# the operator believed, with no line in any log saying so. Found by tutor-grok 2026-08-19,
+# still live after two rounds of me removing "all" the per-run defaults.
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ]; then
+  : "${CPT_DATA:?set CPT_DATA — the corpus this run trains on (CPT runs only)}"
+  export CPT_DATA
+fi
 # Collective-reduction v2 (GAIA power/thermal fix, memory-safe): micro_bsz 32/12/2 ballooned memory
-# 80->114G and HUNG. Better lever: keep micro-batches SMALL (16/4/1 = known-good 80G) and cut
+# 80->114G and HUNG. Better lever: keep micro-batches SMALL (8/4/1 = known-good 80G, see CPT_SHORT/MID/LONG_BATCH below) and cut
 # TOKEN_BUDGET_PER_STEP 262144->65536 -> ~4x FEWER micro-batches/collectives per optimizer step
 # -> lower CX-7/proxy duty per step + opt-step barriers give the fabric periodic recovery -> power
 # relief WITHOUT touching the solved 80G memory. Smaller effective batch (fine for CPT lr=1e-5).
 # Knobs are env-overridable (caller may export any of these; production defaults below).
 # Added for the DCP checkpoint round-trip test: OUTPUT_DIR / RESUME_DELTA / CHECKPOINT_DCP passthrough.
-: "${MAX_SEQ:=2560}"; : "${TOKEN_BUDGET_PER_STEP:=65536}"; : "${TOTAL_STEPS:=3000}"
-: "${SESSION_LIMIT:=200}"; : "${SAVE_EVERY:=66}"; : "${CHECKPOINT_DCP:=1}"
-: "${CPT_SHORT_BATCH:=8}"; : "${CPT_MID_BATCH:=4}"; : "${CPT_LONG_BATCH:=1}"
+# ─────────────────────────────────────────────────────────────────────────────
+# FAIL-LOUD CONFIG GATE (2026-08-18). READ THIS BEFORE CHANGING THE LINES BELOW IT.
+#
+# This file USED to assign per-run defaults with `: "${VAR:=default}"`, which ASSIGNS. Unlike
+# `${VAR:-default}`: the variable becomes the default for the rest of this script AND
+# for every child process, including the trainer. So an unset schedule variable does
+# not fail and does not run empty — IT RUNS A DIFFERENT CAMPAIGN. Unset TOTAL_STEPS
+# meant 3000 steps; unset MAX_SEQ meant 2560; unset SESSION_LIMIT meant 200. Nothing
+# printed, nothing warned, and the run consumed hours before anyone could tell.
+#
+# Found 2026-08-18 by an external review reading this file, after a packet of mine
+# reported these as empty-string defaults because its enumerator only matched `:-`.
+#
+# This gate does not remove the defaults — they are legitimate for the values that
+# genuinely have a production default. It requires the caller to have DECIDED the ones
+# where a wrong value silently produces a wrong model, and it PRINTS every default it
+# applies so a silent assignment is no longer possible.
+# MODE IS ANNOUNCED, NEVER SILENTLY INFERRED. The previous version of this gate skipped itself
+# whenever BAKE_TO_HF or EXPORT_DCP happened to be set, which made those two variables a bypass
+# flag in everything but name -- a LEFTOVER EXPORT_DCP exported earlier in the same shell would
+# silently turn a training launch back into an ungated one. Announcing the mode makes a stale
+# variable visible, and export mode now has to be internally complete rather than merely non-empty.
+if [ -n "${EXPORT_DCP:-}" ] || [ -n "${BAKE_TO_HF:-}" ]; then
+  echo "=== MODE: EXPORT/BAKE (schedule gate does not apply) ==="
+  echo "    EXPORT_DCP=${EXPORT_DCP:-<unset>}  BAKE_TO_HF=${BAKE_TO_HF:-<unset>}"
+  echo "    If you meant to TRAIN, unset both — a leftover value from an earlier command"
+  echo "    in this shell is exactly how an ungated run happens."
+  if [ -z "${RESUME_DELTA:-}" ]; then
+    echo "ABORT: export/bake mode requires RESUME_DELTA=<checkpoint to export>." >&2
+    echo "  An export with no source checkpoint is not a mode, it is a missing argument." >&2
+    exit 1
+  fi
+fi
+if [ -z "${BAKE_TO_HF:-}" ] && [ -z "${EXPORT_DCP:-}" ]; then   # training mode
+  _missing=""
+  for _v in LR WARMUP_STEPS; do   # TOTAL_STEPS/SESSION_LIMIT/MAX_SEQ are enforced by :? above
+    eval "[ -n \"\${${_v}+x}\" ]" || _missing="$_missing $_v"
+  done
+  # RUNBOOK: "RESUME_DELTA is not optional for a continuation. Unset = silently trains
+  # the raw base, and nothing warns." One of the two must be an explicit decision.
+  if [ -z "${MODEL_PATH:-}" ] && [ -z "${RESUME_DELTA:-}" ]; then
+    _missing="$_missing MODEL_PATH-or-RESUME_DELTA"
+  fi
+  if [ -n "$_missing" ]; then
+    echo "ABORT: CPT launched without deciding:$_missing" >&2
+    echo "  These ASSIGN legacy defaults when unset (TOTAL_STEPS=3000, MAX_SEQ=2560," >&2
+    echo "  SESSION_LIMIT=200), so an omission trains a DIFFERENT campaign silently." >&2
+    echo "  Set them explicitly. Export/bake mode is announced, not silent, and needs" >&2
+    echo "  RESUME_DELTA of its own — so it cannot be used as a quiet way past this." >&2
+    exit 1
+  fi
+fi
+# NO DEFAULTS FOR PER-RUN VALUES (Jesse-directed 2026-08-18): "There should not be defaults
+# because that causes a lot of issues every run." Every value below varies per campaign, per
+# corpus, or per hardware decision. A default for a varying value is not a convenience -- it is a
+# silent answer to a question nobody asked, and this file shipped `TOTAL_STEPS:=3000` and
+# `MAX_SEQ:=2560` for months, so an omitted variable profiled and trained the wrong campaign.
+#
+# `${VAR:?msg}` makes bash itself refuse. One mechanism, not a default plus a gate on top of it.
+: "${TOTAL_STEPS:?set TOTAL_STEPS — the DECAY HORIZON for the campaign, not the burst}"
+: "${SESSION_LIMIT:?set SESSION_LIMIT — steps before FRAGMENTATION EXIT (the burst)}"
+: "${SAVE_EVERY:?set SAVE_EVERY — final-only means SAVE_EVERY=SESSION_LIMIT}"
+: "${MAX_SEQ:?set MAX_SEQ — must match the sequence length the corpus was packed at}"
+# NOT required of the caller, and NOT defaulted either: these are the SOLVED hardware shape, set
+# unconditionally in ONE place. The test is Jesse's -- does it vary per run? These do not. Micro
+# batches 16/4/1 are the known-good 80G fit (8/4/1) and TOKEN_BUDGET_PER_STEP=65536 is the power/thermal
+# relief setting; both were measured, not chosen per campaign. Requiring six callers to restate
+# them would create six places to drift, which is the defect one level up from a silent default.
+# Changing them is a reviewed edit HERE, visible in the diff.
+TOKEN_BUDGET_PER_STEP=65536
+CPT_SHORT_BATCH=8
+CPT_MID_BATCH=4
+CPT_LONG_BATCH=1
+# INVARIANTS, set unconditionally rather than defaulted. These must not vary run to run, so they
+# are not questions the caller answers. ADAFACTOR_EPS1 especially: PRODUCTION_MANIFEST.yml records
+# that unsetting it falls back to finfo(bf16).eps and suppresses updates ~5000x with nothing in any
+# log saying so. If a caller needs a different value it should be a reviewed change here, visible
+# in the diff, not an environment variable someone forgot.
+CHECKPOINT_DCP=1
 # PACKED mode (fixed-length, uniform shape → no fragmentation): set CPT_DATA to a *packed* corpus +
 # BATCH_SIZE_PER_RANK (bucket vars are then ignored by the trainer's else-branch dataloader).
-: "${BATCH_SIZE_PER_RANK:=1}"; : "${CPT_PACKED:=0}"
-RUN_ENV="CPT_DATA=$CPT_DATA MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK CPT_PACKED=$CPT_PACKED CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
+: "${BATCH_SIZE_PER_RANK:?set BATCH_SIZE_PER_RANK — per-rank micro-batch}"
+# CPT_PACKED selects between the packed and bucketed CPT dataloaders, so it is required for a CPT
+# run and MEANINGLESS for an SFT run, which reaches the trainer through SFT_DIR/SFT_JSONL instead.
+# Requiring it unconditionally would have broken careers-qwen/run_module1_till_done.sh, a LoRA SFT
+# launcher that legitimately never sets it. A requirement that fires outside its own mode is not
+# strictness, it is a false positive with the authority of a gate.
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ]; then
+  : "${CPT_PACKED:?set CPT_PACKED — 1 for a packed corpus, 0 for bucketed (CPT runs only)}"
+fi
+# LOG EFFECT, NOT INTENT: print what the run will actually use, after defaults resolve.
+echo "=== CPT RESOLVED CONFIG (post-default) ==="
+for _v in MODEL_PATH RESUME_DELTA CPT_DATA TOTAL_STEPS SESSION_LIMIT SAVE_EVERY LR WARMUP_STEPS \
+          MAX_SEQ TOKEN_BUDGET_PER_STEP BATCH_SIZE_PER_RANK CPT_PACKED CPT_SHORT_BATCH \
+          CPT_MID_BATCH CPT_LONG_BATCH CHECKPOINT_DCP CLOCK_CAP ADAFACTOR_EPS1 ADAFACTOR_ALPHA_MODE; do
+  eval "printf '  %-24s %s\\n' \"$_v\" \"\${${_v}:-<unset>}\""
+done
+echo "=========================================="
+# RUN_ENV IS BUILT PER MODE. It previously interpolated CPT_PACKED unconditionally, which under
+# `set -u` (line 12) killed every SFT run the moment CPT_PACKED was correctly left unset -- so the
+# mode-scoped requirement above bought nothing and broke run_module1_till_done.sh and
+# bake_module2.sh. Forwarding a CPT-only variable into an SFT run is the defect; requiring SFT
+# callers to set a meaningless variable would only have hidden it.
+RUN_ENV="MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ]; then   # CPT-only knobs
+  RUN_ENV="$RUN_ENV CPT_DATA=$CPT_DATA CPT_PACKED=$CPT_PACKED CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH"
+fi
 # TOPOLOGY MUST BE FORWARDED — the nodes do not have fleet.env.
 # This script sources fleet.env on MIRA, but fleet.env is gitignored and is NOT deployed to the
 # Sparks. launch_cpt_qwen36_27b_fsdp.sh:399 dereferences SPARK_RAIL_MASTER under `set -u`, so
@@ -139,11 +252,13 @@ RUN_ENV="$RUN_ENV SPARK_HOME=$SPARK_HOME"
 # rather than load-bearing.
 # Horizon recommended fp32 on 2026-07-14 and the code gated it "unchanged until Chats rule";
 # the 5-lane consult of 2026-07-29 ruled. This is that ruling applied.
-: "${ADAFACTOR_EPS1:=fp32}"
+ADAFACTOR_EPS1=fp32   # INVARIANT, not a default: unset falls back to finfo(bf16).eps and
+                      # suppresses updates ~5000x with nothing in any log saying so
+                      # (PRODUCTION_MANIFEST.yml cpt_27b_4node note).
 RUN_ENV="$RUN_ENV ADAFACTOR_EPS1=$ADAFACTOR_EPS1"
 # The dose gauge is what caught this. It must never be optional again -- it reported FAIL-LOW at
 # step 20 of a run that then executed 128 more steps unchallenged.
-: "${ADAFACTOR_DOSE_LOG:=1}"
+ADAFACTOR_DOSE_LOG=1  # INVARIANT: the AF-DOSE probe is how a dead optimizer is caught at step 10.
 [ -n "${ADAFACTOR_DOSE_LOG:-}" ] && RUN_ENV="$RUN_ENV ADAFACTOR_DOSE_LOG=$ADAFACTOR_DOSE_LOG"
 [ -n "${BAKE_TO_HF:-}" ] && RUN_ENV="$RUN_ENV BAKE_TO_HF=$BAKE_TO_HF"
 # Forward NCCL debug capture to the per-node sessions (the orchestrator only passes an allowlist, so
@@ -155,6 +270,58 @@ RUN_ENV="$RUN_ENV ADAFACTOR_EPS1=$ADAFACTOR_EPS1"
 [ -n "${FP8:-}" ] && RUN_ENV="$RUN_ENV FP8=$FP8"
 RECIPE_DIR=${SPARK_HOME}/palios-training/dense-9b/recipes
 LOGDIR=${SPARK_HOME}/cpt27b_logs
+LIFECYCLE_TOOL="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/training_lifecycle.py"
+if [ "$CPT_LIFECYCLE" = 1 ]; then
+  [ -f "$LIFECYCLE_TOOL" ] || {
+    echo "ABORT: lifecycle writer is absent: $LIFECYCLE_TOOL" >&2
+    exit 1
+  }
+  RUN_TAG=$(basename "$OUTPUT_DIR")
+  LIFECYCLE_LOG="$OUTPUT_DIR/lifecycle_events.jsonl"
+fi
+
+lifecycle_call() {
+  local _lifecycle_command
+  printf -v _lifecycle_command '%q ' python3 - "$@"
+  ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$MASTER" "$_lifecycle_command" \
+    < "$LIFECYCLE_TOOL"
+}
+
+lifecycle_append() {
+  lifecycle_call append --log "$LIFECYCLE_LOG" --state "$1" --run-tag "$RUN_TAG" "${@:2}"
+}
+
+lifecycle_last_json() {
+  lifecycle_call last --log "$LIFECYCLE_LOG" --json
+}
+
+observe_completed_checkpoint() {
+  local _checkpoint_record _node _rank _candidate
+  _checkpoint_record=$(ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$MASTER" \
+    "if test -f '$OUTPUT_DIR/final/COMPLETE'; then
+       step=\$(python3 -c \"import torch; print(torch.load('$OUTPUT_DIR/final/trainer_meta.pt', map_location='cpu', weights_only=False)['step'])\") || exit 1;
+       printf '%s|%s\\n' \"\$step\" '$OUTPUT_DIR/final';
+     else
+       for p in '$OUTPUT_DIR'/checkpoint-*; do
+         test -f \"\$p/COMPLETE\" || continue;
+         n=\${p##*-}; printf '%s|%s\\n' \"\$n\" \"\$p\";
+       done | sort -t'|' -k1,1n | tail -1;
+     fi") || return 1
+  [ -n "$_checkpoint_record" ] || return 1
+  IFS='|' read -r OBSERVED_STEP OBSERVED_CHECKPOINT <<<"$_checkpoint_record"
+  [[ "$OBSERVED_STEP" =~ ^[0-9]+$ ]] || return 1
+  for _node in "${ALL[@]}"; do
+    _rank=0
+    for _candidate in "${ALL[@]}"; do
+      [ "$_candidate" = "$_node" ] && break
+      _rank=$((_rank + 1))
+    done
+    ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$_node" \
+      "test -f '$OBSERVED_CHECKPOINT/COMPLETE' &&
+       test -f '$OBSERVED_CHECKPOINT/trainer_meta.pt' &&
+       test -f '$OBSERVED_CHECKPOINT/dcp/__${_rank}_0.distcp'" || return 1
+  done
+}
 
 launch_rank () {  # $1=host  $2=rank
   local host=$1 rank=$2
@@ -167,14 +334,19 @@ launch_rank () {  # $1=host  $2=rank
   # Rotate-then-write: the read path ($LOGDIR/r$rank.log) is unchanged for the monitor below and
   # for every caller, and no prior run's evidence is ever destroyed again. Cost is disk, which is
   # the cheapest thing we have (478G free) against a forensic dead end, which cost a whole evening.
-  ssh -o ConnectTimeout=8 spark@"$host" \
+  if ssh -o ConnectTimeout=8 spark@"$host" \
     "mkdir -p $LOGDIR; \
      if [ -s $LOGDIR/r$rank.log ]; then \
        mv $LOGDIR/r$rank.log $LOGDIR/r$rank.\$(date -r $LOGDIR/r$rank.log +%Y%m%dT%H%M%S).log; \
      fi; \
      cd $RECIPE_DIR && tmux new-session -d -s cpt27b \
-       \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/r$rank.log 2>&1\"" \
-    && echo "  launched rank $rank on $host" || echo "  FAILED to launch rank $rank on $host"
+       \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/r$rank.log 2>&1\""
+  then
+    echo "  launched rank $rank on $host"
+  else
+    echo "  FAILED to launch rank $rank on $host" >&2
+    return 1
+  fi
 }
 
 measure_gemm_tflops() {
@@ -253,7 +425,9 @@ fi
 # limit (-pl N/A) but supports graphics-clock lock (-lgc); cap the max graphics clock to hold boards
 # below the shutdown point. The cap does NOT persist across reboot, so it MUST be applied here on
 # every launch (the production launcher previously omitted it -> the crashes). CLOCK_CAP=0 disables.
-CLOCK_CAP="${CLOCK_CAP:-2000}"
+: "${CLOCK_CAP:?set CLOCK_CAP — nvidia-smi -lgc PERSISTS ACROSS JOBS, so an unset value silently
+inherits whatever the previous run left. README section 7 records a run executing its whole
+length at a third of its clock with nothing in any log saying so.}"
 if [ "$CLOCK_CAP" != "0" ]; then
   echo "  thermal: capping graphics clock <= ${CLOCK_CAP}MHz on all 4 nodes (prevents ~94C hard-crash)"
   for h in "${ALL[@]}"; do
@@ -310,16 +484,48 @@ if [ "$GEMM_PREFLIGHT_ONLY" = "1" ]; then
   exit 0
 fi
 
+INITIAL_SESSION=0
+PREVIOUS_STEP=0
+if [ "$CPT_LIFECYCLE" = 1 ]; then
+  LAST_EVENT=$(lifecycle_last_json) || {
+    echo "ABORT: lifecycle journal is unreadable: $LIFECYCLE_LOG" >&2
+    exit 1
+  }
+  if [ "$LAST_EVENT" = UNKNOWN ]; then
+    LAST_STATE=UNKNOWN
+  else
+    LAST_STATE=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])' <<<"$LAST_EVENT")
+  fi
+  case "$LAST_STATE" in
+    UNKNOWN)
+      lifecycle_append SPEC_VALID --total-steps "$TOTAL_STEPS" --session-limit "$SESSION_LIMIT" || exit 1
+      INITIAL_SESSION=1
+      ;;
+    FRAGMENTATION_EXIT)
+      PREVIOUS_STEP=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["step"])' <<<"$LAST_EVENT")
+      ;;
+    *)
+      echo "ABORT: lifecycle state $LAST_STATE cannot begin a training session." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 echo "  master $MASTER = rank 0 (binding :29500 first)"
-launch_rank "$MASTER" 0
+launch_rank "$MASTER" 0 || exit 1
 echo "  (master settling 12s...)"
 sleep 12
-for i in 0 1 2; do launch_rank "${WORKERS[$i]}" $((i+1)); done
+for i in 0 1 2; do launch_rank "${WORKERS[$i]}" $((i+1)) || exit 1; done
+if [ "$INITIAL_SESSION" = 1 ]; then
+  lifecycle_append NODE_DEPLOY --nodes 4 || exit 1
+fi
 
 echo ""
 echo "=== monitor: peakUsed/node + trainer liveness + master optimizer-step progression ==="
 STEP_SEEN=0
-for t in $(seq 1 80); do   # ~40 min @ 30s
+t=0
+while :; do
+  t=$((t + 1))
   line=""; alive=0
   for h in "${ALL[@]}"; do
     r=$(ssh -o ConnectTimeout=5 -o BatchMode=yes spark@"$h" \
@@ -348,9 +554,40 @@ for t in $(seq 1 80); do   # ~40 min @ 30s
        echo ">>> FAILURE signal in master log — stopping monitor"; break;;
   esac
   if [[ "$step_num" =~ ^[0-9]+$ ]]; then
-    STEP_SEEN=1
-    echo ">>> OPTIMIZER STEP $step_num COMPLETED — 27B IS TRAINING (fit confirmed). Full grads= breakdown:"
-    ssh -o ConnectTimeout=5 spark@"$MASTER" 'grep -aE "FIRST STEP:|params=.*grads=.*optim=" '"$LOGDIR"'/r0.log | tail -2' 2>/dev/null
+    if [ "$STEP_SEEN" -eq 0 ]; then
+      STEP_SEEN=1
+      echo ">>> OPTIMIZER STEP $step_num COMPLETED — 27B IS TRAINING (fit confirmed). Full grads= breakdown:"
+      ssh -o ConnectTimeout=5 spark@"$MASTER" 'grep -aE "FIRST STEP:|params=.*grads=.*optim=" '"$LOGDIR"'/r0.log | tail -2' 2>/dev/null
+      if [ "$INITIAL_SESSION" = 1 ]; then
+        lifecycle_append TRAINING --step "$step_num" || exit 1
+      fi
+      if [ "$CPT_LIFECYCLE" != 1 ]; then
+        break
+      fi
+    fi
+  fi
+  if [ "$CPT_LIFECYCLE" = 1 ] && [ "$STEP_SEEN" -eq 1 ] && [ "$alive" -eq 0 ]; then
+    if ! observe_completed_checkpoint; then
+      echo "ERROR: all trainers exited after TRAINING but no all-rank COMPLETE checkpoint is readable." >&2
+      exit 1
+    fi
+    [ "$OBSERVED_STEP" -gt "$PREVIOUS_STEP" ] || {
+      echo "ERROR: session made no checkpoint progress: prior=$PREVIOUS_STEP observed=$OBSERVED_STEP." >&2
+      exit 1
+    }
+    if [ "$OBSERVED_STEP" -ge "$TOTAL_STEPS" ]; then
+      lifecycle_append CHECKPOINT_SAVED --step "$OBSERVED_STEP" \
+        --checkpoint-path "$OBSERVED_CHECKPOINT" || exit 1
+      EXPECTED_FRAGMENTATION=$(( (TOTAL_STEPS + SESSION_LIMIT - 1) / SESSION_LIMIT - 1 ))
+      lifecycle_call validate --log "$LIFECYCLE_LOG" \
+        --expected-fragmentation "$EXPECTED_FRAGMENTATION" || exit 1
+    else
+      lifecycle_append FRAGMENTATION_EXIT --step "$OBSERVED_STEP" \
+        --checkpoint-path "$OBSERVED_CHECKPOINT" || exit 1
+    fi
+    break
+  fi
+  if [ "$STEP_SEEN" -eq 0 ] && [ "$t" -ge 80 ]; then
     break
   fi
   sleep 30

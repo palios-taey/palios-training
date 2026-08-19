@@ -42,7 +42,7 @@ scripts/taey-train <capability> [VAR=val ...]
 | `corpus_pack` | ADJUDICATED | yes |
 | `cpt_27b_4node` | ADJUDICATED | yes |
 | `bake_export` | ADJUDICATED | yes |
-| `sft_stage2_lora` | CANDIDATE_PENDING_QUALIFICATION | **no — gate has not passed** |
+| `sft_stage2_lora` | QUALIFIED_AWAITING_0_TO_50_AUTHORIZATION | **no — awaiting authorization** |
 | `sft_27b_fullparam` | CONTESTED | **no — not adjudicated** |
 
 It refuses an unknown capability, a status that is not `ADJUDICATED`, a file named in the manifest
@@ -74,6 +74,19 @@ been measured misleading here. Only *executed and verified* cannot be faked.
 5. **Capture the live config while it runs.** `/proc/<pid>/environ` is ground truth and cannot be
    reconstructed after the process exits. A script's defaults are a *copy* of the run; the captured
    `run_config.env` **is** the run, and the post-CPT pipeline reads it rather than defaulting.
+   **Capture it once per SESSION, not once per run.** A multi-session run exits and relaunches at
+   every `FRAGMENTATION EXIT`, so a capture taken during session 1 describes a process that no
+   longer exists by session 3. Missed on cpt_qwen38_v3 (2026-08-18): captured for an abandoned
+   first attempt, never for the three sessions that produced the artifact, and by the time the gap
+   was noticed every process had exited — permanently unrecoverable, exactly as this rule warns.
+   What partially survived it: `final/trainer_meta.pt` carries step, epoch, num_ranks, max_seq and
+   the scheduler state (`base_lrs`, `_last_lr`, `_step_count`), and the run log names the corpus and
+   base. Those are artifact-grade and worth reading. Everything else — batch shape, Adafactor
+   settings, token budget — existed only in the process environment and is now only a launch
+   argument, which is INTENT, not proof the process received it. If you reconstruct a
+   `run_config.env` after the fact, tag every line with its provenance and say plainly that it is
+   not a Rule 5 capture. The s213 record carried an UNVERIFIED warmup value for months for exactly
+   this reason.
 
 Rule 4 exists because of a specific, repeatable failure: **a run can execute every step, hold flat
 memory, sustain full throughput, save a clean checkpoint, and move the weights by 1/5000th of what
@@ -173,6 +186,13 @@ capacity: [`docs/SPARK_TOPOLOGY.md`](docs/SPARK_TOPOLOGY.md).
 ---
 
 ## 8. Layout
+
+**[`docs/INDEX.md`](docs/INDEX.md) lists every document in this repository.** Nothing is reachable
+only by grep. If you are deciding HOW TO RUN something, the authority order is the PRODUCTION
+AUTHORITY section of [`CLAUDE.md`](CLAUDE.md), then [`PRODUCTION_MANIFEST.yml`](PRODUCTION_MANIFEST.yml),
+then this file, then [`careers-qwen/RUNBOOK_CPT_SFT_BAKE.md`](careers-qwen/RUNBOOK_CPT_SFT_BAKE.md).
+Every other document is a RECORD, not an instruction.
+
 
 - **`dense-9b/recipes/`** — the launchers that ran on the production cluster, with the full NCCL
   dual-rail RoCEv2 fabric setup
