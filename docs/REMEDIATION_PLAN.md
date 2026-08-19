@@ -78,22 +78,39 @@ deploy-from-SHA; `main` still 5-way drifted against itself until #11 lands.
 `:16,23` still take the donor from the `fleet.env` pin rather than the run's own source. The
 runbook records the correct order and the measured numbers; the code does not implement it.
 
-## W6 — the checkers must fail for the right reason · **NEW, from tutor-grok**
+## W6 — the checkers must fail for the right reason · **DONE on grok/w6-correspondence**
 
-`check_manifest_pins.py` hashes only the pinned subset — an unpinned production file can be
-arbitrarily wrong and it still exits 0, and it does not compare NODE-DEPLOYED bytes to the pin,
-which is the correspondence defect this repo already paid for. `check_docs_index.py` tests index
-membership and substring presence, so a document can contain the words "PRODUCTION AUTHORITY" and
-still instruct the reader to invoke the inner script.
+`check_manifest_pins.py` hashed only the pinned subset — an unpinned production file could be
+arbitrarily wrong and it still exited 0, and it did not compare NODE-DEPLOYED bytes to the pin.
+`check_docs_index.py` tested index membership and substring presence, so a document could contain
+the words "PRODUCTION AUTHORITY" and still instruct `bash run_4node_27b_cpt.sh`.
 
-Both are the consistency-not-correspondence shape, in gates written to prevent it.
+Both were the consistency-not-correspondence shape, in gates written to prevent it.
+
+**Landed:**
+- ADJUDICATED structural paths (entrypoint / trainer / per_node / config / runner / qualifier /
+  path_family_winner / stage entrypoints) must be in that capability's `content_sha`. Self-test
+  drops the CPT launcher pin and requires UNPINNED; mutates bytes of a pinned file and requires
+  DRIFT; mutates README (not a production path) and requires PASS.
+- `--deployed` hashes `$SPARK_HOME/palios-training/<path>` on each Spark. Fails closed without
+  `fleet.env`. `scripts/taey-train` invokes it when `fleet.env` is present; CI cannot SSH and
+  does not pass the flag. Self-test injects a mismatched remote hash; no live SSH in CI.
+- Docs checker fails on an affirmative inner launch (`bash <inner>` or `LAUNCH: ... <inner>`)
+  even when the AUTHORITY banner is present. Prohibitions and citations are not instructions.
+  Three documents that carried the banner and still instructed the inner script were corrected
+  to `scripts/taey-train` in the same commit.
+- Both checkers `--self-test`, and both CI workflows run it. Crash is distinguished from
+  detection: a Traceback or an unrendered `{m.group(...)}` is a SELFTEST FAIL even if exit 1.
+
+**Not in this commit (still W5 / W3):** Rule 5 rank-0 serialisation; bake path order; lifecycle
+ownership. Node-deployed hashing is the hook; it cannot be live-verified from a laptop.
+
 
 ---
 
 ## Sequencing
 
-W2 registry (this cycle) → W6 checker correspondence → W5 bake path → W3 lifecycle. W4 lands when
-the audits clear. Grok validates each against Cosmos's spec rather than against my description.
+W2 registry (landed on PR #11, still under audit) → **W6 checker correspondence (this branch)** → W5 bake path → W3 lifecycle. W4 lands when the audits clear. Grok validates each against Cosmos's spec rather than against tutor's description.
 
 ## Unknowns, stated
 

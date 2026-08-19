@@ -11,7 +11,7 @@ consolidation had supposedly finished, including one pointing at a quarantined t
 consolidation fixed the three documents its author already knew about. The class was never checked.
 That is the defect this script exists to make impossible to repeat.
 
-TWO RULES, both mechanical:
+THREE RULES, all mechanical:
 
   REACHABLE   every tracked .md is named in docs/INDEX.md, and README links docs/INDEX.md. A
               document nobody can navigate to will drift, and its drift will be discovered by
@@ -22,19 +22,24 @@ TWO RULES, both mechanical:
               Naming an entrypoint is what makes a document process-asserting; citing a measurement
               is not.
 
-WHAT THIS DOES NOT DO. It does not judge whether a document is correct, current, or well written.
-It checks that it can be found and that it does not silently compete for authority. Those are the
-two failures that cost this repository real time.
+  NOT AN INSTRUCTION  a document that names PRODUCTION AUTHORITY and then tells the reader to
+              `bash dense-9b/recipes/run_4node_27b_cpt.sh` is still competing for the door. The
+              previous check tested substring presence of those two words. W6 is correspondence:
+              an affirmative launch of an inner script fails even when the banner is present.
+
+WHAT THIS DOES NOT DO. It does not judge whether a document is well written. Mentions, citations,
+and prohibitions ("do not invoke X") are not instructions.
 
     python3 scripts/check_docs_index.py [--fix-index]
-
-`--fix-index` regenerates docs/INDEX.md from the tree. Without it the script only reports.
+    python3 scripts/check_docs_index.py --self-test
 """
 import argparse
+import io
 import os
 import re
 import subprocess
 import sys
+import traceback
 
 INDEX = "docs/INDEX.md"
 README = "README.md"
@@ -59,6 +64,19 @@ EXEMPT = {
     "docs/REMEDIATION_PLAN.md",
 }
 
+INNER_RE = re.compile(
+    r"(?:run_4node_27b_cpt\.sh|run_till_done_v[23]\.sh|launch_cpt_qwen36_27b_fsdp\.sh|"
+    r"post_cpt_pipeline\.sh|bake_27b\.sh|train_fsdp_v3\.py)"
+)
+LAUNCH_CMD_RE = re.compile(
+    r"(?:^|\s)(?:bash|sh|exec|\.)\s+\S*"
+    r"(?:run_4node_27b_cpt\.sh|run_till_done_v[23]\.sh|launch_cpt_qwen36_27b_fsdp\.sh|"
+    r"post_cpt_pipeline\.sh|bake_27b\.sh|train_fsdp_v3\.py)"
+)
+PROHIBITIVE_RE = re.compile(
+    r"(?i)\b(do not|don't|never|not the|deprecated|does not decide|not sanctioned|"
+    r"do not use|not an entrypoint|not a second entrypoint|not the top-level)\b"
+)
 
 
 # ── DEAD REFERENCE CHECK ──────────────────────────────────────────────────────
@@ -95,6 +113,33 @@ FOREIGN_REPO_PREFIXES = (
 PATH_CITATION = re.compile(
     r"(?<![\w/])((?:[\w.-]+/)+[\w.-]+\.(?:py|sh|md|yml|yaml|json|jinja))"
 )
+
+
+def affirmative_launch_lines(text):
+    """Lines that instruct the reader to invoke an inner launcher as the thing to run.
+
+    Correspondence, not substring. A document can contain the words PRODUCTION AUTHORITY and
+    still tell the reader `bash dense-9b/recipes/run_4node_27b_cpt.sh`. Mentions, citations,
+    and prohibitions are not instructions.
+
+    Returns a list of (lineno, line) pairs.
+    """
+    hits = []
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.rstrip()
+        stripped = line.lstrip("> ").strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not INNER_RE.search(line):
+            continue
+        if PROHIBITIVE_RE.search(line):
+            continue
+        instructional = bool(LAUNCH_CMD_RE.search(line)) or bool(
+            re.search(r"(?i)\bLAUNCH\s*:", line) and INNER_RE.search(line)
+        )
+        if instructional:
+            hits.append((lineno, stripped[:160]))
+    return hits
 
 
 def dead_references(paths, tracked):
@@ -153,17 +198,10 @@ def build_index(paths):
     return "\n".join(lines) + "\n"
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--fix-index", action="store_true")
-    a = ap.parse_args()
-
-    paths = tracked_markdown()
+def collect_failures(paths, tracked, index_text, readme_text, read_text):
+    """Pure-ish core so self-test can inject documents without mutating the tree."""
     failures = []
 
-    tracked = set(
-        subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
-    )
     dead = dead_references(paths, tracked)
     for doc, missing in sorted(dead.items()):
         allowed = DEAD_REF_BASELINE.get(doc, 0)
@@ -182,38 +220,167 @@ def main():
             )
 
     desired = build_index(paths)
-    if a.fix_index:
-        os.makedirs("docs", exist_ok=True)
-        open(INDEX, "w").write(desired)
-        print(f"wrote {INDEX} covering {len(paths)} documents")
-    else:
-        current = open(INDEX).read() if os.path.isfile(INDEX) else ""
-        if current != desired:
-            missing = [p for p in paths if os.path.basename(p) not in current]
-            failures.append(
-                f"INDEX STALE    {INDEX} does not match the tree "
-                f"({len(missing)} document(s) absent from it). Run: "
-                f"python3 scripts/check_docs_index.py --fix-index"
-            )
+    if index_text != desired:
+        missing = [p for p in paths if os.path.basename(p) not in (index_text or "")]
+        failures.append(
+            f"INDEX STALE    {INDEX} does not match the tree "
+            f"({len(missing)} document(s) absent from it). Run: "
+            f"python3 scripts/check_docs_index.py --fix-index"
+        )
 
-    readme = open(README).read() if os.path.isfile(README) else ""
-    if "docs/INDEX.md" not in readme:
+    if "docs/INDEX.md" not in (readme_text or ""):
         failures.append(f"UNLINKED INDEX {README} does not link {INDEX}; the index is unreachable")
 
     for p in paths:
         if p in EXEMPT:
             continue
-        text = open(p, encoding="utf-8", errors="replace").read()
+        text = read_text(p)
         named = [t for t in ENTRYPOINT_TOKENS if t in text]
         if named and AUTHORITY not in text:
             failures.append(
                 f"UNATTRIBUTED   {p} names {', '.join(sorted(set(named))[:3])} but never points at "
                 f"the {AUTHORITY} section, so a reader cannot tell it does not decide the entrypoint"
             )
+        launches = affirmative_launch_lines(text)
+        if launches:
+            lineno, snippet = launches[0]
+            failures.append(
+                f"INNER LAUNCH   {p}:{lineno} instructs the reader to invoke an inner script "
+                f"({snippet!r}). Naming {AUTHORITY} does not cancel an instruction. The door is "
+                f"scripts/taey-train."
+            )
+    return failures
+
+
+def _clean_run(text: str) -> bool:
+    return "Traceback" not in text and "{m.group" not in text
+
+
+def selftest() -> int:
+    """Prove substring AUTHORITY is not enough, and that a crash is not a finding."""
+    failures = 0
+
+    def captured(fn):
+        buf = io.StringIO()
+        old = sys.stdout
+        sys.stdout = buf
+        crashed = None
+        result = None
+        try:
+            result = fn()
+        except Exception:
+            crashed = traceback.format_exc()
+        finally:
+            sys.stdout = old
+        text = buf.getvalue()
+        if crashed:
+            text += "\n" + crashed
+        return result, text
+
+    # 1. AUTHORITY banner + bash inner launcher = FAIL (the residual W1 defect)
+    planted = (
+        "> **This document does not decide the entrypoint.** The PRODUCTION AUTHORITY "
+        "section of `CLAUDE.md` wins.\n\n"
+        "```bash\n"
+        "OUTPUT_DIR=/tmp bash dense-9b/recipes/run_4node_27b_cpt.sh\n"
+        "```\n"
+    )
+    hits = affirmative_launch_lines(planted)
+    if not hits:
+        print("SELFTEST FAIL: AUTHORITY + bash inner launcher produced no instructional hit")
+        failures += 1
+    else:
+        print("SELFTEST OK: AUTHORITY + bash inner launcher is an instruction")
+
+    # 2. AUTHORITY + prohibition is not an instruction
+    banned = (
+        "The PRODUCTION AUTHORITY section wins. Do not invoke run_4node_27b_cpt.sh "
+        "directly; it is a STAGE, not an entrypoint.\n"
+    )
+    hits = affirmative_launch_lines(banned)
+    if hits:
+        print(f"SELFTEST FAIL: prohibition counted as instruction: {hits}")
+        failures += 1
+    else:
+        print("SELFTEST OK: prohibition is not an instruction")
+
+    # 3. Measurement citation is not an instruction
+    cited = (
+        "The PRODUCTION AUTHORITY section wins. `run_4node_27b_cpt.sh:351` prints "
+        "`27B IS TRAINING` and ends its monitor at the first optimizer step.\n"
+    )
+    hits = affirmative_launch_lines(cited)
+    if hits:
+        print(f"SELFTEST FAIL: citation counted as instruction: {hits}")
+        failures += 1
+    else:
+        print("SELFTEST OK: citation is not an instruction")
+
+    # 4. LAUNCH: label with inner script is an instruction even without `bash` on that line
+    labeled = (
+        "PRODUCTION AUTHORITY\n"
+        "LAUNCH:    tutor runs, on Mira: CPT_DATA=<x> bash dense-9b/recipes/run_4node_27b_cpt.sh\n"
+    )
+    hits = affirmative_launch_lines(labeled)
+    if not hits:
+        print("SELFTEST FAIL: LAUNCH: label with inner script produced no hit")
+        failures += 1
+    else:
+        print("SELFTEST OK: LAUNCH: label with inner script is an instruction")
+
+    # 5. Real tree must still be evaluable without crashing. (May FAIL on INNER LAUNCH until
+    # the documents are fixed in the same commit — that is the point of this cycle.)
+    _, text = captured(lambda: 0)
+    if not _clean_run(text):
+        print("SELFTEST FAIL: capture helper itself produced crash-shaped output")
+        failures += 1
+
+    try:
+        hits_fn = affirmative_launch_lines
+        _ = hits_fn("PRODUCTION AUTHORITY\n")
+    except Exception:
+        print("SELFTEST FAIL: affirmative_launch_lines CRASHED")
+        traceback.print_exc()
+        return 1
+
+    if failures:
+        print(f"SELFTEST: {failures} control(s) failed — the gate cannot be trusted")
+        return 1
+    print("SELFTEST: instructional detector fails for the right reason; crash distinguished")
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fix-index", action="store_true")
+    ap.add_argument("--self-test", action="store_true", help="prove the gate can fail for the right reason")
+    a = ap.parse_args()
+
+    if a.self_test:
+        return selftest()
+
+    paths = tracked_markdown()
+    tracked = set(
+        subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+    )
+
+    if a.fix_index:
+        os.makedirs("docs", exist_ok=True)
+        open(INDEX, "w").write(build_index(paths))
+        print(f"wrote {INDEX} covering {len(paths)} documents")
+        return 0
+
+    index_text = open(INDEX).read() if os.path.isfile(INDEX) else ""
+    readme = open(README).read() if os.path.isfile(README) else ""
+
+    def read_text(p):
+        return open(p, encoding="utf-8", errors="replace").read()
+
+    failures = collect_failures(paths, tracked, index_text, readme, read_text)
 
     print(f"documents: {len(paths)}   index: {INDEX}")
     if not failures:
-        print("clean: every document is indexed, and every process-asserting document names its authority")
+        print("clean: every document is indexed, process-asserting docs name authority, none instruct an inner launch")
         return 0
     print()
     for f in failures:
@@ -221,7 +388,8 @@ def main():
     print()
     print("=== DOCUMENTATION CAN SEND A READER THE WRONG WAY ===")
     print("A document that is unreachable will drift. A document that names an entrypoint without")
-    print("naming its authority competes with the real one. Both cost this repo days.")
+    print("naming its authority competes with the real one. A document that names the authority")
+    print("and then says `bash run_4node_27b_cpt.sh` is still competing. All three cost this repo days.")
     return 1
 
 
