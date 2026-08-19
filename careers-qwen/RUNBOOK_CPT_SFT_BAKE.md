@@ -77,11 +77,14 @@ python3 careers-qwen/corpus_manifest.py verify --corpus <corpus>.jsonl --manifes
 scripts/taey-train cpt_27b_4node [VAR=val ...]     # the ONE door — verifies content shas
 ```
 
-The run appends every transition to its `lifecycle_events.jsonl` journal under the selected output
-directory. `taey-train` returns
+The manifest declares `lifecycle: true` only for `cpt_27b_4node` and `bake_export`; the launcher
+never infers lifecycle ownership from a name or argument. Those runs append every transition to
+their `lifecycle_events.jsonl` journal under the selected output directory. `taey-train` returns
 non-zero after an intermediate fragmentation exit or `CHECKPOINT_SAVED`; that is an honest
-incomplete lifecycle, not a failed checkpoint. Exit 0 is reserved for the `bake_export` capability
-after the exact sealed artifact has been verified on Thor and `THOR_DELIVERED` is appended.
+incomplete lifecycle, not a failed checkpoint. Exit 0 for a lifecycle-declaring operation is
+reserved for `bake_export` after the exact sealed artifact has been verified on Thor and
+`THOR_DELIVERED` is appended. Capabilities without the declaration return their entrypoint status
+and do not require Spark topology or a lifecycle journal.
 
 **AN UNRESOLVED TENSION, STATED RATHER THAN PAPERED OVER (2026-08-18).** `run_till_done_v3.sh`
 exists because it sets the eight variables below correctly, and that is real value — the launcher

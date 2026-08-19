@@ -50,6 +50,7 @@ eval "$RESOLVED"
 echo "=== taey-train: $CAP ==="
 echo "  manifest : $MANIFEST"
 echo "  entry    : ${ENTRY:-<none>}"
+echo "  lifecycle: ${LIFECYCLE:-false}"
 [ -n "${TRAINER:-}" ] && echo "  trainer  : $TRAINER"
 
 # Existence is not optional: a dropped file is exactly how production got lost before.
@@ -108,6 +109,10 @@ done
 
 env "$@" bash "$ROOT/$ENTRY_FILE"
 ENTRY_STATUS=$?
+
+if [ "${LIFECYCLE:-false}" != "true" ]; then
+  exit "$ENTRY_STATUS"
+fi
 
 [ -f "$LIFECYCLE_TOOL" ] || die "lifecycle validator missing at $LIFECYCLE_TOOL."
 [ -f "$ROOT/fleet.env" ] && . "$ROOT/fleet.env"

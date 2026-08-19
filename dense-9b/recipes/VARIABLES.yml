@@ -135,3 +135,11 @@ local_shell_not_config:
   - SORTED_TFLOPS
   - STEP_SEEN
   - WORKERS
+
+# EXTERNAL — variables owned by a file other than the launcher
+#   The owning path is part of the class. The checker verifies the file reads every listed name
+#   and refuses any external-mode conditional that can precede or contain a manifest/content pin
+#   gate. These flags may have inert diagnostic defaults; they are not dynamic campaign inputs.
+external:
+  scripts/taey-train:
+    - TAEY_TRAIN_CHECK_ONLY

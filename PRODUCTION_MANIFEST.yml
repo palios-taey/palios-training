@@ -93,9 +93,11 @@ capabilities:
       dense-9b/recipes/run_refresh_gate.sh: 974689c2086e3ed9f96459eeb0f5c8b3699185222e870e77c918b4ba357997fe
       dense-9b/recipes/run_till_done_v2.sh: 118b594e5309c3d2e811ba7b5533e9c53a23023edb79019067301d818f82b7f5
       dense-9b/recipes/run_till_done_v3.sh: 131913b05934fdbe9811eaa29d501b2162d1afb542b485d768ac1d24ea2292e2
-      scripts/taey-train: a0d96edefe67e2314ca6d28da0c0f9459ad5e5eae7005de23a52064f8dd072e1
+      scripts/taey-train: 61794fe8a7d55a42c944194729ea639ac90cf9512645282e65ed83d04d6b0c82
+      scripts/_resolve_capability.py: b96a1893887c23379c47cde4318f802df52a3ee4b96748a8942260e03515560b
       scripts/training_lifecycle.py: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
     status: CANDIDATE_PENDING_PRODUCTION_RUN
+    lifecycle: true
     entrypoint: dense-9b/recipes/run_4node_27b_cpt.sh          # OPERATOR entrypoint (orchestrator)
     per_node: dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh    # launched on each node by the above
     trainer: dense-9b/trainers/train_fsdp_dense_9b.py
@@ -271,7 +273,8 @@ capabilities:
       careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
       careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
       careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
-      scripts/taey-train: a0d96edefe67e2314ca6d28da0c0f9459ad5e5eae7005de23a52064f8dd072e1
+      scripts/taey-train: 61794fe8a7d55a42c944194729ea639ac90cf9512645282e65ed83d04d6b0c82
+      scripts/_resolve_capability.py: b96a1893887c23379c47cde4318f802df52a3ee4b96748a8942260e03515560b
       scripts/training_lifecycle.py: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
     entrypoint: careers-qwen/post_cpt_pipeline.sh   # OPERATOR entrypoint; takes DCP_DIR
     internal_stages_note: >
@@ -280,6 +283,7 @@ capabilities:
       first draft promoted the internal stage to entrypoint, which would have had an operator
       run a fragment of the pipeline and skip the graft and the tensor-count gates.
     status: CANDIDATE_PENDING_PRODUCTION_RUN
+    lifecycle: true
     stages:
       - name: coordinated sharded export
         entrypoint: "EXPORT_DCP=<dir> dense-9b/recipes/bake_27b.sh"

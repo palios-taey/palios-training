@@ -6,7 +6,7 @@ heredoc version collided its own delimiter with the shell's and silently truncat
 A resolver that can be mangled by quoting is not a gate.
 
 Contract, deliberately narrow:
-  success -> shell assignments on stdout (ENTRY=..., TRAINER=...), exit 0
+  success -> shell assignments on stdout (ENTRY=..., TRAINER=..., LIFECYCLE=...), exit 0
   refusal -> exactly one line beginning REFUSE:, exit 0 (the CALLER turns that into exit 1)
 
 The refusal path prints rather than exiting non-zero so the caller controls the exit code in one
@@ -62,6 +62,14 @@ def main() -> int:
         print(f"REFUSE:capability '{cap}' is ADJUDICATED but names no entrypoint.")
         return 0
 
+    lifecycle = body.get("lifecycle", False)
+    if not isinstance(lifecycle, bool):
+        print(
+            f"REFUSE:capability '{cap}' lifecycle must be YAML true or false, "
+            f"not {lifecycle!r}."
+        )
+        return 0
+
     # shlex.quote would wrap these in quotes the shell then has to strip; these are repo-relative
     # paths under our control, so emit them plainly and let the caller verify existence.
     # Emit the recorded content hashes so the caller can verify the BYTES, not just the path.
@@ -75,6 +83,7 @@ def main() -> int:
     # the content check, which never ran — a parsing bug wearing a working gate's clothes.
     print(f"ENTRY={shlex.quote(str(entry))}")
     print(f"TRAINER={body.get('trainer', '')}")
+    print(f"LIFECYCLE={'true' if lifecycle else 'false'}")
     return 0
 
 
