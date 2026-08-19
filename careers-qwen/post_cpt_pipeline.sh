@@ -164,17 +164,48 @@ print(len(json.load(open(index_path))["weight_map"]) if os.path.isfile(index_pat
 PY
 }
 
+# THE CONTAINER AND THE HOST MUST AGREE ABOUT THE FILESYSTEM. Both halves below are
+# required, and until 2026-08-19 neither was present, which is why NO bake had ever
+# completed on this node: `find $SPARK_HOME/post_cpt -name weight_diff.json` returned 0
+# and there were no bake roots at all.
 bake_container_python(){
   local -a command=(
     sudo docker run --rm --network none
     -v "$SPARK_HOME:$SPARK_HOME"
-    --entrypoint /opt/venv/bin/python
-    "$CONVERT_IMAGE"
-    "$@"
   )
+  # VISIBILITY. The corpus the trainer recorded may live OUTSIDE $SPARK_HOME (production
+  # keeps it under /var/spark). emit_training_provenance.py runs INSIDE this container and
+  # reads it, so a path the host can see and the container cannot is a hard abort:
+  #   ABORT: corpus not found: /var/spark/isma/training/cpt_prod_v4_repos_packed_8192.jsonl
+  # while that file was present and byte-identical on all four nodes. Mount its DIRECTORY
+  # read-only, derived from the value — the location comes from run_config.env and is not
+  # ours to hardcode. Skipped when already covered by the $SPARK_HOME mount.
+  local corpus_dir
+  if [ -n "${CONVERT_CORPUS:-}" ]; then
+    corpus_dir=$(dirname "$CONVERT_CORPUS")
+    case "$corpus_dir" in
+      "$SPARK_HOME"|"$SPARK_HOME"/*) : ;;
+      /*) command+=(-v "$corpus_dir:$corpus_dir:ro") ;;
+    esac
+  fi
+  command+=(--entrypoint /opt/venv/bin/python "$CONVERT_IMAGE" "$@")
   local quoted
   printf -v quoted '%q ' "${command[@]}"
   ssh -o BatchMode=yes spark@"$SPARK_MASTER" "$quoted"
+  local rc=$?
+  # OWNERSHIP. The image REQUIRES root — verified by execution: `--user 1000:1000` crashes
+  # it outright, so running unprivileged is not available. Every artifact it writes
+  # therefore lands root-owned, and the host side of this pipeline runs as spark and cannot
+  # write beside it. That killed the run twice in sequence, once per container stage:
+  #   tee: .../cpt_prod_v5_repos_1ep_hf/weight_diff.json: Permission denied
+  #   cp:  .../cpt_prod_v5_repos_1ep_servable/weight_diff.json: Permission denied
+  # Reclaim ownership after EVERY container step, not once at the end — each stage creates
+  # a new directory. Metadata-only, so it costs nothing on a 52G tree. Never masks rc.
+  if [ -n "${BAKE_ROOT:-}" ]; then
+    ssh -o BatchMode=yes spark@"$SPARK_MASTER" \
+      "test -d '$BAKE_ROOT' && sudo chown -R spark:spark '$BAKE_ROOT'" || true
+  fi
+  return $rc
 }
 
 bake_python(){
