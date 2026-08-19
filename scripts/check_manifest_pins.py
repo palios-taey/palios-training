@@ -684,8 +684,11 @@ def selftest() -> int:
 
         # 5. --deployed with a fleet and a mismatched remote hash fails with DEPLOYED, not crash.
         fake_fleet = os.path.join(td, "fleet.env")
+        # /home/<user> is the documented de-umbilical placeholder (allowlist
+        # `/home/<`). A service-account home path matches PII_PATH_RE and is
+        # what made CHECK_HOME_PATHS=1 fail this fixture.
         open(fake_fleet, "w").write(
-            'SPARK_HOME="/home/spark"\n'
+            'SPARK_HOME="/home/<user>"\n'
             'SPARK_MGMT_IPS="PRIVATE_MGMT_IP_0 PRIVATE_MGMT_IP_1 PRIVATE_MGMT_IP_2 PRIVATE_MGMT_IP_3"\n'
             'SPARK_USER="spark"\n'
         )
