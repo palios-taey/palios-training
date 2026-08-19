@@ -454,3 +454,33 @@ authorization:
     dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1
     dense-9b/trainers/train_fsdp_dense_9b.py: b0c5e00ff4b5a34b11e3c4ffc34956ef5a32e9b3acd11d78280faaa5180fad66
     dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
+
+# SECOND AUTHORIZATION — the bake half of the same cycle. Separate object by design: the resolver
+# refused to let cpt_27b_4node's authorization cover this ("An authorization is not transferable
+# across capabilities"), which is grok's C7 case firing in production rather than in a self-test.
+# Same Jesse instruction, 2026-08-19: "everthing all the way through baking." Bound to all 14
+# pinned bake files; a one-byte change voids it. Deleted by the promotion commit.
+authorizations:
+- capability: bake_export
+  campaign_id: bake_prod_v4_repos_1ep
+  authorized_by: Jesse
+  authorized_on: '2026-08-19'
+  scope: Bake the cpt_prod_v4_repos_1ep checkpoint (CHECKPOINT_SAVED step 85, per-rank DCP) through coordinated
+    export -> 851-tensor HF -> graft 348 vision/mtp tensors from the run's own source -> 1199 servable.
+    Graft donor resolved per-run from DERIVED_FROM.json (source /home/spark/models/Qwen3.8-27B, source_tensors
+    1199), never a fixed fleet.env pin.
+  content_sha:
+    careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+    careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
+    careers-qwen/graft_cpt_into_servable.py: 7410ba2a408c53d309b56a0799a22eecf2f7c2f373d6eddbde45ebf0ad731b1a
+    careers-qwen/measure_cpt_delta.py: c7076b9a9898833dd3bb01d962e58f994bbd3560175be4c8361e2533db52430e
+    careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
+    careers-qwen/post_cpt_pipeline.sh: 54ca4d8d8d5b14b7874a184919d2f6ab5ec69b2b0af420bac01d9b13d18cb1dc
+    careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
+    dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
+    dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
+    dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
+    dense-9b/recipes/model_snapshot_sync.sh: 4af7859f53f38db9b2752ae5715b0aba10e447c2b32acd860592cb24a0dae0bc
+    scripts/_resolve_capability.py: 931882b5fab89a9f7832a0c5057aa2a8dc98006f221c63853c40228fbf6dc87d
+    scripts/taey-train: 066d762bca8e6dc1587cc397d12df71ac0107935660214f529fc95354ff24022
+    scripts/training_lifecycle.py: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
