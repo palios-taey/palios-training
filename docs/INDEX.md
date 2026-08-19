@@ -12,6 +12,7 @@ section of `CLAUDE.md` wins, then `PRODUCTION_MANIFEST.yml`, then `README.md`, t
 - [CLAUDE.md](../CLAUDE.md)
 - [README.md](../README.md)
 - [RECIPES.md](../RECIPES.md)
+- [RELEASE.md](../RELEASE.md)
 - [REPUBLISH_CHECKLIST.md](../REPUBLISH_CHECKLIST.md)
 
 ## `careers-qwen`

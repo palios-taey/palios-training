@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "terminal-release-receipt.schema.json",
+  "title": "Generated terminal release receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "release_id",
+    "campaign_id",
+    "state",
+    "campaign_spec_sha256",
+    "hub_decision_receipt_sha256",
+    "evaluation_contract_sha256",
+    "checkpoint_manifest_sha256",
+    "lifecycle_chain_sha256",
+    "released_artifact_sha256",
+    "consumer_aliases"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "release_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "state": {
+      "const": "released"
+    },
+    "campaign_spec_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "hub_decision_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evaluation_contract_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "checkpoint_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lifecycle_chain_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "released_artifact_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "consumer_aliases": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {
+          "const": "taey"
+        },
+        {
+          "const": "ep3"
+        }
+      ],
+      "items": false
+    }
+  }
+}

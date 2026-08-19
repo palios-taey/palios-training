@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lifecycle-observation.schema.json",
+  "title": "Append-only lifecycle observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "observation_id",
+    "campaign_id",
+    "sequence",
+    "observed_at",
+    "transition",
+    "event",
+    "hub_decision_receipt_sha256",
+    "evidence_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "observation_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "observed_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "transition": {
+      "type": "string",
+      "enum": [
+        "train",
+        "bake",
+        "promote"
+      ]
+    },
+    "event": {
+      "type": "string",
+      "enum": [
+        "started",
+        "completed",
+        "failed"
+      ]
+    },
+    "hub_decision_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidence_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "previous_observation_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sequence": {
+            "const": 1
+          }
+        },
+        "required": [
+          "sequence"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "previous_observation_sha256"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "previous_observation_sha256"
+        ]
+      }
+    }
+  ]
+}

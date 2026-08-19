@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "checkpoint-manifest.schema.json",
+  "title": "Collected checkpoint manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "checkpoint_step",
+    "node_local_fragments",
+    "collector_receipt_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "campaign_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "checkpoint_step": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "node_local_fragments": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "pattern": "^(?!/)(?!.*//)(?!.*\\.\\./)(?!\\.\\.$)[a-zA-Z0-9][a-zA-Z0-9._/-]*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "collector_receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
