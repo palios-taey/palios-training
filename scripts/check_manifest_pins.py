@@ -36,6 +36,13 @@ FOUR CLASSES OF DEFECT ARE CHECKED, because all four were found live or construc
                  Do NOT fail CANDIDATE + authorization + no receipt: that is the valid pre-run
                  window. Failing it makes the authorized launch un-mergeable.
 
+A candidate_update pin that does not match HEAD is judged against git history of that path.
+If that history cannot be read — shallow clone, no git, rev-parse failure — the checker
+ABORTS. It does not emit CANDIDATE. Absence of evidence is not a finding; that is the
+same class as invokers() treating a failed git grep as zero callers. `.github/workflows/
+manifest-pins.yml` fetches full history so CI can look; this abort is the durable rule
+for every other shallow tree.
+
 `--deployed` additionally hashes the copy on each Spark at `$SPARK_HOME/palios-training/<path>`
 and refuses on mismatch. CI cannot SSH, so it does not pass `--deployed`. `scripts/taey-train`
 does, whenever `fleet.env` is present. Skipping when fleet.env is absent is announced, not silent.
@@ -149,21 +156,63 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+class HistoryUnreadable(Exception):
+    """History could not be enumerated. Not the same as 'enumerated and the digest is absent'."""
+
+
+def require_complete_git_history():
+    """Raise HistoryUnreadable unless this is a non-shallow git repository.
+
+    `git log` in a depth-1 clone succeeds and returns the tip. Treating that
+    subset as 'no revision matches' reports absence of evidence as a finding —
+    the false claim this checker exists to prevent.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise HistoryUnreadable(f"git is unreadable ({exc})") from exc
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+        raise HistoryUnreadable(
+            f"git rev-parse --is-shallow-repository failed: {err}"
+        )
+    answer = proc.stdout.strip()
+    if answer == "true":
+        raise HistoryUnreadable(
+            "repository is shallow; candidate_update pins cannot be judged "
+            "against complete history"
+        )
+    if answer != "false":
+        raise HistoryUnreadable(
+            f"git rev-parse --is-shallow-repository printed {answer!r}, not true or false"
+        )
+
+
 def sha256_in_git_history(path, digest):
     """True iff some committed revision of `path` hashes to digest.
 
     candidate_update.content_sha records proposed or prior bytes, which need not
     equal HEAD. A pin that matches no revision of the named path is an orphan —
     the same 'pin that corresponds to nothing' this checker exists to close.
+
+    Returns False only after walking a complete (non-shallow) log. Raises
+    HistoryUnreadable when the log cannot be trusted as complete. Callers must
+    not translate that exception into CANDIDATE.
     """
+    require_complete_git_history()
     try:
         revs = subprocess.check_output(
             ["git", "log", "--format=%H", "--", path],
             text=True,
             stderr=subprocess.DEVNULL,
         ).split()
-    except (OSError, subprocess.CalledProcessError):
-        return False
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise HistoryUnreadable(f"git log for {path} failed: {exc}") from exc
     for rev in revs:
         try:
             raw = subprocess.check_output(
@@ -300,10 +349,19 @@ def check(manifest_path, *, deployed=False, get_bytes=None, hash_remote=None):
                 actual = sha256_bytes(data)
                 if actual == expected:
                     continue
-                if label == "candidate_update.content_sha" and sha256_in_git_history(path, expected):
-                    # Proposed/prior bytes that are a real revision of this path, not HEAD.
-                    continue
                 if label == "candidate_update.content_sha":
+                    try:
+                        in_history = sha256_in_git_history(path, expected)
+                    except HistoryUnreadable as exc:
+                        failures.append(
+                            f"ABORT         {capability}: {path} candidate_update pin {expected} "
+                            f"does not match the tree ({actual}), and history cannot be read: {exc}. "
+                            f"A check that cannot see its inputs must abort, never report the pin "
+                            f"as an orphan."
+                        )
+                        continue
+                    if in_history:
+                        continue
                     failures.append(
                         f"CANDIDATE      {capability}: {path} pin {expected} matches neither "
                         f"the tree ({actual}) nor any committed revision of that path. "
@@ -439,11 +497,18 @@ def report(failures, checked, n_caps, n_contested, manifest):
     for f in failures:
         print(f"  {f}")
     print()
-    print("=== THE MANIFEST DOES NOT DESCRIBE THE PRODUCTION SURFACE ===")
-    print("scripts/taey-train verifies pinned files at launch and there is no force flag, so a")
-    print("drifted pin makes a capability UNRUNNABLE. An UNPINNED production file is worse: the")
-    print("capability is runnable on bytes no receipt covers. Fix the BYTES if the file changed")
-    print("by accident. Re-pin only when the change is intended, and say why.")
+    aborts = [f for f in failures if f.startswith("ABORT")]
+    findings = [f for f in failures if not f.startswith("ABORT")]
+    if aborts:
+        print("=== THE CHECKER COULD NOT SEE ITS INPUTS ===")
+        print("A shallow clone or missing git is not an orphan pin. Fetch the full history")
+        print("and re-run. Absence of evidence is not a finding.")
+    if findings:
+        print("=== THE MANIFEST DOES NOT DESCRIBE THE PRODUCTION SURFACE ===")
+        print("scripts/taey-train verifies pinned files at launch and there is no force flag, so a")
+        print("drifted pin makes a capability UNRUNNABLE. An UNPINNED production file is worse: the")
+        print("capability is runnable on bytes no receipt covers. Fix the BYTES if the file changed")
+        print("by accident. Re-pin only when the change is intended, and say why.")
     return 1
 
 
@@ -632,6 +697,117 @@ def selftest() -> int:
         errs, text = captured(lambda: check(manifest, deployed=True, hash_remote=bad_remote)[0])
         expect_fail("deployed bytes disagree with pin", errs or [], "DEPLOYED", text or "")
         os.environ.pop("FLEET_ENV", None)
+
+        # S1–S4. candidate_update vs git history. A shallow clone's git log succeeds
+        # and returns the tip; treating that as 'no revision matches' is the false
+        # claim this checker exists to prevent. Cannot-look must ABORT, never CANDIDATE.
+        def _git(repo, *args):
+            subprocess.check_call(
+                ["git", "-C", repo, "-c", "user.name=selftest", "-c", "user.email=selftest@test",
+                 *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        def _write_pin_manifest(root, head_digest, candidate_digest):
+            rel = "pack.py"
+            open(os.path.join(root, "PRODUCTION_MANIFEST.yml"), "w").write(
+                "capabilities:\n"
+                "  corpus_pack:\n"
+                "    status: ADJUDICATED\n"
+                f"    entrypoint: {rel}\n"
+                "    content_sha:\n"
+                f"      {rel}: {head_digest}\n"
+                "    candidate_update:\n"
+                "      content_sha:\n"
+                f"        {rel}: {candidate_digest}\n"
+            )
+
+        src_repo = os.path.join(td, "hist-src")
+        os.makedirs(src_repo)
+        _git(src_repo, "init")
+        v1 = b"candidate-bytes-v1\n"
+        v2 = b"tree-bytes-v2\n"
+        open(os.path.join(src_repo, "pack.py"), "wb").write(v1)
+        _git(src_repo, "add", "pack.py")
+        _git(src_repo, "commit", "-m", "v1")
+        digest_v1 = sha256_bytes(v1)
+        open(os.path.join(src_repo, "pack.py"), "wb").write(v2)
+        _git(src_repo, "add", "pack.py")
+        _git(src_repo, "commit", "-m", "v2")
+        digest_v2 = sha256_bytes(v2)
+
+        here = os.getcwd()
+        try:
+            _write_pin_manifest(src_repo, digest_v2, digest_v1)
+            os.chdir(src_repo)
+            errs, text = captured(lambda: check("PRODUCTION_MANIFEST.yml")[0])
+            expect_pass("S2 full history: candidate_update matches a parent", errs, text or "")
+
+            shallow = os.path.join(td, "hist-shallow")
+            subprocess.check_call(
+                # Local clones default to --local and ignore --depth, so the
+                # history we are hiding would still be present. --no-local is
+                # the same shape as actions/checkout@v4 depth 1.
+                ["git", "clone", "--no-local", "--depth", "1", src_repo, shallow],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            shallow_flag = subprocess.check_output(
+                ["git", "-C", shallow, "rev-parse", "--is-shallow-repository"],
+                text=True,
+            ).strip()
+            if shallow_flag != "true":
+                print(
+                    f"SELFTEST FAIL: S1 clone is not shallow "
+                    f"(--is-shallow-repository={shallow_flag!r})"
+                )
+                failures += 1
+            _write_pin_manifest(shallow, digest_v2, digest_v1)
+            os.chdir(shallow)
+            errs, text = captured(lambda: check("PRODUCTION_MANIFEST.yml")[0])
+            expect_fail(
+                "S1 shallow clone with historical candidate_update ABORTS",
+                errs or [],
+                "ABORT",
+                text or "",
+            )
+            blob = "\n".join(errs or [])
+            if "CANDIDATE" in blob:
+                print(
+                    "SELFTEST FAIL: S1 — shallow history reported as CANDIDATE "
+                    "(absence of evidence as a finding):\n" + blob
+                )
+                failures += 1
+
+            _write_pin_manifest(shallow, digest_v2, digest_v2)
+            errs, text = captured(lambda: check("PRODUCTION_MANIFEST.yml")[0])
+            expect_pass(
+                "S4 shallow clone whose candidate_update matches HEAD does not need history",
+                errs,
+                text or "",
+            )
+        finally:
+            os.chdir(here)
+
+        nogit = os.path.join(td, "hist-nogit")
+        os.makedirs(nogit)
+        open(os.path.join(nogit, "pack.py"), "wb").write(v2)
+        _write_pin_manifest(nogit, digest_v2, digest_v1)
+        try:
+            os.chdir(nogit)
+            errs, text = captured(lambda: check("PRODUCTION_MANIFEST.yml")[0])
+            expect_fail(
+                "S5 no git repo: historical candidate_update ABORTS, not CANDIDATE",
+                errs or [],
+                "ABORT",
+                text or "",
+            )
+            if any("CANDIDATE" in e for e in (errs or [])):
+                print("SELFTEST FAIL: S5 reported CANDIDATE without a git history")
+                failures += 1
+        finally:
+            os.chdir(here)
 
         # A1. Forgotten promotion: ADJUDICATED + authorization naming it. No structural
         # path so UNPINNED does not fire and the only class is AUTHORIZATION.

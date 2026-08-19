@@ -21,6 +21,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # candidate_update pins are judged against git history of the named path.
+          # Default checkout is depth 1; that makes git log return only HEAD, and the
+          # checker must then ABORT rather than call the pin an orphan. Fetch everything
+          # so CI can actually look. The abort in the checker is the durable rule.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
