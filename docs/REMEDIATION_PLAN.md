@@ -357,6 +357,73 @@ constructs the legitimate case they forbid.
   `MAX_SEQ`, `CLOCK_CAP`, `BATCH_SIZE_PER_RANK`, `CPT_DATA`, `CPT_PACKED`. The launcher refuses
   without them by design — that refusal is the feature, not an obstacle to route around.
 
+## R2a — LAUNCH CONSTRAINTS from the audit of the merged head (tutor-grok, ENDORSE)
+
+**Anchored to `dd1c3a4`, which merged to `main` at `e21bebf`.** First written against `b907fb8`;
+tutor-grok re-endorsed on `dd1c3a4` and stated the residuals unchanged, so every constraint below
+still governs the run. `audit/grok` + `audit/gatekeeper` both success, `r5-audit-gate` green.
+
+**The re-audit was EXECUTED, not read, and that is why this endorsement is worth more than the
+first one.** On `b907fb8` every static check passed while `lifecycle_call` would have aborted every
+CPT launch. On `dd1c3a4` tutor-grok ran it in a fresh directory:
+
+```
+SPEC_VALID, NODE_DEPLOY, TRAINING, FRAGMENTATION_EXIT   all LIFECYCLE APPEND exit 0, 4-line journal
+skip to THOR_DELIVERED after FRAGMENTATION_EXIT         exit 1, LIFECYCLE INVALID, journal unchanged
+path containing a space                                 %q escaped, journal written
+OLD form on a sibling fresh dir                         --state: invalid choice: 'python3', NO journal
+```
+
+The last two lines are the ones that matter: a negative control proving the validator rejects an
+illegal transition, and an A/B proving the old form genuinely failed. A pass without those is a pass
+that cannot tell a working gate from a broken one.
+
+Verdict: on the production door this head does not
+report success a run did not earn — CANDIDATE refuses without authorization, the resolver always
+emits `LIFECYCLE`, the CPT inner no longer exits at the first optimizer step under `CPT_LIFECYCLE=1`,
+`taey-train` requires `THOR_DELIVERED` and dies on entrypoint failure even when the journal already
+says `THOR_DELIVERED`, bake will not start from `FRAGMENTATION_EXIT`, and a leftover authorization
+after promotion is a CI failure (A1/A7).
+
+The residuals below are **not** blocks. They are the conditions under which that verdict holds, and
+several of them decide how the run must be launched. Read them as launch constraints, not trivia.
+
+**1. `taey-train` WILL EXIT 1 AFTER EVERY LEGITIMATE `FRAGMENTATION_EXIT`. This is W3 working.**
+With `lifecycle: true` on `cpt_27b_4node`, a multi-session campaign returns non-zero between
+sessions because the campaign has not reached `THOR_DELIVERED` yet. **Do not read that as a failed
+run, do not restart from scratch, and do not "fix" it.** A non-zero exit naming a state that is not
+`THOR_DELIVERED` is the launcher correctly refusing to call a started run a finished one. This is the
+single most likely thing to be misread at 3am by whoever is watching.
+
+**2. A FRESH `OUTPUT_DIR` / `DCP_DIR` IS MANDATORY.** W3's last-state is not invocation-bound —
+reusing a directory that already reached `THOR_DELIVERED` can confuse it, and `GEMM_PREFLIGHT_ONLY=1`
+exits before the lifecycle resume check. A fresh directory fail-closes; a reused one may not.
+
+**3. LAUNCH ONLY THROUGH `scripts/taey-train`.** W1 is still documentation plus the one door:
+`dense-9b/instrumentation/capture_run.sh` and `dense-9b/recipes/run_till_done_v3.sh` **still invoke
+the inner launcher directly and skip the resolver entirely** — no manifest check, no authorization
+check, no lifecycle. They are not the door and must not be used for this campaign.
+
+**4. `EXPORT_DCP` MUST BE UNSET.** A leftover value restores the inner script's first-step exit 0.
+Through `taey-train` with a fresh journal W3 still catches it, but do not rely on the backstop.
+
+**5. VERIFY THE CLOCK CAP APPLIED — do not trust the script's exit.** A `CLOCK_CAP` ssh failure is
+**non-fatal**, so the cap can silently fail to apply on a node. This one is not cosmetic: the 27B
+whole-node death on this hardware was a **thermal** shutdown (~94 °C board/SoC), so an unapplied cap
+is the failure mode that killed a previous campaign. Confirm the cap on all four nodes by reading it
+back, not by observing that the launcher did not complain.
+
+**6. `bake_27b.sh` still carries `:=` defaults, including a hardcoded corpus.** It is a stage, not
+the door, so the manifest gates it — but the hardcoded corpus is exactly the "runs a different
+campaign silently" shape, and it has not been cleaned.
+
+Also open and already known: `never_defaulted()` is mode-unaware (mine); `CLAUDE.md` §7 and the
+manifest header are stale against the code.
+
+**What would invalidate the endorsement** (grok's own words, worth keeping as the falsifier):
+`taey-train cpt_27b_4node` or `bake_export` on a fresh run directory **exiting 0 without
+`THOR_DELIVERED` written by this campaign.**
+
 ## R3 — the run, and what "done" means
 
 `scripts/taey-train cpt_27b_4node VAR=… …` — the one door, no inner script, no node-local edit.
