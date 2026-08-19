@@ -472,10 +472,10 @@ authorization:
 # pinned bake files; a one-byte change voids it. Deleted by the promotion commit.
 authorizations:
 - capability: bake_export
-  campaign_id: bake_prod_v4_repos_1ep
+  campaign_id: bake_prod_v5_repos_1ep
   authorized_by: Jesse
   authorized_on: '2026-08-19'
-  scope: Bake the cpt_prod_v4_repos_1ep checkpoint (CHECKPOINT_SAVED step 85, per-rank DCP) through coordinated
+  scope: Bake the cpt_prod_v5_repos_1ep checkpoint (CHECKPOINT_SAVED step 85, per-rank DCP) through coordinated
     export -> 851-tensor HF -> graft 348 vision/mtp tensors from the run's own source -> 1199 servable.
     Graft donor resolved per-run from DERIVED_FROM.json (source $SPARK_HOME/models/Qwen3.8-27B, source_tensors
     1199), never a fixed fleet.env pin.
