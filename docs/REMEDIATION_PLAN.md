@@ -156,11 +156,49 @@ constraints on how it is written, because this is the exact place a permanent by
 2. It is **single-use by construction**: the run's own receipt replaces it. If a promotion can be
    reused for a second run, it has become a standing bypass and must be revoked.
 
-**OPEN — decide before R3, do not improvise at launch time:** whether the authorized-but-unreceipted
-state is expressed as (a) a straight promotion to `ADJUDICATED` whose receipt block is explicitly
-marked pending, or (b) a distinct single-use status the resolver accepts exactly once. (b) is
-safer-looking and adds a runnable status to the one door, which is the thing we keep being punished
-for. Route this to tutor-grok and tutor-codex as a design question with no preferred answer stated.
+**DECIDED (tutor-grok, 2026-08-19). I offered two shapes and both were rejected; the third is
+better than either, and one of my own stated constraints was the bug.**
+
+I proposed (a) promote to `ADJUDICATED` with the receipt marked pending, or (b) a single-use
+runnable status. Both are wrong:
+
+- **(a) fails** because `ADJUDICATED` becomes a lie the moment it is written, and
+  `_resolve_capability.py:51` treats it as a *standing* door. A `PENDING` marker in the receipt
+  block is enforced by nothing — it is a comment, and the resolver never reads it.
+- **(b) fails** because this plan already names it two paragraphs up: candidate-but-runnable is
+  `--force` under another name. **And it breaks the run.** "Single-use, consumed on first launch"
+  cannot express a multi-session CPT — `FRAGMENTATION_EXIT` means one campaign spans several
+  `taey-train` invocations, so the second session would be refused by the authorization that
+  legitimately covers it. My "single-use by construction" constraint was itself the defect.
+
+**THE SHAPE (authoritative):** the status stays `CANDIDATE_PENDING_PRODUCTION_RUN` — honest, no lie
+written anywhere — and the **authorization is a separate manifest object, never a runnable status**:
+
+```yaml
+authorization:                  # NOT a status. Absent by default.
+  capability: cpt_27b_4node
+  content_sha: {…}              # the EXACT pins it authorizes
+  authorized_by: <name>
+  campaign_id: <id>             # shared by every session of one campaign
+```
+
+- The resolver permits a `CANDIDATE_*` launch **only** when this block is present **and no receipt
+  exists for that `campaign_id`**.
+- It is bound to the **exact `content_sha` pins**. Change a byte and the authorization no longer
+  describes what you are running — that binding, not a use-counter, is what stops it becoming a
+  standing bypass.
+- It is consumed at **campaign completion or explicit revoke** — never at the first optimizer step,
+  which is the same "training started = success" error W3 exists to kill.
+- After the run, a **second human commit** promotes to `ADJUDICATED` with the filled receipt **and
+  deletes the authorization**. Two commits, two acts: one authorizes, one records what happened.
+
+`taey-train:8` remains the exit — a manifest edit — and no new status enters the one door.
+
+**Audit consequence, from the same lens:** `audit/grok` will not be posted on `9905ce8` (an ancestor)
+nor on `1fb90d9` (a plan commit with #12/#13 unmerged). Pushing to the branch also cleared the
+`audit/gatekeeper: success` that sat on `9905ce8` — at `1fb90d9` both lenses read *missing*, which is
+the gate behaving correctly. **Both lenses re-run on the exact final merged head, once #12 and #13
+land.** There is no path where an audit of an ancestor counts.
 
 ## R2 — pre-run gates (none of these are optional, all have been skipped before)
 
