@@ -1,0 +1,24 @@
+# Parse every tracked shell and Python file. A syntax error is a CI failure.
+#
+# bash -n / python3 -m py_compile only catch what someone remembers to run.
+# Same script CI runs is the script you run locally. --self-test plants a
+# broken .sh and a broken .py; a gate that cannot go RED is not a gate.
+name: syntax
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: every tracked shell and Python file must parse
+        run: python3 scripts/check_syntax.py
+      - name: prove the gate can fail for the right reason
+        run: python3 scripts/check_syntax.py --self-test
