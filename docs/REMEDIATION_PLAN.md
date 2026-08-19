@@ -132,9 +132,50 @@ Order: #12 and #13 into `tutor/requalify-manifest-shas` (merge gate below) → *
 re-audit the resulting head with BOTH lenses → #11 into `main`. Conductor merges; tutor does not
 merge its own PR.
 
-**THE MERGE REQUIRES A RE-PIN COMMIT. This is arithmetic, not corruption.** Verified by constructing
-the merge (worktree at `577cda2`, merge `636cbdc`, merge `82f46e0` — **both clean, zero conflicts**),
-then running W6's checker on the result:
+### THE MERGE RECIPE — constructed at `3d747dc`, current heads, exact values
+
+The stack collapsed: **`491bfa0`'s parent is `99fb0f9`, so merging #14 carries #13 with it.** Two
+merges, not three. Both verified **CLEAN, zero conflicts** (the earlier `_resolve_capability.py`
+conflict is gone — tutor-grok rebased onto `99fb0f9` and absorbed codex's lifecycle handling).
+
+```
+1.  merge 06d5bfe   (#12  W6 correspondence + authorization guards)      CLEAN
+2.  merge 491bfa0   (#14  resolver authorization; carries #13 W3/W5)     CLEAN
+3.  RE-PIN — before running any gate, see below
+4.  gates, then the two-lens audit on THIS head
+```
+
+**Step 3, exact.** Four pins drift because two branches edit two pinned files. Replace with the
+merged-tree bytes:
+
+| capability | path | new `content_sha` |
+|---|---|---|
+| `cpt_27b_4node` | `scripts/taey-train` | `066d762bca8e6dc1587cc397d12df71ac0107935660214f529fc95354ff24022` |
+| `cpt_27b_4node` | `scripts/_resolve_capability.py` | `931882b5fab89a9f7832a0c5057aa2a8dc98006f221c63853c40228fbf6dc87d` |
+| `bake_export` | `scripts/taey-train` | `066d762bca8e6dc1587cc397d12df71ac0107935660214f529fc95354ff24022` |
+| `bake_export` | `scripts/_resolve_capability.py` | `931882b5fab89a9f7832a0c5057aa2a8dc98006f221c63853c40228fbf6dc87d` |
+
+**ORDER IS LOAD-BEARING — re-pin BEFORE the self-test, or the gate looks broken.** On the merged
+tree `check_manifest_pins.py --self-test` exits 1 with:
+
+```
+SELFTEST FAIL: real tree must PASS before mutation tests
+```
+
+That is **correct behaviour, not a defect**: the self-test refuses to run mutation fixtures against
+an already-dirty baseline, since a mutation could otherwise "pass" for the wrong reason. It passes on
+`06d5bfe` alone and fails on the merge only because the merge drifts the pins it is about to check.
+Re-pin first and it goes green. Recorded because at merge time this reads as "grok's gate is broken"
+and would cost a cycle.
+
+Gate state on the merged tree before re-pinning: `check_variable_registry` exit 0,
+`check_docs_index` exit 0, `_resolve_capability.py --self-test` exit 0, `check_manifest_pins` exit 1
+(the four drifts above, and nothing else).
+
+---
+
+**Why the re-pin is legitimate rather than a forced gate** — first established with the earlier
+`577cda2`/`636cbdc`/`82f46e0` construction:
 
 ```
 DRIFT  cpt_27b_4node: scripts/taey-train
