@@ -185,6 +185,14 @@ bake_container_python(){
     corpus_dir=$(dirname "$CONVERT_CORPUS")
     case "$corpus_dir" in
       "$SPARK_HOME"|"$SPARK_HOME"/*) : ;;
+      # NEVER mount host root. A corpus at "/x.jsonl" makes dirname "/", which the /*
+      # branch below matches, and the mount would become -v /:/:ro — the entire host
+      # filesystem inside the container. Bounded by --network none, :ro and the pinned
+      # image, and no production corpus lives at root, but a defence that depends on the
+      # input never taking one specific shape is not a defence. Found by gatekeeper's R5
+      # on this PR, who verified the glob does match "/"; excluded here rather than
+      # deferred, because a known hole with a follow-up ticket is a shipped hole.
+      /) : ;;
       /*) command+=(-v "$corpus_dir:$corpus_dir:ro") ;;
     esac
   fi
