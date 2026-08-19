@@ -100,3 +100,115 @@ the audits clear. Grok validates each against Cosmos's spec rather than against 
 - The ~40-hour allocation across 2026-08-16..18. W3 makes the next one answerable.
 - Whether the SFT surfaces carry the same defects. Never inventoried; `RECIPES.md:30` is reason to
   assume they might.
+
+---
+
+# PHASE 2 — the end-to-end run (Jesse-directed, 2026-08-19)
+
+**The directive, in order:** everything clean and to spec → a proper end-to-end training run on the
+updated repos and the new infrastructure → then infra-codex dispatches it to ALL Chats to audit with
+the full background files and packet → **Gemini sits out the audit and then does the synthesis.**
+
+This phase exists because the last cycle burned two days for hours of work. The remediation above is
+what makes this run's outcome *legible*; the run is what makes the remediation *proven*. Neither
+counts alone.
+
+## R0 — merge order, and what is actually blocking
+
+Three stacked PRs, measured 2026-08-19:
+
+| PR | head | base | state |
+|---|---|---|---|
+| #13 | `agent/codex-w3-w5-lifecycle-bake` | `tutor/requalify-manifest-shas` | open; 2 amendments outstanding |
+| #12 | `grok/w6-correspondence` @ `636cbdc` | `tutor/requalify-manifest-shas` | open; predicate covers CANDIDATE_* |
+| #11 | `tutor/requalify-manifest-shas` | `main` | **`r5-audit-gate: failure`** |
+
+`#11` carries `audit/gatekeeper: success` and is missing the second lens. **The R5 gate is two
+lenses on the exact head; one success is not a pass.** Nothing reaches `main` until `audit/grok`
+lands on the head that is actually merged — and the head moves every time #12 or #13 lands, so the
+audit is re-run on the final head, not on an ancestor of it.
+
+Order: #12 and #13 into `tutor/requalify-manifest-shas` (merge gate below) → re-audit the resulting
+head with BOTH lenses → #11 into `main`. Conductor merges; tutor does not merge its own PR.
+
+**Merge gate between #12 and #13, still live:** #13 downgrades `cpt_27b_4node` and `bake_export` to
+`CANDIDATE_PENDING_PRODUCTION_RUN`; #12's UNPINNED predicate keys on status. `636cbdc` extends it to
+candidate statuses, so the gate is *satisfied by that sha specifically* — merging an earlier W6 sha
+alongside #13 silently lifts structural pin enforcement on the two capabilities whose bytes are new.
+
+## R1 — the promotion problem. Read this before launching anything.
+
+After #13 merges, `cpt_27b_4node` is `CANDIDATE_PENDING_PRODUCTION_RUN` and **`taey-train` will
+refuse to launch it** (`scripts/_resolve_capability.py:50-57`; verified live — `sft_stage2_lora`
+shows `blocked`). That refusal is correct: the bytes changed and have never executed.
+
+It is also circular on its face — the status is earned by a run, and the run is gated on the status.
+**The way out is not a new runnable status.** `scripts/taey-train:17` says there is no `--force` and
+none may be added, and a "candidate-but-runnable" state is a `--force` wearing a different name.
+
+The designed exit is already documented at `scripts/taey-train:8`: reaching production "requires
+editing `PRODUCTION_MANIFEST.yml`: a visible, reviewable, gated act." So promotion is a **human-
+authorized manifest commit**, and Jesse's directive to do the run IS that authorization. Two
+constraints on how it is written, because this is the exact place a permanent bypass gets born:
+
+1. The promoting commit states, in its body, that it carries an **authorization** and not a receipt,
+   names who authorized it, and cites the audited head being promoted.
+2. It is **single-use by construction**: the run's own receipt replaces it. If a promotion can be
+   reused for a second run, it has become a standing bypass and must be revoked.
+
+**OPEN — decide before R3, do not improvise at launch time:** whether the authorized-but-unreceipted
+state is expressed as (a) a straight promotion to `ADJUDICATED` whose receipt block is explicitly
+marked pending, or (b) a distinct single-use status the resolver accepts exactly once. (b) is
+safer-looking and adds a runnable status to the one door, which is the thing we keep being punished
+for. Route this to tutor-grok and tutor-codex as a design question with no preferred answer stated.
+
+## R2 — pre-run gates (none of these are optional, all have been skipped before)
+
+- **Reboot all four Sparks before the run**, and again after. Never kill-and-relaunch on dirty GPUs.
+- **Disk gate on every node** — a full disk on `.68` once truncated a checkpoint mid-save and wedged
+  the node. Check before, not after.
+- **Corpus is Treasurer-sanctioned only.** tutor never assembles training data. The corpus receipt
+  (`careers-qwen/receipts/`) must name the exact `corpus_sha256` and verify identical on all four.
+- **Recipe is Chats-researched only.** No solo LR/optimizer choices.
+- **Deployed bytes must equal git bytes.** `check_manifest_pins.py --deployed` (W6) hashes the Spark
+  copy. This is the defect the repo already paid for; it is now checkable, so check it.
+- **Every dynamic variable supplied explicitly.** `TOTAL_STEPS`, `SESSION_LIMIT`, `SAVE_EVERY`,
+  `MAX_SEQ`, `CLOCK_CAP`, `BATCH_SIZE_PER_RANK`, `CPT_DATA`, `CPT_PACKED`. The launcher refuses
+  without them by design — that refusal is the feature, not an obstacle to route around.
+
+## R3 — the run, and what "done" means
+
+`scripts/taey-train cpt_27b_4node VAR=… …` — the one door, no inner script, no node-local edit.
+
+**Training starting is not the run succeeding.** `run_4node_27b_cpt.sh:351-359` prints
+`27B IS TRAINING` at the first optimizer step; that is confirmation of fit. Completion is the
+lifecycle journal reaching `THOR_DELIVERED` (W3), with:
+
+- weight-diff in band `5e-05..8e-04`, measured against the run's **own** source, never a pinned donor
+- tensor count `851 → 1199`, graft verified **by content**, not by count
+- artifact sha256 matched on the serving host
+- served-root match by identity, consumer quiesce before any swap
+
+**Serving swaps go through infra-codex** (Jesse, standing): check with them before doing anything
+that touches a serve, so they manage it against whatever else is in flight.
+
+## R4 — the audit dispatch
+
+When R3 is complete, **request that infra-codex send it to all Chats** with the full required
+background files and packet. Not tutor — infra-codex owns this dispatch.
+
+- **Gemini sits out the audit, then does the synthesis** of the other lenses' findings.
+- Gemini cannot fetch GitHub repos anyway, so it is the correct lens to hold back for synthesis.
+- The packet points at the **public repo**, carries the don't-trust-my-summary clause, and pre-loads
+  no conclusion. At least one reviewer must quote a real `file:line` or the review proved nothing.
+- Reviewers that must fetch go to fetch-capable modes: Perplexity DR, ChatGPT DR, Grok DeeperSearch,
+  Claude Research. A reasoning-mode "cannot fetch → BLOCK" is a dispatch error, not a finding.
+
+## R5 — what would make this run a failure even if the loss curve looks fine
+
+Recorded now, while nothing is at stake, because the last cycle's failure was invisible from inside:
+
+- weights that did not move (a null run reported as a trained one)
+- a corpus containing the model's own generated output
+- a graft from a foreign vision tower that every count gate passes
+- a "done" asserted from a status line rather than from the artifact on the serving host
