@@ -63,7 +63,7 @@ echo "  UPS sample: $(tail -1 "$CAPDIR/ups.csv" 2>/dev/null)"
 # profiled a 3000-step / 2560-seq campaign nobody asked for. The launcher now refuses that, which
 # is correct; the fix belongs HERE, at the caller that failed to decide.
 _cap_missing=""
-for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZE_PER_RANK CPT_PACKED CLOCK_CAP CPT_DATA; do
+for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZE_PER_RANK CPT_PACKED CLOCK_CAP CPT_DATA OUTPUT_DIR; do
   eval "[ -n \"\${${_v}+x}\" ]" || _cap_missing="$_cap_missing $_v"
 done
 if [ -n "$_cap_missing" ]; then

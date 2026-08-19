@@ -14,6 +14,12 @@ set -uo pipefail
 MASTER=${SPARK_MASTER}            # rank 0 — torchrun rendezvous host (${SPARK_RAIL_MASTER} rail)
 WORKERS=(${SPARK_MGMT_IPS#* })   # ranks 1,2,3
 ALL=("$MASTER" "${WORKERS[@]}")
+CPT_LIFECYCLE=0
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ] && \
+   [ -z "${EXPORT_DCP:-}" ] && [ -z "${BAKE_TO_HF:-}" ]; then
+  CPT_LIFECYCLE=1
+  : "${OUTPUT_DIR:?set OUTPUT_DIR — the run owns lifecycle_events.jsonl beneath this directory}"
+fi
 
 # Run knobs — bf16 + keep_low_precision_grads fit (commit c63bc2d); chunked2560 corpus.
 # THE CORPUS IS THE RUN. This defaulted to a hardcoded legacy corpus path, so an unset CPT_DATA
@@ -264,6 +270,58 @@ ADAFACTOR_DOSE_LOG=1  # INVARIANT: the AF-DOSE probe is how a dead optimizer is 
 [ -n "${FP8:-}" ] && RUN_ENV="$RUN_ENV FP8=$FP8"
 RECIPE_DIR=${SPARK_HOME}/palios-training/dense-9b/recipes
 LOGDIR=${SPARK_HOME}/cpt27b_logs
+LIFECYCLE_TOOL="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/training_lifecycle.py"
+if [ "$CPT_LIFECYCLE" = 1 ]; then
+  [ -f "$LIFECYCLE_TOOL" ] || {
+    echo "ABORT: lifecycle writer is absent: $LIFECYCLE_TOOL" >&2
+    exit 1
+  }
+  RUN_TAG=$(basename "$OUTPUT_DIR")
+  LIFECYCLE_LOG="$OUTPUT_DIR/lifecycle_events.jsonl"
+fi
+
+lifecycle_call() {
+  local _lifecycle_command
+  printf -v _lifecycle_command 'python3 - %q ' "$@"
+  ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$MASTER" "$_lifecycle_command" \
+    < "$LIFECYCLE_TOOL"
+}
+
+lifecycle_append() {
+  lifecycle_call append --log "$LIFECYCLE_LOG" --state "$1" --run-tag "$RUN_TAG" "${@:2}"
+}
+
+lifecycle_last_json() {
+  lifecycle_call last --log "$LIFECYCLE_LOG" --json
+}
+
+observe_completed_checkpoint() {
+  local _checkpoint_record _node _rank _candidate
+  _checkpoint_record=$(ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$MASTER" \
+    "if test -f '$OUTPUT_DIR/final/COMPLETE'; then
+       step=\$(python3 -c \"import torch; print(torch.load('$OUTPUT_DIR/final/trainer_meta.pt', map_location='cpu', weights_only=False)['step'])\") || exit 1;
+       printf '%s|%s\\n' \"\$step\" '$OUTPUT_DIR/final';
+     else
+       for p in '$OUTPUT_DIR'/checkpoint-*; do
+         test -f \"\$p/COMPLETE\" || continue;
+         n=\${p##*-}; printf '%s|%s\\n' \"\$n\" \"\$p\";
+       done | sort -t'|' -k1,1n | tail -1;
+     fi") || return 1
+  [ -n "$_checkpoint_record" ] || return 1
+  IFS='|' read -r OBSERVED_STEP OBSERVED_CHECKPOINT <<<"$_checkpoint_record"
+  [[ "$OBSERVED_STEP" =~ ^[0-9]+$ ]] || return 1
+  for _node in "${ALL[@]}"; do
+    _rank=0
+    for _candidate in "${ALL[@]}"; do
+      [ "$_candidate" = "$_node" ] && break
+      _rank=$((_rank + 1))
+    done
+    ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$_node" \
+      "test -f '$OBSERVED_CHECKPOINT/COMPLETE' &&
+       test -f '$OBSERVED_CHECKPOINT/trainer_meta.pt' &&
+       test -f '$OBSERVED_CHECKPOINT/dcp/__${_rank}_0.distcp'" || return 1
+  done
+}
 
 launch_rank () {  # $1=host  $2=rank
   local host=$1 rank=$2
@@ -276,14 +334,19 @@ launch_rank () {  # $1=host  $2=rank
   # Rotate-then-write: the read path ($LOGDIR/r$rank.log) is unchanged for the monitor below and
   # for every caller, and no prior run's evidence is ever destroyed again. Cost is disk, which is
   # the cheapest thing we have (478G free) against a forensic dead end, which cost a whole evening.
-  ssh -o ConnectTimeout=8 spark@"$host" \
+  if ssh -o ConnectTimeout=8 spark@"$host" \
     "mkdir -p $LOGDIR; \
      if [ -s $LOGDIR/r$rank.log ]; then \
        mv $LOGDIR/r$rank.log $LOGDIR/r$rank.\$(date -r $LOGDIR/r$rank.log +%Y%m%dT%H%M%S).log; \
      fi; \
      cd $RECIPE_DIR && tmux new-session -d -s cpt27b \
        \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/r$rank.log 2>&1\"" \
-    && echo "  launched rank $rank on $host" || echo "  FAILED to launch rank $rank on $host"
+  then
+    echo "  launched rank $rank on $host"
+  else
+    echo "  FAILED to launch rank $rank on $host" >&2
+    return 1
+  fi
 }
 
 measure_gemm_tflops() {
@@ -421,16 +484,48 @@ if [ "$GEMM_PREFLIGHT_ONLY" = "1" ]; then
   exit 0
 fi
 
+INITIAL_SESSION=0
+PREVIOUS_STEP=0
+if [ "$CPT_LIFECYCLE" = 1 ]; then
+  LAST_EVENT=$(lifecycle_last_json) || {
+    echo "ABORT: lifecycle journal is unreadable: $LIFECYCLE_LOG" >&2
+    exit 1
+  }
+  if [ "$LAST_EVENT" = UNKNOWN ]; then
+    LAST_STATE=UNKNOWN
+  else
+    LAST_STATE=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])' <<<"$LAST_EVENT")
+  fi
+  case "$LAST_STATE" in
+    UNKNOWN)
+      lifecycle_append SPEC_VALID --total-steps "$TOTAL_STEPS" --session-limit "$SESSION_LIMIT" || exit 1
+      INITIAL_SESSION=1
+      ;;
+    FRAGMENTATION_EXIT)
+      PREVIOUS_STEP=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["step"])' <<<"$LAST_EVENT")
+      ;;
+    *)
+      echo "ABORT: lifecycle state $LAST_STATE cannot begin a training session." >&2
+      exit 1
+      ;;
+  esac
+fi
+
 echo "  master $MASTER = rank 0 (binding :29500 first)"
-launch_rank "$MASTER" 0
+launch_rank "$MASTER" 0 || exit 1
 echo "  (master settling 12s...)"
 sleep 12
-for i in 0 1 2; do launch_rank "${WORKERS[$i]}" $((i+1)); done
+for i in 0 1 2; do launch_rank "${WORKERS[$i]}" $((i+1)) || exit 1; done
+if [ "$INITIAL_SESSION" = 1 ]; then
+  lifecycle_append NODE_DEPLOY --nodes 4 || exit 1
+fi
 
 echo ""
 echo "=== monitor: peakUsed/node + trainer liveness + master optimizer-step progression ==="
 STEP_SEEN=0
-for t in $(seq 1 80); do   # ~40 min @ 30s
+t=0
+while :; do
+  t=$((t + 1))
   line=""; alive=0
   for h in "${ALL[@]}"; do
     r=$(ssh -o ConnectTimeout=5 -o BatchMode=yes spark@"$h" \
@@ -459,9 +554,40 @@ for t in $(seq 1 80); do   # ~40 min @ 30s
        echo ">>> FAILURE signal in master log — stopping monitor"; break;;
   esac
   if [[ "$step_num" =~ ^[0-9]+$ ]]; then
-    STEP_SEEN=1
-    echo ">>> OPTIMIZER STEP $step_num COMPLETED — 27B IS TRAINING (fit confirmed). Full grads= breakdown:"
-    ssh -o ConnectTimeout=5 spark@"$MASTER" 'grep -aE "FIRST STEP:|params=.*grads=.*optim=" '"$LOGDIR"'/r0.log | tail -2' 2>/dev/null
+    if [ "$STEP_SEEN" -eq 0 ]; then
+      STEP_SEEN=1
+      echo ">>> OPTIMIZER STEP $step_num COMPLETED — 27B IS TRAINING (fit confirmed). Full grads= breakdown:"
+      ssh -o ConnectTimeout=5 spark@"$MASTER" 'grep -aE "FIRST STEP:|params=.*grads=.*optim=" '"$LOGDIR"'/r0.log | tail -2' 2>/dev/null
+      if [ "$INITIAL_SESSION" = 1 ]; then
+        lifecycle_append TRAINING --step "$step_num" || exit 1
+      fi
+      if [ "$CPT_LIFECYCLE" != 1 ]; then
+        break
+      fi
+    fi
+  fi
+  if [ "$CPT_LIFECYCLE" = 1 ] && [ "$STEP_SEEN" -eq 1 ] && [ "$alive" -eq 0 ]; then
+    if ! observe_completed_checkpoint; then
+      echo "ERROR: all trainers exited after TRAINING but no all-rank COMPLETE checkpoint is readable." >&2
+      exit 1
+    fi
+    [ "$OBSERVED_STEP" -gt "$PREVIOUS_STEP" ] || {
+      echo "ERROR: session made no checkpoint progress: prior=$PREVIOUS_STEP observed=$OBSERVED_STEP." >&2
+      exit 1
+    }
+    if [ "$OBSERVED_STEP" -ge "$TOTAL_STEPS" ]; then
+      lifecycle_append CHECKPOINT_SAVED --step "$OBSERVED_STEP" \
+        --checkpoint-path "$OBSERVED_CHECKPOINT" || exit 1
+      EXPECTED_FRAGMENTATION=$(( (TOTAL_STEPS + SESSION_LIMIT - 1) / SESSION_LIMIT - 1 ))
+      lifecycle_call validate --log "$LIFECYCLE_LOG" \
+        --expected-fragmentation "$EXPECTED_FRAGMENTATION" || exit 1
+    else
+      lifecycle_append FRAGMENTATION_EXIT --step "$OBSERVED_STEP" \
+        --checkpoint-path "$OBSERVED_CHECKPOINT" || exit 1
+    fi
+    break
+  fi
+  if [ "$STEP_SEEN" -eq 0 ] && [ "$t" -ge 80 ]; then
     break
   fi
   sleep 30

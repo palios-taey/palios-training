@@ -53,7 +53,6 @@ LAUNCHER = "dense-9b/recipes/run_4node_27b_cpt.sh"
 # forgotten, which is the only property that matters for work deferred at 3am.
 CALLER_DEFAULT_BASELINE = {
     "careers-qwen/launch_stage2_sft.sh": 6,
-    "careers-qwen/run_stage2_sft_till_done.sh": 3,
 }
 
 
@@ -64,7 +63,7 @@ def invokers():
         if not line.strip() or line == LAUNCHER:
             continue
         src = open(line, encoding="utf-8", errors="replace").read()
-        if re.search(r"^[^#]*(bash|sh|exec|\.)\s+[^#]*run_4node_27b_cpt\.sh", src, re.M):
+        if re.search(r"^[^\n#]*(bash|sh|exec|\.)\s+[^\n#]*run_4node_27b_cpt\.sh", src, re.M):
             out.append(line)
     return sorted(out)
 REGISTRY = "dense-9b/recipes/VARIABLES.yml"
@@ -87,6 +86,17 @@ def never_defaulted(reg):
         if cls.startswith("dynamic"):
             out |= set(items or [])
     return out
+
+
+def caller_never_defaulted(reg, source):
+    protected = never_defaulted(reg)
+    # The launcher is intentionally multi-mode. CPT-only requirements are meaningless to a
+    # caller that explicitly supplies an SFT dataset, and the two existing SFT wrappers have
+    # their own frozen default debt. Treating OUTPUT_DIR's SFT output convention as a new CPT
+    # default is a domain error in the checker, not new production debt.
+    if re.search(r"\bSFT_(?:DIR|JSONL)\s*=", source):
+        protected -= set(reg.get("dynamic_required_when_cpt") or [])
+    return protected
 
 
 def code_reads(path):
@@ -197,15 +207,15 @@ def main():
             )
 
     # 3d. NO INVOKER MAY SUPPLY A PER-RUN DEFAULT ON THE LAUNCHER'S BEHALF.
-    dyn = never_defaulted(reg)
     found = {}
     for inv in invokers():
         isrc = "\n".join(
             l for l in open(inv, encoding="utf-8", errors="replace").read().split("\n")
             if not l.strip().startswith("#")
         )
+        protected = caller_never_defaulted(reg, isrc)
         for v in sorted(set(re.findall(r"\$\{([A-Z][A-Z0-9_]+):?-[^}\s]", isrc))):
-            if v in dyn:
+            if v in protected:
                 found.setdefault(inv, set()).add(v)
     for inv, vs in sorted(found.items()):
         allowed = CALLER_DEFAULT_BASELINE.get(inv, 0)

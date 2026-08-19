@@ -19,6 +19,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST="$ROOT/PRODUCTION_MANIFEST.yml"
 RESOLVER="$ROOT/scripts/_resolve_capability.py"
+LIFECYCLE_TOOL="$ROOT/scripts/training_lifecycle.py"
 
 die(){ echo "REFUSED: $*" >&2; exit 1; }
 
@@ -92,4 +93,37 @@ echo
 echo "  Preconditions satisfied. Launching the manifest's entrypoint, not a remembered one."
 echo "  \$ $ENTRY_FILE $*"
 echo
-exec env "$@" bash "$ROOT/$ENTRY_FILE"
+
+# The manifest entrypoint owns execution, but the lifecycle journal owns success. A detached
+# launcher returning after its first optimizer step used to turn "started" into exit 0. Preserve
+# the entrypoint status for diagnosis, then independently read the durable rank-0 journal.
+RUN_ROOT=""
+for assignment in "$@"; do
+  case "$assignment" in
+    OUTPUT_DIR=*) RUN_ROOT=${assignment#OUTPUT_DIR=} ;;
+    DCP_DIR=*) RUN_ROOT=${assignment#DCP_DIR=} ;;
+  esac
+done
+[ -n "$RUN_ROOT" ] || RUN_ROOT=${DCP_DIR:-${OUTPUT_DIR:-}}
+
+env "$@" bash "$ROOT/$ENTRY_FILE"
+ENTRY_STATUS=$?
+
+[ -f "$LIFECYCLE_TOOL" ] || die "lifecycle validator missing at $LIFECYCLE_TOOL."
+[ -f "$ROOT/fleet.env" ] && . "$ROOT/fleet.env"
+[ -n "${SPARK_MASTER:-}" ] || die "SPARK_MASTER is absent; cannot read the run-owned lifecycle."
+[ -n "$RUN_ROOT" ] || die "entrypoint exited status $ENTRY_STATUS with no OUTPUT_DIR or DCP_DIR; lifecycle state reached: UNKNOWN"
+
+printf -v LAST_COMMAND 'python3 - last --log %q/lifecycle_events.jsonl' "$RUN_ROOT"
+LAST_STATE=$(ssh -o BatchMode=yes spark@"$SPARK_MASTER" "$LAST_COMMAND" \
+  < "$LIFECYCLE_TOOL" 2>/dev/null) || {
+  die "entrypoint exited status $ENTRY_STATUS; lifecycle journal is unreadable at $RUN_ROOT/lifecycle_events.jsonl"
+}
+if [ "$ENTRY_STATUS" -ne 0 ]; then
+  die "entrypoint exited status $ENTRY_STATUS; lifecycle state reached: $LAST_STATE"
+fi
+[ "$LAST_STATE" = THOR_DELIVERED ] || \
+  die "entrypoint returned before THOR_DELIVERED; lifecycle state reached: $LAST_STATE"
+
+echo "  lifecycle: THOR_DELIVERED — production operation complete"
+exit 0

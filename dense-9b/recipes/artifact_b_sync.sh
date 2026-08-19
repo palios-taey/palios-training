@@ -8,13 +8,75 @@ set -euo pipefail
 NODES=(${SPARK_MGMT_IPS})
 RECIPE_DIR=$(cd "$(dirname "$0")" && pwd)
 VERIFY_TOOL="${RECIPE_DIR}/bake_dcp_offline.py"
+RANK_VERIFY_TOOL="${RECIPE_DIR}/../../careers-qwen/verify_artifact_b.py"
 TRANSFER_MARGIN_BYTES=${TRANSFER_MARGIN_BYTES:-10737418240}
 
 usage(){
   echo "usage:"
   echo "  $0 collect <spark-export-dir> <controller-dir>"
+  echo "  $0 verify-sparks <spark-export-dir>"
+  echo "  $0 assemble-spark <spark-export-dir> <rank0-node-local-dir>"
   echo "  $0 push <controller-dir> <convert-ssh> <convert-dir>"
   echo "  $0 retire-sparks <spark-export-dir> <verified-controller-dir>"
+}
+
+remote_rank_verify(){
+  local node=$1 root=$2 rank=$3
+  ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"$node" \
+    "python3 - rank --root '$root' --rank '$rank' --world 4" < "$RANK_VERIFY_TOOL"
+}
+
+verify_sparks(){
+  local spark_export=$1 rank
+  safe_spark_export "$spark_export"
+  [ "${#NODES[@]}" = 4 ] || {
+    echo "REFUSE: Artifact B requires four rank-ordered nodes, got ${#NODES[@]}" >&2
+    return 1
+  }
+  for rank in 0 1 2 3; do
+    remote_rank_verify "${NODES[$rank]}" "$spark_export" "$rank"
+  done
+  echo "SPARK EXPORT VERIFIED — four manifests, four shards, four READY markers"
+}
+
+assemble_spark(){
+  local spark_export=$1 dest=$2 rank stage
+  safe_spark_export "$spark_export"
+  case "$dest" in
+    "${SPARK_HOME}"/post_cpt/*_artifactB) ;;
+    *) echo "REFUSE: rank-0 assembly must be ${SPARK_HOME}/post_cpt/*_artifactB: $dest" >&2; return 1;;
+  esac
+  verify_sparks "$spark_export"
+  if ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[0]}" "test -e '$dest'"; then
+    ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[0]}" \
+      "python3 - assembled --root '$dest'" < "$RANK_VERIFY_TOOL" && {
+      echo "SKIP assembly — verified rank-0 Artifact B already exists at $dest"
+      return 0
+    }
+    echo "REFUSE: existing rank-0 assembly is incomplete: $dest" >&2
+    return 1
+  fi
+  stage="${dest}.staging.$$"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[0]}" \
+    "test ! -e '$stage'; mkdir -p '$(dirname "$dest")' '$stage';
+     cp -a '$spark_export/.metadata' '$spark_export/__0_0.distcp' \
+       '$spark_export/manifest.rank0.json' '$spark_export/READY.rank0' '$stage/'"
+  for rank in 1 2 3; do
+    scp -3 -q -o BatchMode=yes -o ConnectTimeout=10 \
+      "spark@${NODES[$rank]}:$spark_export/__${rank}_0.distcp" \
+      "spark@${NODES[0]}:$stage/"
+    scp -3 -q -o BatchMode=yes -o ConnectTimeout=10 \
+      "spark@${NODES[$rank]}:$spark_export/manifest.rank${rank}.json" \
+      "spark@${NODES[0]}:$stage/"
+    scp -3 -q -o BatchMode=yes -o ConnectTimeout=10 \
+      "spark@${NODES[$rank]}:$spark_export/READY.rank${rank}" \
+      "spark@${NODES[0]}:$stage/"
+  done
+  ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[0]}" \
+    "python3 - assembled --root '$stage'" < "$RANK_VERIFY_TOOL"
+  ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"${NODES[0]}" \
+    "mv '$stage' '$dest'"
+  echo "ASSEMBLY COMPLETE — verified Artifact B is node-local on rank 0 at $dest"
 }
 
 safe_local_target(){
@@ -200,6 +262,14 @@ retire_sparks(){
 
 command_name=${1:-}
 case "$command_name" in
+  verify-sparks)
+    [ "$#" = 2 ] || { usage; exit 2; }
+    verify_sparks "$2"
+    ;;
+  assemble-spark)
+    [ "$#" = 3 ] || { usage; exit 2; }
+    assemble_spark "$2" "$3"
+    ;;
   collect)
     [ "$#" = 3 ] || { usage; exit 2; }
     collect "$2" "$3"
