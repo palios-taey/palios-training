@@ -467,7 +467,7 @@ authorizations:
   authorized_on: '2026-08-19'
   scope: Bake the cpt_prod_v4_repos_1ep checkpoint (CHECKPOINT_SAVED step 85, per-rank DCP) through coordinated
     export -> 851-tensor HF -> graft 348 vision/mtp tensors from the run's own source -> 1199 servable.
-    Graft donor resolved per-run from DERIVED_FROM.json (source /home/spark/models/Qwen3.8-27B, source_tensors
+    Graft donor resolved per-run from DERIVED_FROM.json (source $SPARK_HOME/models/Qwen3.8-27B, source_tensors
     1199), never a fixed fleet.env pin.
   content_sha:
     careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
