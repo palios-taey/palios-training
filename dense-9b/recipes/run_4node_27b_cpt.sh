@@ -282,7 +282,7 @@ fi
 
 lifecycle_call() {
   local _lifecycle_command
-  printf -v _lifecycle_command 'python3 - %q ' "$@"
+  printf -v _lifecycle_command '%q ' python3 - "$@"
   ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$MASTER" "$_lifecycle_command" \
     < "$LIFECYCLE_TOOL"
 }
@@ -340,7 +340,7 @@ launch_rank () {  # $1=host  $2=rank
        mv $LOGDIR/r$rank.log $LOGDIR/r$rank.\$(date -r $LOGDIR/r$rank.log +%Y%m%dT%H%M%S).log; \
      fi; \
      cd $RECIPE_DIR && tmux new-session -d -s cpt27b \
-       \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/r$rank.log 2>&1\"" \
+       \"$RUN_ENV ./launch_cpt_qwen36_27b_fsdp.sh $rank > $LOGDIR/r$rank.log 2>&1\""
   then
     echo "  launched rank $rank on $host"
   else
