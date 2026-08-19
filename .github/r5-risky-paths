@@ -9,7 +9,27 @@
 # an allowlist that drifts. For this repo the R5 audit is "verify-claims-against-
 # repo" (per conductor 2026-06-17), not a session-exploit repro. One glob/line.
 #
-# All shipped training artifacts:
+# All shipped training artifacts.
+#
+# MEASURED 2026-08-19: the five root-relative globs below matched ZERO of the 32
+# files PRODUCTION_MANIFEST.yml pins as production. The gate matches with shell
+# `case "$f" in $pat)` (r5-audit-gate.yml:89), which anchors at the start of the
+# path, so `trainers/*` never matches `dense-9b/trainers/train_fsdp_dense_9b.py`.
+# Nothing announced this: the gate posted "no R5 risky surface touched" and went
+# green. A PR rewriting the production trainer was waved through, while a PR that
+# only added markdown got the full two-auditor review — because `*.md` was the one
+# pattern that happened to match at any depth.
+#
+# The stated design was always "gate the whole tree rather than an allowlist that
+# drifts." These patterns are what that sentence was supposed to mean. The five
+# root-relative lines are kept because they cost nothing and would matter if those
+# directories are ever created at the root.
+dense-9b/*
+careers-qwen/*
+scripts/*
+tests/*
+schemas/*
+PRODUCTION_MANIFEST.yml
 recipes/*
 trainers/*
 configs/*
