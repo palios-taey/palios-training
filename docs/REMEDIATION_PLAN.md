@@ -228,13 +228,70 @@ nor on `1fb90d9` (a plan commit with #12/#13 unmerged). Pushing to the branch al
 the gate behaving correctly. **Both lenses re-run on the exact final merged head, once #12 and #13
 land.** There is no path where an audit of an ancestor counts.
 
+## R1a — the promotion guard, and my inverted predicate
+
+The authorization object leaves one residual: if the promotion commit omits `campaign_id` or forgets
+to delete the authorization, the authorization stays live — a standing bypass created by **omission**
+rather than design.
+
+**I specified the guard wrong.** I proposed *"CI fails when an authorization's `campaign_id` appears
+in no receipt."* That state **is the valid pre-run window** (C2/C5) — an authorization exists and the
+run has not happened yet. The check would have made the authorized launch un-mergeable, blocking the
+exact thing the authorization exists to enable. tutor-grok refused it.
+
+**The correct guards** (in `check_manifest_pins.py` or a sibling, never in the resolver, because
+launch/refuse must keep permitting the live campaign):
+
+1. **FAIL if an authorization names a capability whose status is `ADJUDICATED`.** The promotion
+   commit must delete the authorization. *This is the forgotten-promotion catch and the one that
+   matches the residual.*
+2. FAIL if `authorization.campaign_id` equals a `receipt.campaign_id` — a consumed leftover. The
+   resolver already refuses that launch (C4); CI failing the dirty manifest is the durable record.
+3. **Do NOT fail** `CANDIDATE` + authorization + no receipt. That is the legitimate pre-run state.
+
+A procedure note is not sufficient here: two-commit discipline without a checker is precisely how
+omission becomes the standing bypass.
+
+**Pattern worth recording about the author of this plan:** twice in one day I aimed a safety property
+at the wrong state and it landed on legitimate operation — first "single-use, consumed on first
+launch" (would have refused session 2 of a multi-session CPT), then this. Both were caught by the
+seat implementing them, not by me. Constraints I write should be assumed too tight until someone
+constructs the legitimate case they forbid.
+
 ## R2 — pre-run gates (none of these are optional, all have been skipped before)
 
 - **Reboot all four Sparks before the run**, and again after. Never kill-and-relaunch on dirty GPUs.
 - **Disk gate on every node** — a full disk on `.68` once truncated a checkpoint mid-save and wedged
   the node. Check before, not after.
-- **Corpus is Treasurer-sanctioned only.** tutor never assembles training data. The corpus receipt
-  (`careers-qwen/receipts/`) must name the exact `corpus_sha256` and verify identical on all four.
+- **Corpus: same six slices as the last CPT, rebuilt from the repos as they stand now** (Jesse,
+  2026-08-19 — *Treasurer is NOT involved in this run*; the standing Treasurer-sanction rule does not
+  govern it). The rebuild must emit a fresh receipt naming the new `corpus_sha256`, verified identical
+  on all four nodes. **The v3 receipt is a receipt for a PRIOR build and must not be cited as this
+  run's lineage.**
+
+- **TWO CORPUS FINDINGS, both measured, both bearing on "properly this time":**
+
+  **(a) The v3 corpus contains Taey's own generated output — R5's second failure mode, confirmed.**
+  Found by treasurer, verified independently against the receipt's own input hashes:
+
+  | slice | receipt sha | contents |
+  |---|---|---|
+  | `cpt_strategy_research_delta_v1_SCRUBBED.jsonl` | `0a81a0af…` match | generated exec-search letters ("Dear Christian & Timbers Team…") |
+  | `cpt_raw_corpus_v4.jsonl` | `fd64cb08…` match | real cover letters ("Dear Boyden Team", "Dear Hiring Team at Hearst") |
+
+  `slices_v2_probe/` and `slices_v2_probe.prescrub_20260729/` hold **byte-identical** copies of the
+  file named `…SCRUBBED.jsonl` (both `0a81a0af…`) — **that scrub never touched it.** A filename
+  asserting a property it does not have is why this survived prior review. Rebuilding from the same
+  slices carries it forward. Scale is small and the remedy is row-level, not a redesign: ~9
+  salutation-bearing rows across 1093, and some are legitimate *templates*
+  (`[Standard ATS-Safe Contact Header]`, "Dear Hiring Manager / [Specific Name]") rather than
+  generated artifacts. Separate the two before dropping anything.
+
+  **(b) The builder that produced the v3 corpus is not in git.** The receipt names
+  `builder_sha256 d7e9d7cb…`; the only committed revision (`e164ebd`) is `c6770d6d…`, and all four
+  Sparks carry `c6770d6d…` as well. Committed and deployed agree with each other and disagree with
+  the receipt. Rebuilding with the committed builder is therefore a genuinely different build — which
+  is acceptable, but it must be stated in the new receipt rather than implied to be a reproduction.
 - **Recipe is Chats-researched only.** No solo LR/optimizer choices.
 - **Deployed bytes must equal git bytes.** `check_manifest_pins.py --deployed` (W6) hashes the Spark
   copy. This is the defect the repo already paid for; it is now checkable, so check it.
