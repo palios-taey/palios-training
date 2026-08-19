@@ -124,7 +124,11 @@ done
 # that sets nothing takes whatever the previous job left. A bake leaves 1000MHz; an SFT launched
 # after one therefore ran its whole length at 33% of the 3003MHz ceiling, silently. One
 # definition lives in fleet.env; this reads it rather than carrying a seventh copy.
-CLOCK_CAP="${CLOCK_CAP:-1600}"
+# EXPORTED, not merely set. `exec` at the end of this script replaces the process and the child
+# inherits only EXPORTED variables, so a decided-but-unexported CLOCK_CAP arrived unset in the
+# launcher and its ${CLOCK_CAP:?} killed the run. The value was always decided here; it just
+# never travelled.
+export CLOCK_CAP="${CLOCK_CAP:-1600}"
 if [ "$CLOCK_CAP" != "0" ]; then
   echo "  clock: pinning graphics <= ${CLOCK_CAP}MHz on all 4 (ceiling ${SPARK_CLOCK_MAX_MHZ:-3003}MHz)"
   for h in ${SPARK_MGMT_IPS:?fleet.env did not define SPARK_MGMT_IPS}; do

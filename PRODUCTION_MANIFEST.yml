@@ -87,7 +87,7 @@ capabilities:
       # the ssh) — real defects, but they belong to bake/export/fabric and are deliberately NOT
       # bundled here. run_4node_27b_cpt.sh and the config stay at their existing pins.
       dense-9b/trainers/train_fsdp_dense_9b.py: b0c5e00ff4b5a34b11e3c4ffc34956ef5a32e9b3acd11d78280faaa5180fad66
-      dense-9b/recipes/run_4node_27b_cpt.sh: 161307ed54050423df393a8355384f7a5c490238e0da6b2db7a1d07dcd001ce7
+      dense-9b/recipes/run_4node_27b_cpt.sh: 703838027ecf030c3812f7c7e85cd657e0ad5b601fee83587510640e0808908d
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
     status: ADJUDICATED
     entrypoint: dense-9b/recipes/run_4node_27b_cpt.sh          # OPERATOR entrypoint (orchestrator)

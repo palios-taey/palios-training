@@ -18,7 +18,7 @@ ALL=("$MASTER" "${WORKERS[@]}")
 # Run knobs — bf16 + keep_low_precision_grads fit (commit c63bc2d); chunked2560 corpus.
 export CPT_DATA="${CPT_DATA:-/var/spark/isma/training/cpt_raw_corpus_train_no_superseded.chunked2560.jsonl}"
 # Collective-reduction v2 (GAIA power/thermal fix, memory-safe): micro_bsz 32/12/2 ballooned memory
-# 80->114G and HUNG. Better lever: keep micro-batches SMALL (16/4/1 = known-good 80G) and cut
+# 80->114G and HUNG. Better lever: keep micro-batches SMALL (8/4/1 = known-good 80G, see CPT_SHORT/MID/LONG_BATCH below) and cut
 # TOKEN_BUDGET_PER_STEP 262144->65536 -> ~4x FEWER micro-batches/collectives per optimizer step
 # -> lower CX-7/proxy duty per step + opt-step barriers give the fabric periodic recovery -> power
 # relief WITHOUT touching the solved 80G memory. Smaller effective batch (fine for CPT lr=1e-5).
@@ -89,7 +89,7 @@ fi
 : "${MAX_SEQ:?set MAX_SEQ — must match the sequence length the corpus was packed at}"
 # NOT required of the caller, and NOT defaulted either: these are the SOLVED hardware shape, set
 # unconditionally in ONE place. The test is Jesse's -- does it vary per run? These do not. Micro
-# batches 16/4/1 are the known-good 80G fit and TOKEN_BUDGET_PER_STEP=65536 is the power/thermal
+# batches 16/4/1 are the known-good 80G fit (8/4/1) and TOKEN_BUDGET_PER_STEP=65536 is the power/thermal
 # relief setting; both were measured, not chosen per campaign. Requiring six callers to restate
 # them would create six places to drift, which is the defect one level up from a silent default.
 # Changing them is a reviewed edit HERE, visible in the diff.
@@ -122,7 +122,15 @@ for _v in MODEL_PATH RESUME_DELTA CPT_DATA TOTAL_STEPS SESSION_LIMIT SAVE_EVERY 
   eval "printf '  %-24s %s\\n' \"$_v\" \"\${${_v}:-<unset>}\""
 done
 echo "=========================================="
-RUN_ENV="CPT_DATA=$CPT_DATA MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK CPT_PACKED=$CPT_PACKED CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
+# RUN_ENV IS BUILT PER MODE. It previously interpolated CPT_PACKED unconditionally, which under
+# `set -u` (line 12) killed every SFT run the moment CPT_PACKED was correctly left unset -- so the
+# mode-scoped requirement above bought nothing and broke run_module1_till_done.sh and
+# bake_module2.sh. Forwarding a CPT-only variable into an SFT run is the defect; requiring SFT
+# callers to set a meaningless variable would only have hidden it.
+RUN_ENV="MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK TOKEN_BUDGET_PER_STEP=$TOKEN_BUDGET_PER_STEP TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SESSION_LIMIT SAVE_EVERY=$SAVE_EVERY CHECKPOINT_DCP=$CHECKPOINT_DCP"
+if [ -z "${SFT_JSONL:-}" ] && [ -z "${SFT_DIR:-}" ]; then   # CPT-only knobs
+  RUN_ENV="$RUN_ENV CPT_DATA=$CPT_DATA CPT_PACKED=$CPT_PACKED CPT_SHORT_BATCH=$CPT_SHORT_BATCH CPT_MID_BATCH=$CPT_MID_BATCH CPT_LONG_BATCH=$CPT_LONG_BATCH"
+fi
 # TOPOLOGY MUST BE FORWARDED — the nodes do not have fleet.env.
 # This script sources fleet.env on MIRA, but fleet.env is gitignored and is NOT deployed to the
 # Sparks. launch_cpt_qwen36_27b_fsdp.sh:399 dereferences SPARK_RAIL_MASTER under `set -u`, so

@@ -19,7 +19,6 @@
 dynamic_required:
   - CLOCK_CAP
   - BATCH_SIZE_PER_RANK
-  - CPT_PACKED
   - MAX_SEQ
   - SAVE_EVERY
   - SESSION_LIMIT
@@ -27,6 +26,12 @@ dynamic_required:
 
 # DYNAMIC — required, enforced by the launcher's own gate
 #   MODEL_PATH or RESUME_DELTA: exactly one must be an explicit decision. Unset RESUME_DELTA silently trains the raw base.
+# DYNAMIC — required, but only in CPT mode. Enforced by a ${VAR:?} nested inside the CPT-mode
+#   branch. Registered separately because claiming it is unconditionally enforced would be false:
+#   an SFT run legitimately never sets it, and the launcher no longer forwards it in that mode.
+dynamic_required_when_cpt:
+  - CPT_PACKED
+
 dynamic_required_by_gate:
   - LR
   - MODEL_PATH

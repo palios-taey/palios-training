@@ -40,13 +40,30 @@ REGISTRY = "dense-9b/recipes/VARIABLES.yml"
 # regex below cannot see them. Kept explicit rather than silently excluded.
 GATE_ENFORCED = {"LR", "WARMUP_STEPS", "MODEL_PATH", "RESUME_DELTA"}
 
+# NEVER DEFAULTED, checked independently of how the registry classifies them. Jesse, 2026-08-18:
+# "There should not be defaults because that causes a lot of issues every run." Misfiling one of
+# these as `optional` and giving it back a `:-3000` default would otherwise keep this check green
+# -- tutor-grok constructed that state. Classification cannot excuse a default on these.
+NEVER_DEFAULTED = {
+    "TOTAL_STEPS", "SESSION_LIMIT", "SAVE_EVERY", "MAX_SEQ",
+    "BATCH_SIZE_PER_RANK", "CPT_PACKED", "CLOCK_CAP", "LR", "WARMUP_STEPS",
+}
+
 
 def code_reads(path):
     """Every environment variable the script actually references, comments excluded."""
     src = "\n".join(l for l in open(path).read().split("\n") if not l.strip().startswith("#"))
-    names = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]{2,})", src))
+    # {1,} not {2,}: the previous bound required THREE characters, so `LR` -- the one variable
+    # whose silent non-forwarding is already a documented incident (post_cpt_pipeline.sh records
+    # LR and WARMUP_STEPS were not forwarded until 2026-07-13) -- was invisible to this enumerator
+    # and reported as a stale registry entry. A checker that cannot see a variable cannot protect it.
+    names = set(re.findall(r"\$\{?([A-Z][A-Z0-9_]{1,})", src))
     forms = {
-        "required": set(re.findall(r"\$\{([A-Z][A-Z0-9_]+):\?", src)),
+        # TOP-LEVEL enforcement only. A `${VAR:?}` nested inside an `if` fires for SOME callers
+        # and not others, which is not what dynamic_required claims. CPT_PACKED sat inside an
+        # SFT-mode `if` and this check called the class true -- tutor-grok constructed exactly that.
+        "required": set(re.findall(r"^: \"\$\{([A-Z][A-Z0-9_]+):\?", src, re.M)),
+        "required_conditional": set(re.findall(r"^\s+: \"\$\{([A-Z][A-Z0-9_]+):\?", src, re.M)),
         "assigned": set(re.findall(r"\$\{([A-Z][A-Z0-9_]+):=", src)),
         # `${VAR:-}` with an EMPTY default is a null-check idiom, not a default value.
         # ADAFACTOR_DOSE_LOG is set unconditionally at :240 and then guarded at :241 with
@@ -96,15 +113,42 @@ def main():
             )
 
     # 3. REGISTRY -> CODE. An entry for a knob that no longer exists is rot.
+    # GATE_ENFORCED is NOT an exemption from this direction. It only means the enforcement is the
+    # launcher's own gate rather than a ${VAR:?}. The variable must still be READ by the code --
+    # tutor-grok deleted LR from a throwaway copy, left it in the registry, and this check stayed
+    # green because the old version skipped GATE_ENFORCED entirely.
     for v, cls in sorted(classified.items()):
-        if v not in names and v not in GATE_ENFORCED:
+        if v not in names:
             failures.append(
                 f"STALE ENTRY    {REGISTRY} lists {v} under '{cls}' but {LAUNCHER} never reads it."
             )
 
+    # 3b. NEVER_DEFAULTED holds regardless of class.
+    for v in sorted(NEVER_DEFAULTED):
+        if v in forms["assigned"] or v in forms["optional"]:
+            failures.append(
+                f"DEFAULT BANNED {v} carries a default in the code. It varies per run, so a default "
+                f"is a silent answer to a question nobody asked. This holds whatever the registry "
+                f"classifies it as."
+            )
+
     # 4. THE CLASS MUST BE TRUE OF THE CODE, not merely written down.
+    for v in reg.get("dynamic_required_when_cpt") or []:
+        if v not in forms["required_conditional"] and v not in forms["required"]:
+            failures.append(
+                f"CLASS UNTRUE   {v} is registered dynamic_required_when_cpt but no ${{{v}:?}} "
+                f"enforces it in the CPT branch."
+            )
     for v in reg.get("dynamic_required") or []:
-        if v not in forms["required"]:
+        if v in forms["required"]:
+            continue
+        if v in forms["required_conditional"]:
+            failures.append(
+                f"CONDITIONAL    {v} is registered dynamic_required but its ${{{v}:?}} is nested "
+                f"inside a conditional, so it fires for some callers and not others. Either enforce "
+                f"it unconditionally or register it under a mode-scoped class."
+            )
+        else:
             failures.append(
                 f"CLASS UNTRUE   {v} is registered dynamic_required but the code does not enforce "
                 f"it with ${{{v}:?...}}. A class nobody enforces is a comment."
