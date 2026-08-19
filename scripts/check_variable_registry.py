@@ -57,10 +57,27 @@ CALLER_DEFAULT_BASELINE = {
 }
 
 
+class CannotEnumerate(Exception):
+    """The invoker set could not be determined. NOT the same as an empty invoker set."""
+
+
 def invokers():
+    # A FAILED ENUMERATION IS NOT AN EMPTY ENUMERATION. git grep exits 1 when it matches
+    # nothing (a real answer) and >1 on error -- a tree with no .git exits 128. This function
+    # used to read .stdout without ever looking at .returncode, so an error produced zero
+    # callers, every caller-side default became invisible, and the checker reported the
+    # baseline as STALE. That false finding was handed to tutor-codex as blocking, and
+    # complying with it would have lowered a TRUE baseline of 6 to 0 -- freeing the debt to
+    # grow back silently. The checker was at its most confident exactly where it was blind.
+    probe = subprocess.run(["git", "grep", "-l", "run_4node_27b_cpt", "--", "*.sh"],
+                           capture_output=True, text=True)
+    if probe.returncode > 1:
+        raise CannotEnumerate(
+            f"git grep exited {probe.returncode}: {probe.stderr.strip() or '<no stderr>'}. "
+            "Refusing to report an empty caller set, which reads as 'no caller defaults'."
+        )
     out = []
-    for line in subprocess.run(["git", "grep", "-l", "run_4node_27b_cpt", "--", "*.sh"],
-                               capture_output=True, text=True).stdout.split("\n"):
+    for line in probe.stdout.split("\n"):
         if not line.strip() or line == LAUNCHER:
             continue
         src = open(line, encoding="utf-8", errors="replace").read()
@@ -199,7 +216,14 @@ def main():
     # 3d. NO INVOKER MAY SUPPLY A PER-RUN DEFAULT ON THE LAUNCHER'S BEHALF.
     dyn = never_defaulted(reg)
     found = {}
-    for inv in invokers():
+    try:
+        invoker_files = invokers()
+    except CannotEnumerate as exc:
+        # Rendered as an ABORT, never as a traceback: a crashing checker and a firing checker
+        # both exit non-zero, so the only thing that distinguishes them is what they print.
+        print(f"ABORT: cannot enumerate the launcher's invokers -- {exc}", file=sys.stderr)
+        return 1
+    for inv in invoker_files:
         isrc = "\n".join(
             l for l in open(inv, encoding="utf-8", errors="replace").read().split("\n")
             if not l.strip().startswith("#")
