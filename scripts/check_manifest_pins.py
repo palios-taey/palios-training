@@ -16,17 +16,25 @@ UNPINNED production file could be arbitrarily wrong and it still exited 0. That 
 It also never compared NODE-DEPLOYED bytes to the pin — the defect this repo already paid for,
 when production ran on node copies that were not the bytes in git.
 
-THREE CLASSES OF DEFECT ARE CHECKED, because all three were found live:
+FOUR CLASSES OF DEFECT ARE CHECKED, because all four were found live or constructed:
 
-  DRIFT      a pinned sha does not match the file's bytes, or the pinned file is absent.
-  DUPLICATE  a capability declares `content_sha` twice. YAML keeps only the last, so the first is
-             decorative text that still reads like a pin.
-  UNPINNED   a capability that names a structural path (entrypoint / trainer / per_node /
-             config / runner / qualifier / path_family_winner, plus stage entrypoints) does not
-             pin that path in content_sha. Status does not excuse this: a CANDIDATE_* capability
-             whose bytes have never run on hardware is the one that most needs its pins, not
-             the one that skips them. The file can change freely and this checker used
-             to stay green.
+  DRIFT          a pinned sha does not match the file's bytes, or the pinned file is absent.
+  DUPLICATE      a capability declares `content_sha` twice. YAML keeps only the last, so the first
+                 is decorative text that still reads like a pin.
+  UNPINNED       a capability that names a structural path (entrypoint / trainer / per_node /
+                 config / runner / qualifier / path_family_winner, plus stage entrypoints) does
+                 not pin that path in content_sha. Status does not excuse this: a CANDIDATE_*
+                 capability whose bytes have never run on hardware is the one that most needs
+                 its pins, not the one that skips them. The file can change freely and this
+                 checker used to stay green.
+  AUTHORIZATION  a leftover authorization object that would become a standing bypass.
+                 (1) an authorization names a capability whose status is ADJUDICATED — the
+                 promotion commit must delete the authorization; omitting that is the residual.
+                 (2) an authorization.campaign_id already appears on a manifest receipt — the
+                 resolver already REFUSES that launch; CI failing the dirty manifest is the
+                 durable record.
+                 Do NOT fail CANDIDATE + authorization + no receipt: that is the valid pre-run
+                 window. Failing it makes the authorized launch un-mergeable.
 
 `--deployed` additionally hashes the copy on each Spark at `$SPARK_HOME/palios-training/<path>`
 and refuses on mismatch. CI cannot SSH, so it does not pass `--deployed`. `scripts/taey-train`
@@ -178,6 +186,72 @@ def pin_blocks(body):
         yield "candidate_update.content_sha", cu.get("content_sha") or {}
 
 
+def authorizations_in(doc):
+    """Every authorization object. Absent / malformed entries are skipped, not guessed."""
+    found = []
+    raw = doc.get("authorization")
+    if isinstance(raw, dict):
+        found.append(raw)
+    for item in doc.get("authorizations") or []:
+        if isinstance(item, dict):
+            found.append(item)
+    return found
+
+
+def campaign_receipt_ids(doc):
+    """campaign_id values recorded as receipts in this manifest. Nothing else.
+
+    Manifest-only. A receipt consumes a campaign only when it carries campaign_id.
+    Historical receipt blocks without that field are not consumption. Disk files
+    under careers-qwen/receipts/ are not consulted.
+    """
+    ids = set()
+    for item in doc.get("campaign_receipts") or []:
+        if isinstance(item, dict) and item.get("campaign_id"):
+            ids.add(str(item["campaign_id"]))
+    for body in (doc.get("capabilities") or {}).values():
+        if not isinstance(body, dict):
+            continue
+        rec = body.get("receipt")
+        if isinstance(rec, dict) and rec.get("campaign_id"):
+            ids.add(str(rec["campaign_id"]))
+        for rec in body.get("receipts") or []:
+            if isinstance(rec, dict) and rec.get("campaign_id"):
+                ids.add(str(rec["campaign_id"]))
+    return ids
+
+
+def authorization_failures(doc):
+    """Promotion-side leftover authorization. Empty = none. Never guesses C5.
+
+    (1) authorization names a capability whose status is ADJUDICATED.
+    (2) authorization.campaign_id already appears on a manifest receipt.
+    CANDIDATE + authorization + no receipt is the valid pre-run window — not a failure.
+    """
+    failures = []
+    capabilities = doc.get("capabilities") or {}
+    spent = campaign_receipt_ids(doc)
+    for auth in authorizations_in(doc):
+        cap = auth.get("capability")
+        body = capabilities.get(cap) if cap else None
+        status = body.get("status", "") if isinstance(body, dict) else ""
+        if cap and isinstance(body, dict) and status == "ADJUDICATED":
+            failures.append(
+                f"AUTHORIZATION  {cap}: status is ADJUDICATED and an authorization still names it. "
+                f"The promotion commit must delete the authorization. Leaving it is a standing "
+                f"bypass created by omission — C4 cannot fire if campaign_id is also omitted."
+            )
+        campaign_id = auth.get("campaign_id")
+        if campaign_id and str(campaign_id) in spent:
+            named = cap or "?"
+            failures.append(
+                f"AUTHORIZATION  {named}: campaign_id {campaign_id!r} already has a receipt in "
+                f"the manifest. That authorization is consumed. The resolver already REFUSES "
+                f"this launch; CI failing the dirty manifest is the durable record."
+            )
+    return failures
+
+
 def check(manifest_path, *, deployed=False, get_bytes=None, hash_remote=None):
     """Return a list of error strings. Empty = pass. Never raises on a finding.
 
@@ -282,6 +356,8 @@ def check(manifest_path, *, deployed=False, get_bytes=None, hash_remote=None):
                     f"the pin checker must too."
                 )
 
+    failures.extend(authorization_failures(doc))
+
     if deployed:
         fleet_path = os.environ.get("FLEET_ENV", "fleet.env")
         if not os.path.isfile(fleet_path):
@@ -355,7 +431,8 @@ def report(failures, checked, n_caps, n_contested, manifest):
     if not failures:
         print(
             "clean: every production file a capability names is pinned, candidate pins "
-            "correspond to a real revision, and the pins match"
+            "correspond to a real revision, the pins match, and no leftover authorization "
+            "survives promotion or consumption"
         )
         return 0
     print()
@@ -555,6 +632,118 @@ def selftest() -> int:
         errs, text = captured(lambda: check(manifest, deployed=True, hash_remote=bad_remote)[0])
         expect_fail("deployed bytes disagree with pin", errs or [], "DEPLOYED", text or "")
         os.environ.pop("FLEET_ENV", None)
+
+        # A1. Forgotten promotion: ADJUDICATED + authorization naming it. No structural
+        # path so UNPINNED does not fire and the only class is AUTHORIZATION.
+        a1 = os.path.join(td, "auth_adjudicated.yml")
+        open(a1, "w").write(
+            "capabilities:\n"
+            "  cpt_27b_4node:\n"
+            "    status: ADJUDICATED\n"
+            "authorization:\n"
+            "  capability: cpt_27b_4node\n"
+            "  campaign_id: phase2-qwen38\n"
+            "  authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a1)[0])
+        expect_fail("A1 ADJUDICATED leftover authorization", errs or [], "AUTHORIZATION", text or "")
+        if errs and "cpt_27b_4node" not in "\n".join(errs):
+            print("SELFTEST FAIL: A1 did not name the capability")
+            failures += 1
+
+        # A2 / (3). Valid pre-run window: CANDIDATE + authorization + no receipt. PASS.
+        # The inverted predicate ("auth whose campaign_id appears in no receipt") would fail this.
+        a2 = os.path.join(td, "auth_candidate.yml")
+        open(a2, "w").write(
+            "capabilities:\n"
+            "  cpt_27b_4node:\n"
+            "    status: CANDIDATE_PENDING_PRODUCTION_RUN\n"
+            "authorization:\n"
+            "  capability: cpt_27b_4node\n"
+            "  campaign_id: phase2-qwen38\n"
+            "  authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a2)[0])
+        expect_pass("A2 CANDIDATE + authorization + no receipt is the live window", errs, text or "")
+
+        # A3. Guard (2): CANDIDATE + authorization + receipt.campaign_id. Consumed leftover.
+        a3 = os.path.join(td, "auth_spent.yml")
+        open(a3, "w").write(
+            "capabilities:\n"
+            "  cpt_27b_4node:\n"
+            "    status: CANDIDATE_PENDING_PRODUCTION_RUN\n"
+            "    receipt:\n"
+            "      campaign_id: phase2-qwen38\n"
+            "authorization:\n"
+            "  capability: cpt_27b_4node\n"
+            "  campaign_id: phase2-qwen38\n"
+            "  authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a3)[0])
+        expect_fail("A3 consumed authorization still present", errs or [], "AUTHORIZATION", text or "")
+        if errs and "phase2-qwen38" not in "\n".join(errs):
+            print("SELFTEST FAIL: A3 did not name the campaign_id")
+            failures += 1
+
+        # A4. Historical receipt WITHOUT campaign_id is not consumption. Same as resolver C5.
+        a4 = os.path.join(td, "auth_leftover_receipt.yml")
+        open(a4, "w").write(
+            "capabilities:\n"
+            "  cpt_27b_4node:\n"
+            "    status: CANDIDATE_PENDING_PRODUCTION_RUN\n"
+            "    receipt:\n"
+            "      date: '2026-07-30'\n"
+            "      verified_outcome: old narrative\n"
+            "authorization:\n"
+            "  capability: cpt_27b_4node\n"
+            "  campaign_id: phase2-qwen38\n"
+            "  authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a4)[0])
+        expect_pass("A4 leftover receipt without campaign_id is not consumption", errs, text or "")
+
+        # A5. Authorization names a CANDIDATE; a different cap is ADJUDICATED. (1) does not fire.
+        a5 = os.path.join(td, "auth_foreign.yml")
+        open(a5, "w").write(
+            "capabilities:\n"
+            "  corpus_pack:\n"
+            "    status: ADJUDICATED\n"
+            "  bake_export:\n"
+            "    status: CANDIDATE_PENDING_PRODUCTION_RUN\n"
+            "authorization:\n"
+            "  capability: bake_export\n"
+            "  campaign_id: bake-1\n"
+            "  authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a5)[0])
+        expect_pass("A5 ADJUDICATED ignores authorization that names a different capability", errs, text or "")
+
+        # A6. Plural authorizations: same as singular for (1).
+        a6 = os.path.join(td, "auths_plural.yml")
+        open(a6, "w").write(
+            "capabilities:\n"
+            "  cpt_27b_4node:\n"
+            "    status: ADJUDICATED\n"
+            "authorizations:\n"
+            "  - capability: cpt_27b_4node\n"
+            "    campaign_id: phase2-qwen38\n"
+            "    authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a6)[0])
+        expect_fail("A6 authorizations list leftover on ADJUDICATED", errs or [], "AUTHORIZATION", text or "")
+
+        # A7. Residual exactly: ADJUDICATED + authorization, no campaign_id on anything. (1) still fires.
+        a7 = os.path.join(td, "auth_no_campaign.yml")
+        open(a7, "w").write(
+            "capabilities:\n"
+            "  cpt_27b_4node:\n"
+            "    status: ADJUDICATED\n"
+            "authorization:\n"
+            "  capability: cpt_27b_4node\n"
+            "  authorized_by: Jesse\n"
+        )
+        errs, text = captured(lambda: check(a7)[0])
+        expect_fail("A7 forgotten promotion omitting campaign_id still FAIL", errs or [], "AUTHORIZATION", text or "")
 
     if failures:
         print(f"SELFTEST: {failures} control(s) failed — the gate cannot be trusted")
