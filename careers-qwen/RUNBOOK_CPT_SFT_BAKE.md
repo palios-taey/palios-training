@@ -77,6 +77,15 @@ python3 careers-qwen/corpus_manifest.py verify --corpus <corpus>.jsonl --manifes
 scripts/taey-train cpt_27b_4node [VAR=val ...]     # the ONE door — verifies content shas
 ```
 
+The manifest declares `lifecycle: true` only for `cpt_27b_4node` and `bake_export`; the launcher
+never infers lifecycle ownership from a name or argument. Those runs append every transition to
+their `lifecycle_events.jsonl` journal under the selected output directory. `taey-train` returns
+non-zero after an intermediate fragmentation exit or `CHECKPOINT_SAVED`; that is an honest
+incomplete lifecycle, not a failed checkpoint. Exit 0 for a lifecycle-declaring operation is
+reserved for `bake_export` after the exact sealed artifact has been verified on Thor and
+`THOR_DELIVERED` is appended. Capabilities without the declaration return their entrypoint status
+and do not require Spark topology or a lifecycle journal.
+
 **AN UNRESOLVED TENSION, STATED RATHER THAN PAPERED OVER (2026-08-18).** `run_till_done_v3.sh`
 exists because it sets the eight variables below correctly, and that is real value — the launcher
 hard-aborts on ZERO variables and silently ASSIGNS legacy values for 13 of them
@@ -110,7 +119,7 @@ means final-only — **no mid-run saves, they break things** (Jesse, standing).
 - `[SR-DELTA] mean|dW| = X ULP` — **this is the oracle, not the loss.** `<0.5u` = FAIL-LOW.
   Loss wobbling 2.4→1.0→2.8 is batch noise on a model that is not learning.
 
-## 3. BAKE — production is Artifact B, off the Sparks
+## 3. BAKE — Artifact B assembled and baked node-local on one Spark
 
 ```bash
 scripts/taey-train bake_export DCP_DIR=<completed-run>
@@ -130,14 +139,18 @@ adjudicated receipt (cpt_v7_eps1fix, checkpoint-148) is one of those. **A run th
 one that exposes it.** Fixed: `final/` wins when present, its step read from its own
 `trainer_meta.pt`, and the pipeline aborts rather than defaulting a completed-step it cannot read.
 
-`fleet.env` supplies the controller artifact store, off-cluster conversion host/root, immutable
-conversion-image digest, and 1199-tensor serving donor. The wrapper refuses if any are absent.
+`fleet.env` supplies the Thor delivery host/root and immutable conversion-image digest. Durable
+controller storage is optional and is used only after Thor delivery. The 1199-tensor donor is never
+read from `fleet.env`: the wrapper resolves it from the run's captured `TRAIN_BASE` (1199 uses
+itself; 851 must name its source in `DERIVED_FROM.json`; any other shape or missing sidecar aborts).
 It verifies the packed-corpus input manifest and checkpoint, reboots all four nodes and proves
 changed boot IDs plus zero trainers, deploys the export runtime byte-exact, then calls canonical
 `EXPORT_DCP` in `bake_27b.sh`.
-`artifact_b_sync.sh` moves the manifest-verified portable checkpoint off the Sparks;
-`model_snapshot_sync.sh` makes a source-hash-verified copy of the exact 851-tensor training base.
-The Spark export is retired as soon as its controller copy verifies.
+`artifact_b_sync.sh` verifies every shard against its rank manifest and assembles Artifact B on
+rank 0 without staging it on controller disk. Conversion, weight-diff, graft, provenance and the
+1199/851 gates run node-local in the pinned container. The completed servable artifact is sealed
+with a full-content manifest, pushed Spark→Thor directly and verified there before the lifecycle
+records `THOR_DELIVERED`. Only then is durable storage populated and Spark transients retired.
 
 Offline conversion runs in the pinned torch 2.10 / transformers 5.3 container. The wrapper writes
 the measured diff into the candidate and stops before graft, handoff, or SFT unless
@@ -192,12 +205,10 @@ critical path.
 Routing a 52G artifact through the controller store costs roughly an hour and a half of round trip to
 move bytes that never needed to go there. The direct path is ~8 minutes.
 
-**WHY THE PIPELINE STILL ROUTES THROUGH THE CONTROLLER, stated plainly rather than left to be
-rediscovered.** `post_cpt_pipeline.sh` requires `ARTIFACT_STORE` (`:20`) and derives both
-`LOCAL_ARTIFACT` and `LOCAL_BASE` under it (`:97-98`), so every artifact lands on controller storage
-before conversion. That design predates the Thors being the destination and treats the controller as
-the hub. It is not wrong about durability — it is wrong about ORDER. Changing it is a production edit
-to a GOLDEN_PATH surface and is tracked as such, not hand-patched mid-run.
+`post_cpt_pipeline.sh` now enforces this order mechanically. `ARTIFACT_STORE` may be absent; when it
+is present the copy is explicitly stage 8, after the serving-host content gate and
+`THOR_DELIVERED`. The export-skip predicate executes the per-rank manifest/hash verifier, so
+`.metadata` plus four READY markers cannot conceal a missing shard.
 
 **MEASURE YOUR OWN PROCESSES BEFORE BLAMING THE NETWORK.** During this transfer the rate fell from
 112 MB/s to 7.5 MB/s and the ETA jumped from 4 minutes to 90. The cause was not the fabric or the

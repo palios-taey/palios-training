@@ -20,6 +20,10 @@ Neither side can drift without the other noticing. A new knob added to the launc
 someone classifies it, which is precisely "do not lose track of them". A registry entry left behind
 by a deleted knob fails too, so the file cannot rot into decoration.
 
+Variables outside the launcher live under an `external` mapping keyed by owning file. They are
+checked against that file and may not control a conditional before or containing manifest/content
+pin verification. A diagnostic flag is not permission to bypass the production gate.
+
 IT ALSO CHECKS THE CLASS IS TRUE, not merely present:
     dynamic_required          must be enforced by `${VAR:?}` in the code
     invariant                 must be an unconditional assignment, never `:=` or `:-`
@@ -53,7 +57,6 @@ LAUNCHER = "dense-9b/recipes/run_4node_27b_cpt.sh"
 # forgotten, which is the only property that matters for work deferred at 3am.
 CALLER_DEFAULT_BASELINE = {
     "careers-qwen/launch_stage2_sft.sh": 6,
-    "careers-qwen/run_stage2_sft_till_done.sh": 3,
 }
 
 
@@ -81,7 +84,7 @@ def invokers():
         if not line.strip() or line == LAUNCHER:
             continue
         src = open(line, encoding="utf-8", errors="replace").read()
-        if re.search(r"^[^#]*(bash|sh|exec|\.)\s+[^#]*run_4node_27b_cpt\.sh", src, re.M):
+        if re.search(r"^[^\n#]*(bash|sh|exec|\.)\s+[^\n#]*run_4node_27b_cpt\.sh", src, re.M):
             out.append(line)
     return sorted(out)
 REGISTRY = "dense-9b/recipes/VARIABLES.yml"
@@ -104,6 +107,17 @@ def never_defaulted(reg):
         if cls.startswith("dynamic"):
             out |= set(items or [])
     return out
+
+
+def caller_never_defaulted(reg, source):
+    protected = never_defaulted(reg)
+    # The launcher is intentionally multi-mode. CPT-only requirements are meaningless to a
+    # caller that explicitly supplies an SFT dataset, and the two existing SFT wrappers have
+    # their own frozen default debt. Treating OUTPUT_DIR's SFT output convention as a new CPT
+    # default is a domain error in the checker, not new production debt.
+    if re.search(r"\bSFT_(?:DIR|JSONL)\s*=", source):
+        protected -= set(reg.get("dynamic_required_when_cpt") or [])
+    return protected
 
 
 def code_reads(path):
@@ -135,6 +149,81 @@ def code_reads(path):
     return names, forms
 
 
+PIN_GATE = re.compile(
+    r"\b(?:MANIFEST|RESOLVER|RESOLVED|SHA_[A-Z0-9_]*|sha256sum)\b|CONTENT DRIFT"
+)
+
+
+def conditional_headers(source):
+    """Return shell if/elif condition headers and their source lines."""
+    headers = []
+    active = None
+    for line_no, raw in enumerate(source.splitlines(), 1):
+        code = raw.split("#", 1)[0]
+        if active is not None:
+            active["condition"].append(code)
+            if re.search(r"\bthen\b", code):
+                headers.append(active)
+                active = None
+            continue
+        if re.match(r"^\s*(?:if|elif)\b", code):
+            active = {
+                "start": line_no,
+                "condition": [code],
+            }
+            if re.search(r"\bthen\b", code):
+                headers.append(active)
+                active = None
+    return headers
+
+
+def external_failures(external):
+    failures = []
+    if not isinstance(external, dict):
+        return ["EXTERNAL SCHEMA external must map owning file paths to variable lists."]
+    for owner, variables in sorted(external.items()):
+        normalized = os.path.normpath(owner)
+        if os.path.isabs(owner) or normalized == ".." or normalized.startswith("../"):
+            failures.append(f"EXTERNAL OWNER {owner!r} is not a repo-relative path.")
+            continue
+        if not isinstance(variables, list) or not all(isinstance(v, str) for v in variables):
+            failures.append(f"EXTERNAL SCHEMA {owner} must map to a list of variable names.")
+            continue
+        if not os.path.isfile(owner):
+            failures.append(f"EXTERNAL OWNER {owner} is absent; its registry entries cannot be verified.")
+            continue
+        source = open(owner, encoding="utf-8", errors="replace").read()
+        names, _ = code_reads(owner)
+        executable = "\n".join(
+            "" if line.strip().startswith("#") else line.split("#", 1)[0]
+            for line in source.splitlines()
+        )
+        gate_lines = [
+            line_no for line_no, line in enumerate(executable.splitlines(), 1)
+            if PIN_GATE.search(line)
+        ]
+        final_gate_line = max(gate_lines, default=0)
+        conditions = conditional_headers(source)
+        for variable in variables or []:
+            if variable not in names:
+                failures.append(
+                    f"EXTERNAL STALE {owner} does not read registered variable {variable}."
+                )
+                continue
+            variable_ref = re.compile(rf"\$\{{?{re.escape(variable)}\b")
+            for condition_header in conditions:
+                condition = "\n".join(condition_header["condition"])
+                if not variable_ref.search(condition):
+                    continue
+                if condition_header["start"] <= final_gate_line:
+                    failures.append(
+                        f"EXTERNAL BYPASS {owner}:{condition_header['start']} {variable} controls a conditional "
+                        f"before or containing the final manifest/content pin gate at line "
+                        f"{final_gate_line}. External flags may diagnose a gate, never skip it."
+                    )
+    return failures
+
+
 def main():
     for f in (LAUNCHER, REGISTRY):
         if not os.path.isfile(f):
@@ -147,13 +236,15 @@ def main():
         return 1
 
     reg = yaml.safe_load(open(REGISTRY)) or {}
+    external = reg.get("external") or {}
+    launcher_reg = {cls: items for cls, items in reg.items() if cls != "external"}
     classified = {}
-    for cls, items in reg.items():
+    for cls, items in launcher_reg.items():
         for v in (items or []):
             classified[v] = cls
 
     names, forms = code_reads(LAUNCHER)
-    failures = []
+    failures = external_failures(external)
 
     # 1. THE ASSIGN SYNTAX MUST NOT EXIST. It is the original defect.
     if forms["assigned"]:
@@ -183,7 +274,7 @@ def main():
             )
 
     # 3b. A variable that varies per run must not carry a default, derived from its class.
-    for v in sorted(never_defaulted(reg)):
+    for v in sorted(never_defaulted(launcher_reg)):
         if v in forms["assigned"] or v in forms["optional"]:
             failures.append(
                 f"DEFAULT BANNED {v} carries a default in the code. It varies per run, so a default "
@@ -214,7 +305,6 @@ def main():
             )
 
     # 3d. NO INVOKER MAY SUPPLY A PER-RUN DEFAULT ON THE LAUNCHER'S BEHALF.
-    dyn = never_defaulted(reg)
     found = {}
     try:
         invoker_files = invokers()
@@ -228,8 +318,9 @@ def main():
             l for l in open(inv, encoding="utf-8", errors="replace").read().split("\n")
             if not l.strip().startswith("#")
         )
+        protected = caller_never_defaulted(launcher_reg, isrc)
         for v in sorted(set(re.findall(r"\$\{([A-Z][A-Z0-9_]+):?-[^}\s]", isrc))):
-            if v in dyn:
+            if v in protected:
                 found.setdefault(inv, set()).add(v)
     for inv, vs in sorted(found.items()):
         allowed = CALLER_DEFAULT_BASELINE.get(inv, 0)
@@ -293,12 +384,14 @@ def main():
                 f"invariant is set unconditionally so a caller cannot silently get another value."
             )
 
-    total = sum(len(v or []) for v in reg.values())
+    external_total = sum(len(variables or []) for variables in external.values())
+    total = sum(len(v or []) for v in launcher_reg.values()) + external_total
     print(f"launcher: {LAUNCHER}")
     print(f"registry: {REGISTRY}   variables classified: {total}   code reads: {len(names)}")
     print(f"  dynamic_required enforced by ${{VAR:?}}: {len(forms['required'])}")
     print(f"  invariants set unconditionally         : {len(forms['unconditional'])}")
     print(f"  ${{VAR:=}} assign-defaults remaining      : {len(forms['assigned'])}")
+    print(f"  external variables verified              : {external_total}")
 
     if not failures:
         print("clean: the registry describes the launcher, and every class is true of the code")

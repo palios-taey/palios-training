@@ -32,6 +32,7 @@ dynamic_required:
 dynamic_required_when_cpt:
   - CPT_DATA
   - CPT_PACKED
+  - OUTPUT_DIR
 
 dynamic_required_by_gate:
   - LR
@@ -98,7 +99,6 @@ optional:
   - NSYS_OUT_DIR
   - NSYS_PROFILE_ALL_RANKS
   - NSYS_PROFILE_STEP
-  - OUTPUT_DIR
   - QUARANTINE_DIGESTS
   - REQUIRE_LORA_INIT_PARITY
   - RESUME_MODEL_ONLY
@@ -117,11 +117,29 @@ local_shell_not_config:
   - GEMM_FAILURES
   - GEMM_MEDIAN
   - GEMM_TFLOPS
+  - CPT_LIFECYCLE
+  - EXPECTED_FRAGMENTATION
+  - INITIAL_SESSION
+  - LAST_STATE
+  - LAST_EVENT
+  - LIFECYCLE_LOG
+  - LIFECYCLE_TOOL
   - LOGDIR
   - MASTER
+  - OBSERVED_CHECKPOINT
+  - OBSERVED_STEP
+  - PREVIOUS_STEP
   - RECIPE_DIR
+  - RUN_TAG
   - RUN_ENV
   - SORTED_TFLOPS
   - STEP_SEEN
   - WORKERS
 
+# EXTERNAL — variables owned by a file other than the launcher
+#   The owning path is part of the class. The checker verifies the file reads every listed name
+#   and refuses any external-mode conditional that can precede or contain a manifest/content pin
+#   gate. These flags may have inert diagnostic defaults; they are not dynamic campaign inputs.
+external:
+  scripts/taey-train:
+    - TAEY_TRAIN_CHECK_ONLY
