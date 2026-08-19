@@ -443,9 +443,15 @@ historical_lines:
 # run, the promotion commit records the receipt AND DELETES THIS BLOCK — check_manifest_pins.py
 # fails if an authorization survives promotion (A1/A7), so a forgotten cleanup is caught by CI
 # rather than by whoever launches next.
+# SUPERSEDES cpt_prod_v4_repos_1ep, same day. That campaign trained 85/85 but could not be baked:
+# run_config.env had four consumers and zero producers, so post_cpt_pipeline.sh:42 aborted and the
+# checkpoint is preserved and quarantined. a3dd59cc gives the trainer a writer for it, which changed
+# the trainer bytes and correctly VOIDED the v4 authorization — the resolver refused with "the
+# authorization does not describe this capability". This object re-authorizes the SAME campaign on
+# the bytes that can actually finish it. v4 produced no receipt and will never be promoted.
 authorization:
   capability: cpt_27b_4node
-  campaign_id: cpt_prod_v4_repos_1ep
+  campaign_id: cpt_prod_v5_repos_1ep
   authorized_by: Jesse
   authorized_on: 2026-08-19
   scope: >
@@ -456,7 +462,7 @@ authorization:
   content_sha:
     dense-9b/recipes/run_4node_27b_cpt.sh: f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b
     dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1
-    dense-9b/trainers/train_fsdp_dense_9b.py: b0c5e00ff4b5a34b11e3c4ffc34956ef5a32e9b3acd11d78280faaa5180fad66
+    dense-9b/trainers/train_fsdp_dense_9b.py: c7bd257d457cded5a2f1feaf70fd59beef883f81f57cd9b2b7081e8e97515dec
     dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
 
 # SECOND AUTHORIZATION — the bake half of the same cycle. Separate object by design: the resolver
