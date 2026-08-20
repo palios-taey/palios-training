@@ -333,7 +333,6 @@ def main():
             out.write(json.dumps({"input_ids": buf + pad}) + "\n")
             blocks += 1
             buf = []
-    os.replace(tmp, args.out)
     dropped = 0
     total_tokens = blocks * SEQ
     print(f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} "
@@ -341,39 +340,54 @@ def main():
           f"(final block = {tail_kept} corpus-tail tok + {SEQ - tail_kept} cycle-pad)" if tail_kept
           else f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} tokens={total_tokens} tail_dropped=0")
 
-    # SHRINKAGE GATE. Every input's sha was verified above — but a corpus can be perfectly
-    # sha-clean and still be missing whole inputs, because the check only validates what you
-    # DECIDED to include. On 2026-07-28 two registered slices were dropped on a bad "they exist
-    # nowhere" finding and the pack produced 2,511 blocks against the previous production
-    # corpus's 3,686. Every per-input check passed. Nothing compared the total.
-    prev = os.environ.get("PREV_CORPUS", "")
-    if prev and os.path.exists(prev):
-        prev_blocks = sum(1 for _ in open(prev, errors="replace"))
-        if blocks < prev_blocks * 0.95:
-            print(f"[pack] *** SHRINKAGE: {blocks} blocks vs previous corpus {prev_blocks} "
-                  f"({blocks/prev_blocks:.0%}). A smaller corpus needs an explicit reason. ***")
-            print(f"[pack] set ALLOW_SHRINK=1 with a recorded justification to proceed.")
-            if os.environ.get("ALLOW_SHRINK", "") != "1":
-                sys.exit("ABORT: corpus shrank against PREV_CORPUS and ALLOW_SHRINK is not set.")
-        else:
-            print(f"[pack] shrinkage gate OK: {blocks} vs previous {prev_blocks} "
-                  f"({blocks/prev_blocks:.0%})")
-    else:
-        print("[pack] shrinkage gate SKIPPED (set PREV_CORPUS to the last production corpus)")
+    # Refusal gates run against tmp. Promoting first left a refused pack at --out.
+    promoted = False
     try:
-        content_gate = verify_packed_content(args.out, tok)
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
-    corpus_sha = sha256_file(args.out)
-    manifest_path = args.manifest or args.out + ".manifest.json"
-    if os.path.abspath(manifest_path) == os.path.abspath(args.out):
-        sys.exit("ABORT: corpus and manifest paths must differ")
+        with open(tmp) as handle:
+            tmp_rows = sum(1 for _ in handle)
+        if tmp_rows != blocks:
+            sys.exit(f"ABORT: packed tmp rows={tmp_rows} != emitted blocks={blocks}")
+
+        # SHRINKAGE GATE. Every input's sha was verified above — but a corpus can be perfectly
+        # sha-clean and still be missing whole inputs, because the check only validates what you
+        # DECIDED to include. On 2026-07-28 two registered slices were dropped on a bad "they exist
+        # nowhere" finding and the pack produced 2,511 blocks against the previous production
+        # corpus's 3,686. Every per-input check passed. Nothing compared the total.
+        prev = os.environ.get("PREV_CORPUS", "")
+        if prev and os.path.exists(prev):
+            prev_blocks = sum(1 for _ in open(prev, errors="replace"))
+            if tmp_rows < prev_blocks * 0.95:
+                print(f"[pack] *** SHRINKAGE: {tmp_rows} blocks vs previous corpus {prev_blocks} "
+                      f"({tmp_rows/prev_blocks:.0%}). A smaller corpus needs an explicit reason. ***")
+                print(f"[pack] set ALLOW_SHRINK=1 with a recorded justification to proceed.")
+                if os.environ.get("ALLOW_SHRINK", "") != "1":
+                    sys.exit("ABORT: corpus shrank against PREV_CORPUS and ALLOW_SHRINK is not set.")
+            else:
+                print(f"[pack] shrinkage gate OK: {tmp_rows} vs previous {prev_blocks} "
+                      f"({tmp_rows/prev_blocks:.0%})")
+        else:
+            print("[pack] shrinkage gate SKIPPED (set PREV_CORPUS to the last production corpus)")
+        try:
+            content_gate = verify_packed_content(tmp, tok)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
+        corpus_sha = sha256_file(tmp)
+        corpus_bytes = os.path.getsize(tmp)
+        manifest_path = args.manifest or args.out + ".manifest.json"
+        if os.path.abspath(manifest_path) == os.path.abspath(args.out):
+            sys.exit("ABORT: corpus and manifest paths must differ")
+        os.replace(tmp, args.out)
+        promoted = True
+    finally:
+        if not promoted and os.path.exists(tmp):
+            os.unlink(tmp)
+
     write_manifest(manifest_path, {
         "schema": SCHEMA,
         "corpus_filename": os.path.basename(args.out),
         "corpus_sha256": corpus_sha,
-        "corpus_bytes": os.path.getsize(args.out),
-        "corpus_rows": blocks,
+        "corpus_bytes": corpus_bytes,
+        "corpus_rows": tmp_rows,
         "sequence_length": SEQ,
         "source_documents": stream_docs,
         "tail_corpus_tokens": tail_kept,
