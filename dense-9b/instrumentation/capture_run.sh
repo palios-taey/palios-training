@@ -9,11 +9,33 @@
 #
 # Run from Mira. Nodes: .68(rank0/master) .80 .12 .19. Usage: capture_run.sh
 set -u
+
+# Authorization must dominate every remote, reboot, deploy, watchdog, capture, and log side effect.
+_GATE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TAEY_TRAIN_CHECK_ONLY=1 "$_GATE_ROOT/scripts/taey-train" cpt_27b_4node || exit 1
+unset _GATE_ROOT
+
 MIRA_IP=${ORCHESTRATOR_IP}
 NODES=($SPARK_MGMT_IPS)
 REPO=${REPO_ROOT}
 INSTR=$REPO/dense-9b/instrumentation
 S() { ssh -o ConnectTimeout=6 -o ControlMaster=no -o ControlPath=none spark@"$1" "${@:2}" 2>&1 | grep -vE "ControlSocket|mux_client"; }
+
+# THIS HARNESS LAUNCHES A REAL TRAINING RUN. Until 2026-08-18 it passed NO schedule, so
+# run_4node_27b_cpt.sh assigned its legacy defaults and this instrumented capture silently
+# profiled a campaign nobody asked for. Decide the schedule before any production mutation.
+_cap_missing=""
+for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZE_PER_RANK CPT_PACKED CLOCK_CAP CPT_DATA OUTPUT_DIR; do
+  eval "[ -n \"\${${_v}+x}\" ]" || _cap_missing="$_cap_missing $_v"
+done
+if [ -n "$_cap_missing" ]; then
+  echo "ABORT: capture_run.sh launches a REAL training run and was given no schedule:$_cap_missing" >&2
+  echo "  Export them before running this harness, e.g." >&2
+  echo "    TOTAL_STEPS=218 SESSION_LIMIT=73 SAVE_EVERY=73 MAX_SEQ=8192 LR=1e-5 \\" >&2
+  echo "    WARMUP_STEPS=15 BATCH_SIZE_PER_RANK=1 CPT_PACKED=0 \\" >&2
+  echo "    MODEL_PATH=<base> bash dense-9b/instrumentation/capture_run.sh" >&2
+  exit 1
+fi
 
 echo "=== [1/5] REBOOT all 4 (Jesse discipline: fresh GPUs every run) ==="
 for n in "${NODES[@]}"; do S "$n" 'sudo reboot' >/dev/null 2>&1 & done
@@ -51,29 +73,15 @@ done
 echo "  clock cap: graphics <= ${CLOCK_CAP_MAX}MHz (thermal fix)"
 
 echo "=== [4/5] START Mira-side capture (UPS + netconsole) ==="
-pkill -f mira_capture.sh 2>/dev/null; pkill -f 'UDP-RECV:6666' 2>/dev/null; sleep 1
+for pid in $(ps -eo pid=,args= | awk '/mira_capture[.]sh|UDP-RECV:6666/ {print $1}'); do
+  kill "$pid" 2>/dev/null
+done
+sleep 1
 nohup bash "$INSTR/mira_capture.sh" >/tmp/mira_capture.out 2>&1 &
 sleep 3
 CAPDIR=$(cat /tmp/mira_capture_dir 2>/dev/null)
 echo "  capture dir: $CAPDIR"
 echo "  UPS sample: $(tail -1 "$CAPDIR/ups.csv" 2>/dev/null)"
-
-# THIS HARNESS LAUNCHES A REAL TRAINING RUN. Until 2026-08-18 it passed NO schedule, so
-# run_4node_27b_cpt.sh:62-64 assigned its legacy defaults and this instrumented capture silently
-# profiled a 3000-step / 2560-seq campaign nobody asked for. The launcher now refuses that, which
-# is correct; the fix belongs HERE, at the caller that failed to decide.
-_cap_missing=""
-for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZE_PER_RANK CPT_PACKED CLOCK_CAP CPT_DATA OUTPUT_DIR; do
-  eval "[ -n \"\${${_v}+x}\" ]" || _cap_missing="$_cap_missing $_v"
-done
-if [ -n "$_cap_missing" ]; then
-  echo "ABORT: capture_run.sh launches a REAL training run and was given no schedule:$_cap_missing" >&2
-  echo "  Export them before running this harness, e.g." >&2
-  echo "    TOTAL_STEPS=218 SESSION_LIMIT=73 SAVE_EVERY=73 MAX_SEQ=8192 LR=1e-5 \\" >&2
-  echo "    WARMUP_STEPS=15 BATCH_SIZE_PER_RANK=1 CPT_PACKED=0 \\" >&2
-  echo "    MODEL_PATH=<base> bash dense-9b/instrumentation/capture_run.sh" >&2
-  exit 1
-fi
 
 echo "=== [5/5] LAUNCH 27B training (instrumented) via one door ==="
 echo "  -> $REPO/scripts/taey-train cpt_27b_4node [schedule VARs]"
@@ -88,5 +96,5 @@ for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZ
     _cap_args+=("${_v}=${!_v}")
   fi
 done
-"$REPO/scripts/taey-train" cpt_27b_4node "${_cap_args[@]}"
+"$REPO/scripts/taey-train" cpt_27b_4node "${_cap_args[@]}" || exit 1
 unset _cap_args _v
