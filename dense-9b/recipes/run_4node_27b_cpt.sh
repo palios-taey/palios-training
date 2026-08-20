@@ -486,7 +486,35 @@ fi
 
 INITIAL_SESSION=0
 PREVIOUS_STEP=0
+CAMPAIGN_RESUME_STEP=0
 if [ "$CPT_LIFECYCLE" = 1 ]; then
+  if [ -n "${RESUME_DELTA:-}" ]; then
+    printf -v _resume_meta_path '%q' "$RESUME_DELTA/trainer_meta.pt"
+    CAMPAIGN_RESUME_STEP=$(ssh -o ConnectTimeout=8 -o BatchMode=yes spark@"$MASTER" \
+      "python3 - $_resume_meta_path" <<'PY'
+import sys
+
+import torch
+
+metadata = torch.load(sys.argv[1], map_location="cpu", weights_only=False)
+step = metadata.get("step")
+if not isinstance(step, int) or step < 0:
+    raise SystemExit(f"invalid resume step in {sys.argv[1]}: {step!r}")
+print(step)
+PY
+    ) || {
+      echo "ABORT: cannot read the resume step from $RESUME_DELTA/trainer_meta.pt." >&2
+      exit 1
+    }
+    [[ "$CAMPAIGN_RESUME_STEP" =~ ^[0-9]+$ ]] || {
+      echo "ABORT: resume checkpoint returned a non-integer step: $CAMPAIGN_RESUME_STEP" >&2
+      exit 1
+    }
+    [ "$CAMPAIGN_RESUME_STEP" -lt "$TOTAL_STEPS" ] || {
+      echo "ABORT: resume step $CAMPAIGN_RESUME_STEP must be below TOTAL_STEPS=$TOTAL_STEPS." >&2
+      exit 1
+    }
+  fi
   LAST_EVENT=$(lifecycle_last_json) || {
     echo "ABORT: lifecycle journal is unreadable: $LIFECYCLE_LOG" >&2
     exit 1
@@ -498,11 +526,23 @@ if [ "$CPT_LIFECYCLE" = 1 ]; then
   fi
   case "$LAST_STATE" in
     UNKNOWN)
-      lifecycle_append SPEC_VALID --total-steps "$TOTAL_STEPS" --session-limit "$SESSION_LIMIT" || exit 1
+      lifecycle_append SPEC_VALID --total-steps "$TOTAL_STEPS" \
+        --session-limit "$SESSION_LIMIT" --resume-step "$CAMPAIGN_RESUME_STEP" || exit 1
+      PREVIOUS_STEP="$CAMPAIGN_RESUME_STEP"
       INITIAL_SESSION=1
       ;;
     FRAGMENTATION_EXIT)
       PREVIOUS_STEP=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["step"])' <<<"$LAST_EVENT")
+      EXPECTED_RESUME_DELTA=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["checkpoint_path"])' <<<"$LAST_EVENT")
+      [ "${RESUME_DELTA:-}" = "$EXPECTED_RESUME_DELTA" ] || {
+        echo "ABORT: continuation must resume the lifecycle checkpoint $EXPECTED_RESUME_DELTA;" >&2
+        echo "  received RESUME_DELTA=$RESUME_DELTA. Refusing to replay an earlier session." >&2
+        exit 1
+      }
+      [ "$CAMPAIGN_RESUME_STEP" -eq "$PREVIOUS_STEP" ] || {
+        echo "ABORT: lifecycle checkpoint step=$PREVIOUS_STEP but RESUME_DELTA metadata step=$CAMPAIGN_RESUME_STEP." >&2
+        exit 1
+      }
       ;;
     *)
       echo "ABORT: lifecycle state $LAST_STATE cannot begin a training session." >&2
@@ -578,9 +618,7 @@ while :; do
     if [ "$OBSERVED_STEP" -ge "$TOTAL_STEPS" ]; then
       lifecycle_append CHECKPOINT_SAVED --step "$OBSERVED_STEP" \
         --checkpoint-path "$OBSERVED_CHECKPOINT" || exit 1
-      EXPECTED_FRAGMENTATION=$(( (TOTAL_STEPS + SESSION_LIMIT - 1) / SESSION_LIMIT - 1 ))
-      lifecycle_call validate --log "$LIFECYCLE_LOG" \
-        --expected-fragmentation "$EXPECTED_FRAGMENTATION" || exit 1
+      lifecycle_call validate --log "$LIFECYCLE_LOG" || exit 1
     else
       lifecycle_append FRAGMENTATION_EXIT --step "$OBSERVED_STEP" \
         --checkpoint-path "$OBSERVED_CHECKPOINT" || exit 1

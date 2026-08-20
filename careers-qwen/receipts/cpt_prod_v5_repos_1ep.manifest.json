@@ -1,0 +1,112 @@
+{
+  "format": "cpt-27b-production-receipt-v1",
+  "observed_at": "2026-08-20T01:07:44.020Z",
+  "campaign_id": "cpt_prod_v5_repos_1ep",
+  "verdict": "THOR_DELIVERED_SERVING_VERIFIED",
+  "deployment": {
+    "commit": "08e34c7445d463e215aa6f32bfce87ce6ec4decd",
+    "controller_sha256": "f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b",
+    "launcher_sha256": "4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1",
+    "trainer_sha256": "c7bd257d457cded5a2f1feaf70fd59beef883f81f57cd9b2b7081e8e97515dec",
+    "config_sha256": "b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b",
+    "lifecycle_sha256": "81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4"
+  },
+  "inputs": {
+    "base": "$SPARK_HOME/models/Qwen3.8-27B_training_base_851_causallm",
+    "base_tensors": 851,
+    "base_digest": "ed2750b1ef2f1c7e4e87696f24111529d0c405ca6156fc9c4ca8b8c34b4aa539",
+    "corpus": "/var/spark/isma/training/cpt_prod_v4_repos_packed_8192.jsonl",
+    "corpus_sha256": "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03427815ddf",
+    "corpus_manifest_sha256": "8f2e5da44b461b811f8bc08950808db86326c461d8bdf8865a97ac4b629c8eee",
+    "corpus_rows": 339,
+    "corpus_bytes": 15293674,
+    "packed_sequence_tokens": 8192
+  },
+  "recipe": {
+    "world_size": 4,
+    "epochs": 1,
+    "total_steps": 85,
+    "session_limit": 85,
+    "save_every": 85,
+    "learning_rate": 0.00001,
+    "warmup_steps": 15,
+    "batch_size_per_rank": 1,
+    "global_batch": 4,
+    "token_budget_per_step": 65536,
+    "graphics_clock_cap_mhz": 1600,
+    "adafactor_alpha_mode": "absolute",
+    "adafactor_eps1": "fp32",
+    "allocator_configuration": "expandable_segments:False"
+  },
+  "training": {
+    "completed_step": 85,
+    "coverage": "85 steps/epoch; 340 padded blocks for 339 dataset blocks",
+    "observed_tok_s_at_steady_state": 748,
+    "sr_delta_mean_abs": 0.00005927,
+    "sr_delta_bf16_ulp_multiple": 0.91,
+    "sr_delta_verdict": "PASS"
+  },
+  "checkpoint": {
+    "path": "$SPARK_HOME/training_outputs/cpt_prod_v5_repos_1ep/final",
+    "complete_ranks": 4,
+    "step": 85,
+    "epoch": 0,
+    "data_pos": 85,
+    "trainer_meta_sha256": "c9f58e44aa59f11421393f1c85178034ae58d82067599c46ee313c8b8b816e31"
+  },
+  "bake": {
+    "campaign_id": "bake_prod_v5_repos_1ep_r2",
+    "state": "BAKE_COMPLETE",
+    "servable_tensors": 1199,
+    "servable_shards": 18,
+    "sealed_manifest_entries": 35,
+    "artifact_sha256": "05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf",
+    "sealed_manifest_check": "35/35 PASS",
+    "training_provenance_sha256": "2a439717a1b05c8337c5dde3a57d7c09f668b5203a6a6f5a34896ee2e1dc8f4f",
+    "weight_diff_sha256": "96eab551e2d42d273975b2b555dd5c7cc5013eb64b2728fa51d120e47a9d6405",
+    "weight_diff_mean_abs": 0.00009071922931980225,
+    "weight_diff_changed_fraction": 0.72727020829916,
+    "weight_diff_band": [
+      0.00005,
+      0.0008
+    ],
+    "weight_diff_verdict": "IN_BAND"
+  },
+  "cleanup": {
+    "post_training_reboot_verified_ranks": 4,
+    "trainers_after_reboot": 0,
+    "checkpoint_survived_reboot_ranks": 4
+  },
+  "delivery": {
+    "state": "THOR_DELIVERED",
+    "artifact_role": "thor1-cpt-artifacts",
+    "artifact_sha256": "05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf",
+    "verified_files": 35,
+    "verification": "35/35 PASS"
+  },
+  "serving": {
+    "status": "LIVE_VERIFIED",
+    "verified_at": "2026-08-20T02:18:11Z",
+    "observed_live_root_before_promotion": "/models/Qwen3.8-27B",
+    "observed_live_aliases_before_promotion": [
+      "taey",
+      "ep3"
+    ],
+    "live_root": "/models/cpt_prod_v5_repos_1ep_servable",
+    "live_aliases": [
+      "taey",
+      "ep3"
+    ],
+    "main_pid": 1726914,
+    "container_id": "1a072813ddf7036a927e32ab73042b8cf6b0b05f38c11e3a762f5b97a8eebe30",
+    "max_model_len": 262144,
+    "artifact_sha256": "05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf",
+    "sealed_manifest_check": "35/35 PASS",
+    "raw_generation_check": "PASS: ready",
+    "production_proxy_check": "healthy: catalogue and generation",
+    "active_turns_at_cutover": 0,
+    "rollback_root": "/models/Qwen3.8-27B",
+    "rollback_drop_in": "/var/tmp/taey-ep3-rollback-before-cpt-prod-v5-20260820.conf",
+    "rollback_is_trained_model": false
+  }
+}

@@ -67,7 +67,7 @@ capabilities:
 
   cpt_27b_4node:
     content_sha:   # exact candidate bytes; promotion requires a controlled production receipt
-      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1
+      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: c263d7c3786e08d5f324637611129f95199ad3130eccca6a6fe769ff50ba8933
       # 2026-08-18: re-pinned to the BUCKET-PATH trainer, git blob 04ddb577 =
       # codex/no-pack-bucket-coverage:dense-9b/trainers/train_fsdp_dense_9b.py (tip == aa9979d).
       # PROVENANCE, and why this is not self-certification: that branch is UNMERGED to origin/main,
@@ -91,7 +91,7 @@ capabilities:
       # without it and ZERO producers, so a completed run could not be baked at all — the wall
       # cpt_prod_v4_repos_1ep hit. Intended change, re-pinned to the bytes that carry it.
       dense-9b/trainers/train_fsdp_dense_9b.py: c7bd257d457cded5a2f1feaf70fd59beef883f81f57cd9b2b7081e8e97515dec
-      dense-9b/recipes/run_4node_27b_cpt.sh: f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b
+      dense-9b/recipes/run_4node_27b_cpt.sh: ccccfe54262ce10a4102fd61f509ce91967a62d9191140299af89cf3087d4ab3
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
       dense-9b/instrumentation/capture_run.sh: 6c9e95a1c4e538dcccb72254d46837a51f74d4cc44f858b891f72ba0fdeda44e
       dense-9b/recipes/run_refresh_gate.sh: 974689c2086e3ed9f96459eeb0f5c8b3699185222e870e77c918b4ba357997fe
@@ -99,7 +99,7 @@ capabilities:
       dense-9b/recipes/run_till_done_v3.sh: 131913b05934fdbe9811eaa29d501b2162d1afb542b485d768ac1d24ea2292e2
       scripts/taey-train: 066d762bca8e6dc1587cc397d12df71ac0107935660214f529fc95354ff24022
       scripts/_resolve_capability.py: 931882b5fab89a9f7832a0c5057aa2a8dc98006f221c63853c40228fbf6dc87d
-      scripts/training_lifecycle.py: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
+      scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
     status: CANDIDATE_PENDING_PRODUCTION_RUN
     lifecycle: true
     entrypoint: dense-9b/recipes/run_4node_27b_cpt.sh          # OPERATOR entrypoint (orchestrator)
@@ -270,7 +270,7 @@ capabilities:
     # never bit; a single one-sided edit would have left a losing block that still READ like a pin.
     # A gate whose text and whose effect can disagree is not a gate. Do not reintroduce a second one.
     content_sha:   # exact candidate bytes; promotion requires a controlled production receipt
-      careers-qwen/post_cpt_pipeline.sh: cbc8360ef43359ae2f20208f262f5b3af08e03d7eac3d19dc6c8881ab38270a8
+      careers-qwen/post_cpt_pipeline.sh: 8ace9c6d4ea3d45ad2bb6004aae11b3d792eb98497de58a46587644a84559aec
       dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
       dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
       dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
@@ -283,7 +283,7 @@ capabilities:
       careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
       scripts/taey-train: 066d762bca8e6dc1587cc397d12df71ac0107935660214f529fc95354ff24022
       scripts/_resolve_capability.py: 931882b5fab89a9f7832a0c5057aa2a8dc98006f221c63853c40228fbf6dc87d
-      scripts/training_lifecycle.py: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
+      scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
     entrypoint: careers-qwen/post_cpt_pipeline.sh   # OPERATOR entrypoint; takes DCP_DIR
     internal_stages_note: >
       bake_27b.sh is NOT the top-level entrypoint — it is this pipeline's internal coordinated
@@ -423,74 +423,31 @@ historical_lines:
       configurations are public, what is trained on never is.
 
 # ============================================================================
-# AUTHORIZATION — a named human act, bound to exact bytes, consumed by a receipt.
-#
-# NOT a status and NOT a --force. cpt_27b_4node stays CANDIDATE_PENDING_PRODUCTION_RUN, which is
-# the honest state: these bytes carry the W3/W5/W6 remediation and have never completed a
-# production run. This object permits ONE campaign on EXACTLY the bytes named below. Change one
-# byte of any of them and the authorization no longer describes what you are running, and the
-# resolver refuses. That binding — not a use-counter — is what keeps this from becoming a standing
-# path (shape designed by tutor-grok; both of tutor's earlier shapes were rejected, one of which
-# would have refused session 2 of a multi-session campaign).
-#
-# AUTHORIZED BY JESSE, 2026-08-19, verbatim: "So do the training run again on the base using the
-# full production infrastructure that you just cleaned up. This should include corpus generation,
-# tokenization, packing/chunking, max GPU util, vars, everthing all the way through baking." and
-# "Just do 1 epoch though and adjust variables accordingly."
-#
-# CONSUMPTION: campaign cpt_prod_v4_repos_1ep is spent the moment a receipt in this manifest
-# records that campaign_id. A second campaign requires a second authorization commit. After the
-# run, the promotion commit records the receipt AND DELETES THIS BLOCK — check_manifest_pins.py
-# fails if an authorization survives promotion (A1/A7), so a forgotten cleanup is caught by CI
-# rather than by whoever launches next.
-# SUPERSEDES cpt_prod_v4_repos_1ep, same day. That campaign trained 85/85 but could not be baked:
-# run_config.env had four consumers and zero producers, so post_cpt_pipeline.sh:42 aborted and the
-# checkpoint is preserved and quarantined. a3dd59cc gives the trainer a writer for it, which changed
-# the trainer bytes and correctly VOIDED the v4 authorization — the resolver refused with "the
-# authorization does not describe this capability". This object re-authorizes the SAME campaign on
-# the bytes that can actually finish it. v4 produced no receipt and will never be promoted.
-authorization:
-  capability: cpt_27b_4node
+# V5 executed the prior pinned bytes. These two distinct receipts consume the two distinct
+# authorizations that permitted training and baking. The executable pins above now name the
+# continuation remediation; the v5 receipt is production evidence for the predecessor bytes,
+# not self-certification of the new candidate.
+campaign_receipts:
+- capability: cpt_27b_4node
   campaign_id: cpt_prod_v5_repos_1ep
-  authorized_by: Jesse
-  authorized_on: 2026-08-19
-  scope: >
-    ONE epoch over cpt_prod_v4_repos_packed_8192.jsonl (339 blocks x 8192 tok = 2,777,088 tok),
-    85 steps, from the 851-tensor causal-LM base. Corpus is the ten PUBLIC_REPOS_PROD repos only —
-    code AND their documentation, plus the UI surfaces. No personal or job-application material;
-    that is layered on in a later module.
-  content_sha:
-    dense-9b/recipes/run_4node_27b_cpt.sh: f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b
-    dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: 4c5ee772e058631fcd27d8edde1f67587cb5e8dbfca5ad14655690849caf05a1
-    dense-9b/trainers/train_fsdp_dense_9b.py: c7bd257d457cded5a2f1feaf70fd59beef883f81f57cd9b2b7081e8e97515dec
-    dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
-
-# SECOND AUTHORIZATION — the bake half of the same cycle. Separate object by design: the resolver
-# refused to let cpt_27b_4node's authorization cover this ("An authorization is not transferable
-# across capabilities"), which is grok's C7 case firing in production rather than in a self-test.
-# Same Jesse instruction, 2026-08-19: "everthing all the way through baking." Bound to all 14
-# pinned bake files; a one-byte change voids it. Deleted by the promotion commit.
-authorizations:
+  public_receipt: careers-qwen/receipts/cpt_prod_v5_repos_1ep.manifest.json
+  public_receipt_sha256: 28bef54e998040325ccea98d12e22c6d21ab94bb775f84d8233f4959ee65edf8
+  executed_controller_sha256: f42f8eaa9a4fdd147fd2eac96889d29c082dcb8a2ce33f164e179453651ac23b
+  executed_lifecycle_sha256: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
+  verified_outcome: >
+    CHECKPOINT_SAVED step 85 on all four ranks; SR-DELTA 0.91x bf16 ULP PASS;
+    post-hoc mean absolute weight delta 9.071922932e-05 IN BAND; checkpoint survived the
+    mandated four-node reboot and reached THOR_DELIVERED under artifact seal 05c5fe1138d7a6f2.
 - capability: bake_export
   campaign_id: bake_prod_v5_repos_1ep_r2
-  authorized_by: Jesse
-  authorized_on: '2026-08-19'
-  scope: Bake the cpt_prod_v5_repos_1ep checkpoint (CHECKPOINT_SAVED step 85, per-rank DCP) through coordinated
-    export -> 851-tensor HF -> graft 348 vision/mtp tensors from the run's own source -> 1199 servable.
-    Graft donor resolved per-run from DERIVED_FROM.json (source $SPARK_HOME/models/Qwen3.8-27B, source_tensors
-    1199), never a fixed fleet.env pin.
-  content_sha:
-    careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
-    careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
-    careers-qwen/graft_cpt_into_servable.py: 7410ba2a408c53d309b56a0799a22eecf2f7c2f373d6eddbde45ebf0ad731b1a
-    careers-qwen/measure_cpt_delta.py: c7076b9a9898833dd3bb01d962e58f994bbd3560175be4c8361e2533db52430e
-    careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
-    careers-qwen/post_cpt_pipeline.sh: cbc8360ef43359ae2f20208f262f5b3af08e03d7eac3d19dc6c8881ab38270a8
-    careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
-    dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
-    dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
-    dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
-    dense-9b/recipes/model_snapshot_sync.sh: 4af7859f53f38db9b2752ae5715b0aba10e447c2b32acd860592cb24a0dae0bc
-    scripts/_resolve_capability.py: 931882b5fab89a9f7832a0c5057aa2a8dc98006f221c63853c40228fbf6dc87d
-    scripts/taey-train: 066d762bca8e6dc1587cc397d12df71ac0107935660214f529fc95354ff24022
-    scripts/training_lifecycle.py: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
+  public_receipt: careers-qwen/receipts/cpt_prod_v5_repos_1ep.manifest.json
+  public_receipt_sha256: 28bef54e998040325ccea98d12e22c6d21ab94bb775f84d8233f4959ee65edf8
+  executed_pipeline_sha256: cbc8360ef43359ae2f20208f262f5b3af08e03d7eac3d19dc6c8881ab38270a8
+  executed_lifecycle_sha256: 81669ff169c2eeb0d5ef0f3fd03f6b26e98f8d46c567f50dc2dc00759559c1d4
+  verified_outcome: >
+    Coordinated Artifact-B export, offline 851-tensor conversion, 1199-tensor graft,
+    provenance, weight-diff gate, 35-file seal verification and THOR_DELIVERED all passed;
+    artifact SHA256 05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf.
+
+# No standing authorization remains. The next cpt_27b_4node object must bind one exact Family
+# recipe verdict and these continuation-remediated bytes before another production launch.

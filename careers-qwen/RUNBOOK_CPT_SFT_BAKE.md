@@ -115,8 +115,17 @@ model before the trainer loads the DCP checkpoint post-prepare. Missing `MODEL_P
 every rank. Missing `RESUME_DELTA` is worse: it silently trains the raw base and nothing warns. Name the
 same base architecture that created the checkpoint, name the completed DCP checkpoint, verify both in
 the resolved-config banner, and require `Scheduler fast-forwarded to opt-step N` before accepting the
-resume. `SAVE_EVERY=SESSION_LIMIT` means final-only — **no mid-run saves, they break things** (Jesse,
-standing).
+resume.
+
+**A baked artifact is not that base architecture.** In the Qwen3.8 V5 production observation, both
+the 1199-tensor servable and the 851-tensor `_hf` export used `model.language_model.*` serving names;
+the 851-tensor training base used `model.*`. Each baked form shared exactly 1 of 851 names with the
+training base (`lm_head.weight`). Both can load without proving that the DCP weights landed, so using
+either as `MODEL_PATH` can run while training the wrong weights. A same-campaign continuation keeps
+the compatible 851-tensor training architecture in `MODEL_PATH` and restores learning exclusively
+from the completed DCP in `RESUME_DELTA`. A later cycle needs an authorized training-base derivation,
+not a baked directory substituted by path. `SAVE_EVERY=SESSION_LIMIT` means final-only — **no mid-run
+saves, they break things** (Jesse, standing).
 
 **Verify while it runs:**
 - `COVERAGE PROOF: blocks/epoch ≈ dataset_blocks` — the corpus is fully consumed
