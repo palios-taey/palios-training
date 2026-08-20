@@ -420,6 +420,7 @@ esac
 # only, so it does not enforce the pinned content identity"). A recorded sha that is only
 # a comment is decoration; anything could sit at an allow-listed path. Pin it for real.
 # Entries with no pin are unaffected, so this is additive.
+# BEGIN_CORPUS_CONTENT_PIN
 case "$CPT_DATA" in
     *cpt_refresh_v2_packed.jsonl) EXPECT_CORPUS_SHA=d571ca45261cadee71a3bf206a0c6b91fc1358881c6a24d767293c198a019735 ;;
     # Sequence-length probe corpora, pinned by FULL digest. Produced by
@@ -467,13 +468,25 @@ case "$CPT_DATA" in
     # apply-machine and linkedin. The later directive governs, not the older artifact.
     # 2,717 rows / 5,334,849 tokens. Repo slice 1167r@779b4234 (0 NAMED credentials, 0 bundles rows).
     *cpt_qwen38_v2_nopack_8192.jsonl) EXPECT_CORPUS_SHA=3973c2af608974191c7db2568c008510aa1711bdb714eede31a33fe414576e97 ;;
-    *) EXPECT_CORPUS_SHA="" ;;
+    *)
+        echo "ERROR: CPT_DATA has no content pin: $CPT_DATA" >&2
+        echo "       Unknown packed filenames are fail-closed. Add a full sha256 pin or do not train." >&2
+        exit 1
+        ;;
 esac
 # Generation pointer is the only published view of a new pack. If it exists, mixed
 # logical corpus/manifest pairs after a crashed two-file replace cannot be trained.
 _REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -n "${_REPO_ROOT}" ] && [ -f "${CPT_DATA}.generation" ]; then
     CPT_DATA=$(python3 "${_REPO_ROOT}/careers-qwen/corpus_manifest.py" resolve --corpus "$CPT_DATA") || exit 1
+fi
+if [ -z "${EXPECT_CORPUS_SHA:-}" ]; then
+    echo "ERROR: CPT_DATA has no content pin after allow-list: $CPT_DATA" >&2
+    exit 1
+fi
+if [ ! -f "$CPT_DATA" ]; then
+    echo "ERROR: CPT_DATA is missing: $CPT_DATA" >&2
+    exit 1
 fi
 if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then
     # FULL 64-hex digest, not a prefix. A 16-char comparison is 64 bits — fine for a
@@ -490,6 +503,7 @@ if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then
     fi
     echo "  corpus content pin OK (full sha256): ${_actual}"
 fi
+# END_CORPUS_CONTENT_PIN
 
 # SCHEMA GATE — the allow-list admits a NAME, the content pin admits BYTES, and neither
 # checks that the loader can actually READ the file. Both shipped DEFAULTS fail this:

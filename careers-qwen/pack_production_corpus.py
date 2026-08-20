@@ -20,7 +20,8 @@ Run on a Spark node (needs the Qwen3.6-27B tokenizer):
       --tokenizer <SPARK_HOME>/models/Qwen3.6-27B \
       --out /var/spark/isma/training/cpt_production_v1_packed_2560.jsonl
 """
-import argparse, json, os, re, sys
+import argparse, json, os, re, subprocess, sys
+from pathlib import Path
 
 from corpus_manifest import (
     SCHEMA,
@@ -219,10 +220,20 @@ PACKED_CONTENT_FORBIDDEN = (
 # Class identity for replay harnesses. Do not enumerate filenames here: a literal
 # list is how 6 of 13 replay_*.py rows survived the previous packed-content gate.
 REPLAY_HARNESS_DOC_ID = re.compile(r"::(?:.+/)?replay_[^/]+\.py$")
-REPLAY_HARNESS_HEADER = re.compile(
-    r"# repo: \S+ file: (?:.+/)?replay_[^/\s]+\.py(?=\n|$)"
+# Source rows: header only at the start of the document (\A). Packed streams
+# join documents with the tokenizer EOS string, not a newline.
+REPLAY_HARNESS_HEADER_SOURCE = re.compile(
+    r"\A# repo: \S+ file: (?:.+/)?replay_[^/\s]+\.py(?:\n|$)"
 )
 _HEADER_DECODE_CARRY = 128
+_PACKED_EOS_DEFAULT = "<|im_end|>"
+
+
+def packed_header_pattern(eos_token=None):
+    eos = re.escape(eos_token or _PACKED_EOS_DEFAULT)
+    return re.compile(
+        rf"(?:\A|{eos})# repo: \S+ file: (?:.+/)?replay_[^/\s]+\.py(?:\n|$)"
+    )
 
 
 def _count_new_subsequence(values, needle, carry_length):
@@ -248,10 +259,10 @@ def _count_new_regex(text, pattern, carry_length):
 
 
 def replay_harness_source_row(doc_id, text):
-    """True when a source row is a replay_*.py harness by doc_id or extractor header."""
+    """True when a source row is a replay_*.py harness by doc_id or start-of-row header."""
     if REPLAY_HARNESS_DOC_ID.search(str(doc_id or "")):
         return True
-    return bool(REPLAY_HARNESS_HEADER.search(str(text or "")))
+    return bool(REPLAY_HARNESS_HEADER_SOURCE.search(str(text or "")))
 
 
 def _unlink_quiet(*paths):
@@ -268,6 +279,8 @@ HISTORICAL_PACKED_SHA = "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03
 HISTORICAL_SOURCE_SHA = "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
 CORRECTED_SOURCE_SHA = "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685"
 CORRECTED_PACKED_SHA = "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba"
+CORRECTED_MANIFEST_SHA = "9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0"
+HISTORICAL_MANIFEST_SHA = "8f2e5da44b461b811f8bc08950808db86326c461d8bdf8865a97ac4b629c8eee"
 CORRECTED_MENTION_DOCS = 35
 CORRECTED_MENTION_ROWS = 40
 
@@ -334,6 +347,7 @@ def measure_packed_content(path, tokenizer):
     decoded_carry = ""
     header_hits = 0
     rows = 0
+    packed_header = packed_header_pattern(getattr(tokenizer, "eos_token", None))
     with open(path) as handle:
         for line in handle:
             row = json.loads(line)
@@ -346,7 +360,9 @@ def measure_packed_content(path, tokenizer):
             decoded = tokenizer.decode(ids, skip_special_tokens=False)
             decoded_window = decoded_carry + decoded
             header_hits += _count_new_regex(
-                decoded_window, REPLAY_HARNESS_HEADER, len(decoded_carry)
+                decoded_window,
+                packed_header,
+                len(decoded_carry),
             )
             for marker in markers:
                 decoded_hits[marker] += decoded.count(marker)
@@ -421,7 +437,7 @@ def _require_sha(label, sha, expected):
         )
 
 
-def prove_nested_selector():
+def prove_selector_legs():
     harness_id = "repo::apply-machine::harness/replay_nested_contract.py"
     harness_text = (
         "# repo: apply-machine file: harness/replay_nested_contract.py\n\n"
@@ -432,61 +448,261 @@ def prove_nested_selector():
         "# repo: apply-machine file: harness/notes.md\n\n"
         "mentions replay machinery without being a replay_*.py file.\n"
     )
+    quote_id = "repo::apply-machine::docs/quoting.md"
+    quote_text = (
+        "# repo: apply-machine file: docs/quoting.md\n\n"
+        "Extractor header example:\n"
+        "# repo: apply-machine file: replay_write_dispatch.py\n"
+        "That quote is documentation, not a harness.\n"
+    )
     if not replay_harness_source_row(harness_id, harness_text):
         raise SystemExit("ABORT: nested replay harness was not refused")
     if replay_harness_source_row(mention_id, mention_text):
         raise SystemExit("ABORT: nested non-harness mention was refused")
+    if replay_harness_source_row(quote_id, quote_text):
+        raise SystemExit("ABORT: prose-quoted header false-refused as a source row")
+    packed_re = packed_header_pattern(_PACKED_EOS_DEFAULT)
+    if packed_re.search(quote_text):
+        raise SystemExit("ABORT: packed predicate matched a mid-document quoted header")
+    if not packed_re.search("<|im_end|>" + harness_text):
+        raise SystemExit("ABORT: packed predicate missed an EOS-bounded nested header")
     return {
         "nested_harness_refused": True,
         "nested_harness_doc_id": harness_id,
         "nested_mention_survived": True,
         "nested_mention_doc_id": mention_id,
+        "quoted_header_survived": True,
+        "quoted_header_doc_id": quote_id,
+        "packed_eos_header_matched": True,
     }
 
 
-def prove_generation_pointer():
-    import tempfile
-    import shutil
+def _toy_manifest(path, corpus_path):
+    write_manifest(path, {
+        "schema": SCHEMA,
+        "corpus_filename": os.path.basename(corpus_path),
+        "corpus_sha256": sha256_file(corpus_path),
+        "corpus_bytes": os.path.getsize(corpus_path),
+        "corpus_rows": 1,
+        "inputs": [{
+            "name": "x.jsonl",
+            "rows": 1,
+            "sha256": "a" * 64,
+            "registered_sha256_prefix": "a" * 16,
+        }],
+    })
 
-    td = tempfile.mkdtemp()
+
+def _forbid_tmp_work_dir(work_dir):
+    if not work_dir:
+        raise SystemExit("ABORT: --proof-work-dir is required")
+    abs_work = os.path.abspath(work_dir)
+    if abs_work == "/tmp" or abs_work.startswith("/tmp/") or abs_work.startswith("/var/tmp/"):
+        raise SystemExit("ABORT: --proof-work-dir must be a durable directory, not /tmp")
+    os.makedirs(abs_work, exist_ok=True)
+    return abs_work
+
+
+def prove_generation_pointer(work_dir):
+    td = os.path.join(work_dir, "generation-pointer")
+    os.makedirs(td, exist_ok=True)
+    logical = os.path.join(td, "logical.jsonl")
+    with open(logical, "w") as handle:
+        handle.write("stale-logical\n")
+    with open(logical + ".manifest.json", "w") as handle:
+        handle.write("{}\n")
+    gen = os.path.join(td, "logical.jsonl.gen.deadbeef")
+    with open(gen, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    man = gen + ".manifest.json"
+    _toy_manifest(man, gen)
+
+    corpus, _manifest = resolve_generation(logical)
+    if os.path.abspath(corpus) != os.path.abspath(logical):
+        raise SystemExit("ABORT: pre-pointer resolve published unpublished gen files")
+    pre_pointer = True
+
+    incomplete = os.path.join(td, "incomplete.jsonl")
+    with open(incomplete, "w") as handle:
+        handle.write("stale-incomplete\n")
+    with open(incomplete + ".manifest.json", "w") as handle:
+        handle.write("{}\n")
+    orphan = os.path.join(td, "incomplete.jsonl.gen.orphan")
+    with open(orphan, "w") as handle:
+        handle.write('{"input_ids":[4,5,6]}\n')
+    corpus, _manifest = resolve_generation(incomplete)
+    if os.path.abspath(corpus) != os.path.abspath(incomplete):
+        raise SystemExit("ABORT: incomplete gen corpus without pointer was resolved")
+    if os.path.exists(orphan + ".manifest.json"):
+        raise SystemExit("ABORT: incomplete pair unexpectedly has a manifest")
+    pre_pointer_incomplete = True
+
+    write_generation_pointer(logical + ".generation", gen, man)
+    corpus, manifest = resolve_generation(logical)
+    if os.path.abspath(corpus) != os.path.abspath(gen):
+        raise SystemExit("ABORT: generation pointer did not resolve to the gen corpus")
+    if os.path.abspath(manifest) != os.path.abspath(man):
+        raise SystemExit("ABORT: generation pointer did not resolve to the gen manifest")
+
+    with open(gen, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    _toy_manifest(man, gen)
+    write_generation_pointer(logical + ".generation", gen, man)
+    corpus, manifest = resolve_generation(logical)
+    if os.path.abspath(corpus) != os.path.abspath(gen):
+        raise SystemExit("ABORT: same-generation rerun lost the pointer")
+    same_generation_rerun = True
+
+    with open(gen, "w") as handle:
+        handle.write('{"input_ids":[9]}\n')
     try:
-        logical = os.path.join(td, "logical.jsonl")
-        with open(logical, "w") as handle:
-            handle.write("stale-logical\n")
-        with open(logical + ".manifest.json", "w") as handle:
-            handle.write("{}\n")
-        gen = os.path.join(td, "logical.jsonl.gen.deadbeef")
-        with open(gen, "w") as handle:
-            handle.write('{"input_ids":[1,2,3]}\n')
-        man = gen + ".manifest.json"
-        write_manifest(man, {
-            "schema": SCHEMA,
-            "corpus_filename": os.path.basename(gen),
-            "corpus_sha256": sha256_file(gen),
-            "corpus_bytes": os.path.getsize(gen),
-            "corpus_rows": 1,
-            "inputs": [{
-                "name": "x.jsonl",
-                "rows": 1,
-                "sha256": "a" * 64,
-                "registered_sha256_prefix": "a" * 16,
-            }],
-        })
-        write_generation_pointer(logical + ".generation", gen, man)
-        corpus, manifest = resolve_generation(logical)
-        if os.path.abspath(corpus) != os.path.abspath(gen):
-            raise SystemExit("ABORT: generation pointer did not resolve to the gen corpus")
-        if os.path.abspath(manifest) != os.path.abspath(man):
-            raise SystemExit("ABORT: generation pointer did not resolve to the gen manifest")
-        with open(gen, "w") as handle:
-            handle.write('{"input_ids":[9]}\n')
-        try:
-            resolve_generation(logical)
-        except ValueError:
-            return {"pointer_resolves": True, "mixed_pair_refused": True}
+        resolve_generation(logical)
         raise SystemExit("ABORT: mixed generation pair was accepted")
-    finally:
-        shutil.rmtree(td, ignore_errors=True)
+    except ValueError:
+        mixed_pair_refused = True
+
+    return {
+        "pointer_resolves": True,
+        "pre_pointer_does_not_publish_gen": pre_pointer,
+        "pre_pointer_incomplete_pair_not_resolved": pre_pointer_incomplete,
+        "same_generation_rerun": same_generation_rerun,
+        "mixed_pair_refused": mixed_pair_refused,
+    }
+
+
+def _run_pin_script(script, cpt_data, cwd):
+    return subprocess.run(
+        ["bash", script, cpt_data],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+    )
+
+
+def prove_launcher_fail_closed(work_dir, launcher_path):
+    text = Path(launcher_path).read_text(encoding="utf-8")
+    start = text.find("# BEGIN_CORPUS_CONTENT_PIN")
+    end = text.find("# END_CORPUS_CONTENT_PIN")
+    if start < 0 or end < 0 or end <= start:
+        raise SystemExit("ABORT: launcher is missing CORPUS_CONTENT_PIN markers")
+    block = text[start:end + len("# END_CORPUS_CONTENT_PIN")]
+    repo = os.path.join(work_dir, "launcher-repo")
+    careers = os.path.join(repo, "careers-qwen")
+    os.makedirs(careers, exist_ok=True)
+    manifest_src = Path(__file__).resolve().parent / "corpus_manifest.py"
+    Path(careers, "corpus_manifest.py").write_bytes(manifest_src.read_bytes())
+    init = subprocess.run(["git", "init", "--quiet", repo], capture_output=True, text=True)
+    if init.returncode != 0:
+        raise SystemExit("ABORT: git init for launcher proof failed: " + init.stderr.strip())
+    script = os.path.join(work_dir, "launcher-pin-check.sh")
+    with open(script, "w") as handle:
+        handle.write("#!/bin/bash\nset -euo pipefail\nCPT_DATA=\"$1\"\n")
+        handle.write(block)
+        handle.write("\n")
+    os.chmod(script, 0o755)
+
+    # Unknown basename hits the pin-case default, not an empty EXPECT skip.
+    unknown = _run_pin_script(
+        script, os.path.join(work_dir, "unknown_packed_8192.jsonl"), repo
+    )
+    if unknown.returncode == 0:
+        raise SystemExit("ABORT: launcher accepted an unknown packed filename")
+    if "no content pin" not in unknown.stderr:
+        raise SystemExit(
+            "ABORT: unknown filename did not fail-closed on the pin case: "
+            + unknown.stderr.strip()
+        )
+
+    # Name that IS in the pin case, file absent → missing-file gate, not unknown.
+    pinned_name = "cpt_prod_v3_packed_8192.jsonl"
+    missing = os.path.join(work_dir, "missing", pinned_name)
+    missing_run = _run_pin_script(script, missing, repo)
+    if missing_run.returncode == 0:
+        raise SystemExit("ABORT: launcher accepted a pinned name whose file is missing")
+    if "CPT_DATA is missing" not in missing_run.stderr:
+        raise SystemExit(
+            "ABORT: missing pinned file did not hit the missing-file gate: "
+            + missing_run.stderr.strip()
+        )
+
+    # Process death before .generation: unpublished gen must not be selected.
+    pre_dir = os.path.join(work_dir, "pre-pointer")
+    os.makedirs(pre_dir, exist_ok=True)
+    logical = os.path.join(pre_dir, pinned_name)
+    with open(logical, "w") as handle:
+        handle.write("stale-logical-pre-pointer\n")
+    unpublished = logical + ".gen.unpublished"
+    with open(unpublished, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    _toy_manifest(unpublished + ".manifest.json", unpublished)
+    pre = _run_pin_script(script, logical, repo)
+    if pre.returncode == 0:
+        raise SystemExit("ABORT: launcher accepted stale logical with unpublished gen")
+    logical_sha = sha256_file(logical)
+    unpublished_sha = sha256_file(unpublished)
+    if logical_sha not in pre.stderr:
+        raise SystemExit(
+            "ABORT: pre-pointer launcher did not pin-check the logical file: "
+            + pre.stderr.strip()
+        )
+    if unpublished_sha in pre.stderr:
+        raise SystemExit("ABORT: pre-pointer launcher pin-checked unpublished gen")
+    if "content pin MISMATCH" not in pre.stderr:
+        raise SystemExit(
+            "ABORT: pre-pointer launcher did not mismatch the stale logical: "
+            + pre.stderr.strip()
+        )
+
+    # Same-generation rerun: pointer rewritten to the same gen, then pin-check gen.
+    sg_dir = os.path.join(work_dir, "same-generation")
+    os.makedirs(sg_dir, exist_ok=True)
+    sg_logical = os.path.join(sg_dir, pinned_name)
+    with open(sg_logical, "w") as handle:
+        handle.write("stale-same-generation\n")
+    sg_gen = sg_logical + ".gen.deadbeef"
+    with open(sg_gen, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    sg_man = sg_gen + ".manifest.json"
+    _toy_manifest(sg_man, sg_gen)
+    write_generation_pointer(sg_logical + ".generation", sg_gen, sg_man)
+    write_generation_pointer(sg_logical + ".generation", sg_gen, sg_man)
+    sg = _run_pin_script(script, sg_logical, repo)
+    if sg.returncode == 0:
+        raise SystemExit("ABORT: launcher accepted same-generation toy gen as pinned v3")
+    sg_gen_sha = sha256_file(sg_gen)
+    sg_logical_sha = sha256_file(sg_logical)
+    if sg_gen_sha not in sg.stderr:
+        raise SystemExit(
+            "ABORT: same-generation rerun did not pin-check the resolved gen: "
+            + sg.stderr.strip()
+        )
+    if sg_logical_sha != sg_gen_sha and sg_logical_sha in sg.stderr:
+        raise SystemExit("ABORT: same-generation rerun still pin-checked the logical file")
+    if "content pin MISMATCH" not in sg.stderr:
+        raise SystemExit(
+            "ABORT: same-generation rerun did not mismatch the resolved gen: "
+            + sg.stderr.strip()
+        )
+
+    # Mixed pair after publish: mutated gen must fail resolve, not train.
+    with open(sg_gen, "w") as handle:
+        handle.write('{"input_ids":[9]}\n')
+    mixed = _run_pin_script(script, sg_logical, repo)
+    if mixed.returncode == 0:
+        raise SystemExit("ABORT: launcher accepted a mixed generation pair")
+    if "REFUSE" not in mixed.stderr:
+        raise SystemExit(
+            "ABORT: mixed generation pair did not fail-closed at resolve: "
+            + mixed.stderr.strip()
+        )
+
+    return {
+        "unknown_filename_refused": True,
+        "missing_pinned_file_refused": True,
+        "pre_pointer_unpublished_gen_not_selected": True,
+        "same_generation_rerun_fail_closed": True,
+        "mixed_pair_fail_closed": True,
+    }
 
 
 def write_class_proof_receipt(
@@ -494,15 +710,21 @@ def write_class_proof_receipt(
     *,
     historical_packed,
     historical_source,
+    historical_manifest,
     corrected_source,
     corrected_packed,
+    corrected_manifest,
     tokenizer_path,
+    proof_work_dir,
+    launcher_path,
 ):
     from transformers import AutoTokenizer
 
+    work_dir = _forbid_tmp_work_dir(proof_work_dir)
     tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    nested = prove_nested_selector()
-    generation = prove_generation_pointer()
+    nested = prove_selector_legs()
+    generation = prove_generation_pointer(work_dir)
+    launcher = prove_launcher_fail_closed(work_dir, launcher_path)
     hist_source = measure_source_jsonl(historical_source)
     corr_source = measure_source_jsonl(corrected_source)
     _require_sha("historical-source", hist_source["sha256"], HISTORICAL_SOURCE_SHA)
@@ -511,6 +733,8 @@ def write_class_proof_receipt(
     corr_packed = measure_packed_content(corrected_packed, tok)
     _require_sha("historical-packed", hist_packed["sha256"], HISTORICAL_PACKED_SHA)
     _require_sha("corrected-packed", corr_packed["sha256"], CORRECTED_PACKED_SHA)
+    _require_sha("historical-manifest", sha256_file(historical_manifest), HISTORICAL_MANIFEST_SHA)
+    _require_sha("corrected-manifest", sha256_file(corrected_manifest), CORRECTED_MANIFEST_SHA)
 
     errors = []
     if hist_source["harness_docs"] != 13:
@@ -541,24 +765,30 @@ def write_class_proof_receipt(
         raise SystemExit("ABORT: class proof against real artifacts failed: " + "; ".join(errors))
 
     receipt = {
-        "schema": "palios.replay_harness_class_proof.v3",
+        "schema": "palios.replay_harness_class_proof.v4",
         "scanner": {
             "doc_id": REPLAY_HARNESS_DOC_ID.pattern,
-            "header": REPLAY_HARNESS_HEADER.pattern,
+            "header_source": REPLAY_HARNESS_HEADER_SOURCE.pattern,
+            "header_packed": packed_header_pattern(_PACKED_EOS_DEFAULT).pattern,
             "forbidden_literals": list(PACKED_CONTENT_FORBIDDEN),
             "positive_control": PACKED_CONTENT_POSITIVE_CONTROL,
         },
         "nested_selector": nested,
         "generation_pointer": generation,
+        "launcher": launcher,
         "historical_source": hist_source,
         "historical_packed": hist_packed,
+        "historical_manifest_sha256": HISTORICAL_MANIFEST_SHA,
         "corrected_source": corr_source,
         "corrected_packed": corr_packed,
+        "corrected_manifest_sha256": CORRECTED_MANIFEST_SHA,
         "acceptance": {
             "historical_packed_sha256": HISTORICAL_PACKED_SHA,
             "historical_source_sha256": HISTORICAL_SOURCE_SHA,
+            "historical_manifest_sha256": HISTORICAL_MANIFEST_SHA,
             "corrected_source_sha256": CORRECTED_SOURCE_SHA,
             "corrected_packed_sha256": CORRECTED_PACKED_SHA,
+            "corrected_manifest_sha256": CORRECTED_MANIFEST_SHA,
             "historical_harness_docs": 13,
             "historical_packed_refused": True,
             "corrected_mention_docs": CORRECTED_MENTION_DOCS,
@@ -589,7 +819,15 @@ def write_class_proof_receipt(
         "corrected_packed_refused": corr_packed["refused"],
         "corrected_packed_positive_fired": corr_packed["positive_control"]["fired"],
         "nested_harness_refused": nested["nested_harness_refused"],
+        "quoted_header_survived": nested["quoted_header_survived"],
         "mixed_pair_refused": generation["mixed_pair_refused"],
+        "pre_pointer_does_not_publish_gen": generation["pre_pointer_does_not_publish_gen"],
+        "same_generation_rerun": generation["same_generation_rerun"],
+        "unknown_filename_refused": launcher["unknown_filename_refused"],
+        "missing_pinned_file_refused": launcher["missing_pinned_file_refused"],
+        "pre_pointer_unpublished_gen_not_selected": launcher["pre_pointer_unpublished_gen_not_selected"],
+        "same_generation_rerun_fail_closed": launcher["same_generation_rerun_fail_closed"],
+        "mixed_pair_fail_closed": launcher["mixed_pair_fail_closed"],
     }, sort_keys=True))
     print(f"[pack] class proof VERIFIED against real artifacts: receipt={path}")
     return 0
@@ -599,10 +837,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--class-proof", metavar="RECEIPT",
                     help="write replay-harness class proof from real corpus artifacts and exit")
-    ap.add_argument("--historical-packed", help="packed corpus whose sha256 starts 841df5ec")
-    ap.add_argument("--historical-source", help="source jsonl whose sha256 starts e549870b")
-    ap.add_argument("--corrected-source", help="source jsonl whose sha256 starts fff6dae2")
-    ap.add_argument("--corrected-packed", help="packed corpus whose sha256 starts 503e18e8")
+    ap.add_argument("--proof-work-dir", help="durable directory for generation/launcher proofs; not /tmp")
+    ap.add_argument("--historical-packed", help="packed corpus sha256 841df5ec…")
+    ap.add_argument("--historical-source", help="source jsonl sha256 e549870b…")
+    ap.add_argument("--historical-manifest", help="packed sidecar sha256 8f2e5da4…")
+    ap.add_argument("--corrected-source", help="source jsonl sha256 fff6dae2…")
+    ap.add_argument("--corrected-packed", help="packed corpus sha256 503e18e8…")
+    ap.add_argument("--corrected-manifest", help="packed sidecar sha256 9d93b763…")
+    ap.add_argument("--launcher", help="path to launch_cpt_qwen36_27b_fsdp.sh")
     ap.add_argument("--pack-set", default="production_v1", choices=sorted(PACK_SETS))
     ap.add_argument("--slices-dir")
     ap.add_argument("--tokenizer")
@@ -613,9 +855,13 @@ def main():
         needed = (
             "historical_packed",
             "historical_source",
+            "historical_manifest",
             "corrected_source",
             "corrected_packed",
+            "corrected_manifest",
             "tokenizer",
+            "proof_work_dir",
+            "launcher",
         )
         missing = [name for name in needed if not getattr(args, name)]
         if missing:
@@ -625,9 +871,13 @@ def main():
             args.class_proof,
             historical_packed=args.historical_packed,
             historical_source=args.historical_source,
+            historical_manifest=args.historical_manifest,
             corrected_source=args.corrected_source,
             corrected_packed=args.corrected_packed,
+            corrected_manifest=args.corrected_manifest,
             tokenizer_path=args.tokenizer,
+            proof_work_dir=args.proof_work_dir,
+            launcher_path=args.launcher,
         )
     missing = [name for name in ("slices_dir", "tokenizer", "out") if not getattr(args, name)]
     if missing:
