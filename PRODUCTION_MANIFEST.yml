@@ -449,34 +449,26 @@ campaign_receipts:
     provenance, weight-diff gate, 35-file seal verification and THOR_DELIVERED all passed;
     artifact SHA256 05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf.
 
-# No standing authorization remains. The next cpt_27b_4node object must bind one exact Family
-# recipe verdict and these continuation-remediated bytes before another production launch.
+# No standing authorization remains. The previous live `authorization` block for
+# campaign_id cpt_prod_v6_repos_2ep is RETIRED below as a non-executable hold: it named a
+# pre-correction corpus identity and an invalid 255-step horizon for the corrected 334-row
+# packed geometry (measured spe=84 => full EPOCHS=3 horizon 252). One-use authority is not
+# transferable across corpus bytes or recipe decisions. The next launch-capable object must be
+# a fresh top-level `authorization` (not this hold) that binds one exact Family recipe verdict
+# plus the corrected corpus identity pins recorded here.
 
-# ONE-USE CONTINUATION AUTHORIZATION. Jesse directed tutor-codex on 2026-08-20 to
-# "get the other 2 epochs going" and then confirmed through the training control lane to start
-# the final CPT continuation now. This object binds that human act to one exact campaign and the
-# exact production bytes below. It permits CPT only; SFT and serving promotion remain separately
-# gated. The campaign is consumed when its campaign_id is recorded in campaign_receipts, and the
-# promotion commit must delete this block.
-authorization:
+# NON-EXECUTABLE HOLD (not an authorization). Resolvers and taey-train MUST ignore this key.
+# Do not rename to `authorization` without a new human authorization act and exact pins.
+authorization_hold:
   capability: cpt_27b_4node
-  campaign_id: cpt_prod_v6_repos_2ep
-  authorized_by: Jesse
-  authorized_on: 2026-08-20
-  scope: >
-    Continue cpt_prod_v5_repos_1ep from its all-rank COMPLETE step-85 DCP checkpoint through
-    absolute step 255, covering the two remaining epochs of the same private packed 8192-token
-    production corpus. Use the compatible 851-tensor causal-LM architecture as MODEL_PATH and
-    load learning from the V5 DCP via RESUME_DELTA; never use a baked serving artifact as the
-    training base. Preserve the production recipe: TOTAL_STEPS=255, SESSION_LIMIT=85,
-    SAVE_EVERY=85, LR=1e-5, WARMUP_STEPS=15, CLOCK_CAP=1600, BATCH_SIZE_PER_RANK=1,
-    CPT_PACKED=1, MAX_SEQ=8192, ADAFACTOR_ALPHA_MODE=absolute, ADAFACTOR_EPS1=fp32, and the
-    existing four-node NCCL/FSDP path, with EPOCHS=3 so the packed-corpus horizon is 255 steps.
-    Reboot and verify the clean Sparks before launch and at the step-170 fragmentation boundary.
-    Stop on any failed resume, coverage, dose, SR-delta, thermal, checkpoint, or lifecycle gate.
-    This authorization does not cover SFT or serving.
-  content_sha:
-    dense-9b/recipes/run_4node_27b_cpt.sh: a4f262781550d205c23af10bbe36e00e255a42cc10baee6077b472651a140b67
-    dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: c263d7c3786e08d5f324637611129f95199ad3130eccca6a6fe769ff50ba8933
-    dense-9b/trainers/train_fsdp_dense_9b.py: 940535165ecf20f23f22782ab6b41d0e2db48151bd4f3ef1a32a10be5e3c55c2
-    dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
+  retired_campaign_id: cpt_prod_v6_repos_2ep
+  status: AWAITING_EXACT_INPUT_HUMAN_AUTHORIZATION
+  reason: >
+    Live pre-correction authorization contradicted the manifest's "no standing authorization"
+    comment, lacked corrected corpus identity pins, and is not valid for the corrected packed
+    corpus / horizon. Removed so CANDIDATE_PENDING_PRODUCTION_RUN fails closed without a fresh
+    authorization object.
+  # Exact prerequisites for any future reauthorization (content addresses only; no private paths):
+  required_source_sha256: fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685
+  required_packed_sha256: 503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba
+  required_sidecar_sha256: 9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0
