@@ -79,12 +79,14 @@ scripts/taey-train cpt_27b_4node [VAR=val ...]     # the ONE door — verifies c
 
 The manifest declares `lifecycle: true` only for `cpt_27b_4node` and `bake_export`; the launcher
 never infers lifecycle ownership from a name or argument. Those runs append every transition to
-their `lifecycle_events.jsonl` journal under the selected output directory. `taey-train` returns
-non-zero after an intermediate fragmentation exit or `CHECKPOINT_SAVED`; that is an honest
-incomplete lifecycle, not a failed checkpoint. Exit 0 for a lifecycle-declaring operation is
-reserved for `bake_export` after the exact sealed artifact has been verified on Thor and
-`THOR_DELIVERED` is appended. Capabilities without the declaration return their entrypoint status
-and do not require Spark topology or a lifecycle journal.
+their `lifecycle_events.jsonl` journal under the selected output directory. Each capability owns
+its accepted invocation boundaries in `PRODUCTION_MANIFEST.yml`: CPT accepts
+`FRAGMENTATION_EXIT` or `CHECKPOINT_SAVED`, while `bake_export` accepts only `THOR_DELIVERED`.
+`taey-train` returns 0 only when the entrypoint itself succeeded and the journal's last state is in
+that capability's accepted set. A successful CPT invocation is not a claim that bake, delivery, or
+the whole multi-session campaign is complete; inspect the reported state and resume after
+`FRAGMENTATION_EXIT`. Capabilities without the lifecycle declaration return their entrypoint
+status and do not require Spark topology or a lifecycle journal.
 
 **AN UNRESOLVED TENSION, STATED RATHER THAN PAPERED OVER (2026-08-18).** `run_till_done_v3.sh`
 exists because it sets the eight variables below correctly, and that is real value — the launcher
