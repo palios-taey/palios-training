@@ -1,6 +1,6 @@
 {
   "acceptance": {
-    "corrected_manifest_sha256": "9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0",
+    "corrected_manifest_sha256": "543b62229dd65191e8e45c9530e477e3ac862eb8be630243f21d5a197a9f5504",
     "corrected_mention_docs": 35,
     "corrected_mention_rows": 40,
     "corrected_packed_refused": false,
@@ -12,7 +12,7 @@
     "historical_packed_sha256": "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03427815ddf",
     "historical_source_sha256": "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
   },
-  "corrected_manifest_sha256": "9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0",
+  "corrected_manifest_sha256": "543b62229dd65191e8e45c9530e477e3ac862eb8be630243f21d5a197a9f5504",
   "corrected_packed": {
     "forbidden_markers": {
       "REPLAY: PASS": {
@@ -181,6 +181,7 @@
   "launcher": {
     "corrected_packed_name_admitted": true,
     "corrected_sidecar_pin_present": true,
+    "corrected_sidecar_pin_sha256": "543b62229dd65191e8e45c9530e477e3ac862eb8be630243f21d5a197a9f5504",
     "missing_pinned_file_refused": true,
     "missing_resolver_fail_closed": true,
     "mixed_pair_fail_closed": true,

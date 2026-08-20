@@ -339,7 +339,8 @@ case "$CPT_DATA" in
     *cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl)
         # Replay-clean corrected pack of source fff6dae2 (1209 rows). Spark artifact
         # name from the 2026-08-20 CONTROL proof. Content pin below is the full packed
-        # sha256 503e18e8 and sidecar 9d93b763; the allow-list name alone is not admission.
+        # sha256 503e18e8 and sidecar from this exact packer; the allow-list name
+        # alone is not admission.
         ;;
     *cpt_prod_v[0-9]*_packed_[0-9]*.jsonl)
         # PRODUCTION REPO SET, 2026-08-02. Jesse named the repos explicitly after the previous
@@ -462,7 +463,7 @@ case "$CPT_DATA" in
     *cpt_prod_v3_packed_8192.jsonl) EXPECT_CORPUS_SHA=3ec3587eb155731bfba395c7f270ca6afcc3f2c7fb14bac232984ba60b3ea61e ;;
     *cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl)
         EXPECT_CORPUS_SHA=503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba
-        EXPECT_MANIFEST_SHA=9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0
+        EXPECT_MANIFEST_SHA=543b62229dd65191e8e45c9530e477e3ac862eb8be630243f21d5a197a9f5504
         ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;

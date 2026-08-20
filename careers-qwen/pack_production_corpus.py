@@ -366,7 +366,7 @@ HISTORICAL_PACKED_SHA = "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03
 HISTORICAL_SOURCE_SHA = "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
 CORRECTED_SOURCE_SHA = "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685"
 CORRECTED_PACKED_SHA = "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba"
-CORRECTED_MANIFEST_SHA = "9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0"
+CORRECTED_PACKED_NAME = "cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl"
 HISTORICAL_MANIFEST_SHA = "8f2e5da44b461b811f8bc08950808db86326c461d8bdf8865a97ac4b629c8eee"
 CORRECTED_MENTION_DOCS = 35
 CORRECTED_MENTION_ROWS = 40
@@ -522,6 +522,28 @@ def _require_sha(label, sha, expected):
         raise SystemExit(
             f"ABORT: {label} sha256 {sha} does not equal required {expected}"
         )
+
+
+def launcher_corrected_pins(launcher_text):
+    """Packed and sidecar pins for the corrected artifact live in the launcher."""
+    pattern = re.compile(
+        r"\*cpt_prod_src-fff6dae26ad02e51_packed_8192\.jsonl\)\s*(.*?);;",
+        re.S,
+    )
+    arm = None
+    for match in pattern.finditer(launcher_text):
+        if "EXPECT_CORPUS_SHA=" in match.group(1):
+            arm = match.group(1)
+            break
+    if arm is None:
+        raise SystemExit("ABORT: launcher has no content-pin arm for the corrected packed filename")
+    packed = re.search(r"EXPECT_CORPUS_SHA=([0-9a-f]{64})", arm)
+    sidecar = re.search(r"EXPECT_MANIFEST_SHA=([0-9a-f]{64})", arm)
+    if not packed or packed.group(1) != CORRECTED_PACKED_SHA:
+        raise SystemExit("ABORT: launcher packed pin is not the corrected corpus sha256")
+    if not sidecar:
+        raise SystemExit("ABORT: launcher sidecar pin missing for the corrected packed filename")
+    return packed.group(1), sidecar.group(1)
 
 
 def prove_selector_legs():
@@ -730,11 +752,10 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
             + unknown.stderr.strip()
         )
 
-    corrected_name = "cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl"
-    if corrected_name not in block or CORRECTED_PACKED_SHA not in block:
-        raise SystemExit("ABORT: launcher pin block is missing the corrected packed identity")
-    if CORRECTED_MANIFEST_SHA not in block:
-        raise SystemExit("ABORT: launcher pin block is missing the corrected sidecar identity")
+    packed_pin, sidecar_pin = launcher_corrected_pins(block)
+    corrected_name = CORRECTED_PACKED_NAME
+    if packed_pin != CORRECTED_PACKED_SHA:
+        raise SystemExit("ABORT: launcher packed pin is not the corrected corpus sha256")
     corrected_missing = os.path.join(work_dir, "missing-corrected", corrected_name)
     corrected_run = _run_pin_script(script, corrected_missing, tree)
     if corrected_run.returncode == 0:
@@ -866,6 +887,7 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
         "missing_resolver_fail_closed": True,
         "corrected_packed_name_admitted": True,
         "corrected_sidecar_pin_present": True,
+        "corrected_sidecar_pin_sha256": sidecar_pin,
     }
 
 
@@ -1009,7 +1031,11 @@ def write_class_proof_receipt(
     _require_sha("historical-packed", hist_packed["sha256"], HISTORICAL_PACKED_SHA)
     _require_sha("corrected-packed", corr_packed["sha256"], CORRECTED_PACKED_SHA)
     _require_sha("historical-manifest", sha256_file(historical_manifest), HISTORICAL_MANIFEST_SHA)
-    _require_sha("corrected-manifest", sha256_file(corrected_manifest), CORRECTED_MANIFEST_SHA)
+    _packed_pin, expected_manifest = launcher_corrected_pins(
+        Path(launcher_path).read_text(encoding="utf-8")
+    )
+    _require_sha("launcher-packed-pin", _packed_pin, CORRECTED_PACKED_SHA)
+    _require_sha("corrected-manifest", sha256_file(corrected_manifest), expected_manifest)
 
     errors = []
     if hist_source["harness_docs"] != 13:
@@ -1057,14 +1083,14 @@ def write_class_proof_receipt(
         "historical_manifest_sha256": HISTORICAL_MANIFEST_SHA,
         "corrected_source": corr_source,
         "corrected_packed": corr_packed,
-        "corrected_manifest_sha256": CORRECTED_MANIFEST_SHA,
+        "corrected_manifest_sha256": expected_manifest,
         "acceptance": {
             "historical_packed_sha256": HISTORICAL_PACKED_SHA,
             "historical_source_sha256": HISTORICAL_SOURCE_SHA,
             "historical_manifest_sha256": HISTORICAL_MANIFEST_SHA,
             "corrected_source_sha256": CORRECTED_SOURCE_SHA,
             "corrected_packed_sha256": CORRECTED_PACKED_SHA,
-            "corrected_manifest_sha256": CORRECTED_MANIFEST_SHA,
+            "corrected_manifest_sha256": expected_manifest,
             "historical_harness_docs": 13,
             "historical_packed_refused": True,
             "corrected_mention_docs": CORRECTED_MENTION_DOCS,
@@ -1129,7 +1155,7 @@ def main():
     ap.add_argument("--historical-manifest", help="packed sidecar sha256 8f2e5da4…")
     ap.add_argument("--corrected-source", help="source jsonl sha256 fff6dae2…")
     ap.add_argument("--corrected-packed", help="packed corpus sha256 503e18e8…")
-    ap.add_argument("--corrected-manifest", help="packed sidecar sha256 9d93b763…")
+    ap.add_argument("--corrected-manifest", help="sidecar whose sha256 equals the launcher sidecar pin")
     ap.add_argument("--launcher", help="path to launch_cpt_qwen36_27b_fsdp.sh")
     ap.add_argument("--pack-set", default="production_v1", choices=sorted(PACK_SETS))
     ap.add_argument("--slices-dir")
