@@ -3816,7 +3816,8 @@ def _load_checkpoint_dcp(model, optimizer, lr_scheduler, delta_path, accelerator
     # weights ONLY and start optimizer state FRESH (momentum re-warms in a few steps; bias-correction
     # handles it; trained weights fully preserved). The driver sets this flag only for the transition
     # resume (from a pre-AdamW checkpoint); once an AdamW checkpoint saves, subsequent resumes load optim.
-    if os.environ.get("RESUME_MODEL_ONLY", "0") == "1":
+    model_only = os.environ.get("RESUME_MODEL_ONLY", "0") == "1"
+    if model_only:
         from torch.distributed.checkpoint.state_dict import get_model_state_dict, set_model_state_dict
         if accelerator.is_main_process:
             log.warning("RESUME_MODEL_ONLY=1: MODEL-ONLY resume — optimizer state FRESH (optimizer switch, "
@@ -3859,6 +3860,14 @@ def _load_checkpoint_dcp(model, optimizer, lr_scheduler, delta_path, accelerator
     gc.collect(); torch.cuda.empty_cache(); gc.collect()
     meta = torch.load(os.path.join(delta_path, "trainer_meta.pt"),
                       map_location="cpu", weights_only=False)
+    if model_only:
+        if accelerator.is_main_process:
+            log.info(
+                "DCP MODEL-ONLY INITIALIZE: source_step=%s source_epoch=%s source_data_pos=%s; "
+                "new optimizer/scheduler/data cycle starts at step=0 epoch=0 data_pos=0",
+                meta.get("step"), meta.get("epoch"), meta.get("data_pos"),
+            )
+        return 0, 0, 0
     if lr_scheduler is not None and meta.get("sched") is not None:
         lr_scheduler.load_state_dict(meta["sched"])
     if meta.get("rng"):

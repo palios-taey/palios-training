@@ -562,6 +562,10 @@ PY
       echo "ABORT: resume checkpoint returned a non-integer step: $CAMPAIGN_RESUME_STEP" >&2
       exit 1
     }
+    if [ "${RESUME_MODEL_ONLY:-0}" = "1" ]; then
+      echo "  model-only initialization: source checkpoint step=$CAMPAIGN_RESUME_STEP; new campaign step=0"
+      CAMPAIGN_RESUME_STEP=0
+    fi
     [ "$CAMPAIGN_RESUME_STEP" -lt "$TOTAL_STEPS" ] || {
       echo "ABORT: resume step $CAMPAIGN_RESUME_STEP must be below TOTAL_STEPS=$TOTAL_STEPS." >&2
       exit 1
