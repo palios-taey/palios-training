@@ -471,9 +471,10 @@ authorization:
     training base. Preserve the production recipe: TOTAL_STEPS=255, SESSION_LIMIT=85,
     SAVE_EVERY=85, LR=1e-5, WARMUP_STEPS=15, CLOCK_CAP=1600, BATCH_SIZE_PER_RANK=1,
     CPT_PACKED=1, MAX_SEQ=8192, ADAFACTOR_ALPHA_MODE=absolute, ADAFACTOR_EPS1=fp32, and the
-    existing four-node NCCL/FSDP path. Reboot and verify the clean Sparks before launch and at
-    the step-170 fragmentation boundary. Stop on any failed resume, coverage, dose, SR-delta,
-    thermal, checkpoint, or lifecycle gate. This authorization does not cover SFT or serving.
+    existing four-node NCCL/FSDP path, with EPOCHS=3 so the packed-corpus horizon is 255 steps.
+    Reboot and verify the clean Sparks before launch and at the step-170 fragmentation boundary.
+    Stop on any failed resume, coverage, dose, SR-delta, thermal, checkpoint, or lifecycle gate.
+    This authorization does not cover SFT or serving.
   content_sha:
     dense-9b/recipes/run_4node_27b_cpt.sh: a4f262781550d205c23af10bbe36e00e255a42cc10baee6077b472651a140b67
     dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: c263d7c3786e08d5f324637611129f95199ad3130eccca6a6fe769ff50ba8933
