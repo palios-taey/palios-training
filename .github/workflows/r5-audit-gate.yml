@@ -96,21 +96,24 @@ jobs:
           printf '%s\n' "$CHANGED" | sed 's/^/  /'
           echo "nonempty PR diff — R5 required for every path (no r5-risky-paths allowlist)."
 
-          # All commit statuses, every page. Require gh api --paginate --slurp
-          # (gh >= 2.48) so multi-page output is one JSON array-of-pages.
-          # Do NOT feed bare --paginate multi-array streams into jq.
+          # All commit statuses, every page, using supported gh flags only.
+          # Production Actions (gh 2.97.0) has no --slurp; bare --paginate emits
+          # multiple JSON arrays that break jq. Contract:
+          #   gh api --paginate --jq '.[]'  -> stream of status objects
+          #   jq -s                         -> one JSON array
+          # Capture gh API rc separately (set +e only around the call) so a
+          # successful jq cannot mask an API failure.
           if ! command -v gh >/dev/null; then
             echo "FAIL: gh CLI missing"
             exit 1
           fi
-          if ! gh api --help 2>&1 | grep -q -- '--slurp'; then
-            echo "FAIL: gh api lacks --slurp (need gh >= 2.48 for fail-closed pagination)"
-            gh --version || true
+          if ! command -v jq >/dev/null; then
+            echo "FAIL: jq missing"
             exit 1
           fi
 
           set +e
-          PAGES="$(gh api --paginate --slurp "repos/$REPO/commits/$HEAD_SHA/statuses?per_page=100" 2>/tmp/r5-statuses.err)"
+          STREAM="$(gh api --paginate --jq '.[]' "repos/$REPO/commits/$HEAD_SHA/statuses?per_page=100" 2>/tmp/r5-statuses.err)"
           API_RC=$?
           set -e
           if [ "$API_RC" -ne 0 ]; then
@@ -119,20 +122,13 @@ jobs:
             exit 1
           fi
 
-          # Flatten pages; select latest per context by numeric id; fail closed
-          # on malformed JSON or ambiguous id/created_at ordering.
+          # Reconstruct one array; select latest per context by numeric id;
+          # fail closed on malformed JSON or ambiguous id/created_at ordering.
           set +e
-          EVAL="$(printf '%s' "$PAGES" | jq -e -c '
+          EVAL="$(printf '%s' "$STREAM" | jq -s -e -c '
             if type != "array" then
-              error("statuses pages root is not a JSON array")
+              error("statuses root is not a JSON array")
             else . end
-            | if length == 0 then
-                []
-              elif any(.[]; type != "array") then
-                error("statuses page element is not a JSON array")
-              else
-                [.[]] | add // []
-              end
             | if any(.[];
                 (.id | type) != "number"
                 or (.context | type) != "string"
@@ -157,7 +153,7 @@ jobs:
           if [ "$JQ_RC" -ne 0 ]; then
             echo "FAIL: status parse/select failed (malformed JSON or ambiguous ordering)"
             cat /tmp/r5-jq.err >&2 || true
-            echo "pages_head=$(printf '%s' "$PAGES" | head -c 200)"
+            echo "stream_head=$(printf '%s' "$STREAM" | head -c 200)"
             exit 1
           fi
 
