@@ -270,7 +270,7 @@ capabilities:
     # never bit; a single one-sided edit would have left a losing block that still READ like a pin.
     # A gate whose text and whose effect can disagree is not a gate. Do not reintroduce a second one.
     content_sha:   # exact candidate bytes; promotion requires a controlled production receipt
-      careers-qwen/post_cpt_pipeline.sh: 8ace9c6d4ea3d45ad2bb6004aae11b3d792eb98497de58a46587644a84559aec
+      careers-qwen/post_cpt_pipeline.sh: c97a2e7fac31fb4f4cd3ffc7912a7da0e73e8094b1a2c56a89b474b25da080f1
       dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
       dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
       dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
