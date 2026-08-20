@@ -39,8 +39,9 @@ capabilities:
 
   corpus_pack:
     content_sha:
-      careers-qwen/pack_production_corpus.py: 3ee08afd28efc2a0154a3068c5c917634d9c82314cfdfe31004cf2e9a73996f8
-    status: ADJUDICATED
+      careers-qwen/pack_production_corpus.py: 1a79d942b8c313414f6705720d62943dcb60adffc481e47c2bb642f3d4430cc1
+      careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
+    status: CANDIDATE_PRODUCTION_OBSERVED_PENDING_R5
     entrypoint: careers-qwen/pack_production_corpus.py
     receipt:
       commit: aa40705
@@ -52,8 +53,8 @@ capabilities:
     candidate_update:
       status: CANDIDATE_PENDING_PRODUCTION
       content_sha:
-        careers-qwen/pack_production_corpus.py: 1d9c9948c1eba0a646258c6aedaf609a7d4fdc1b4c4c982e0d9556e289ac01de
-        careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+        careers-qwen/pack_production_corpus.py: 1a79d942b8c313414f6705720d62943dcb60adffc481e47c2bb642f3d4430cc1
+        careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
       change: >
         The packer now emits an immutable sidecar binding the packed-corpus SHA to every input's
         full SHA. It is not ACTIVE until a sanctioned production pack executes with these exact
@@ -67,7 +68,7 @@ capabilities:
 
   cpt_27b_4node:
     content_sha:   # exact candidate bytes; promotion requires a controlled production receipt
-      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: c263d7c3786e08d5f324637611129f95199ad3130eccca6a6fe769ff50ba8933
+      dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: b229c37662b3249ac26971e15933c4fd937730fad04fb9bbcbc310766d336f94
       # 2026-08-18: re-pinned to the BUCKET-PATH trainer, git blob 04ddb577 =
       # codex/no-pack-bucket-coverage:dense-9b/trainers/train_fsdp_dense_9b.py (tip == aa9979d).
       # PROVENANCE, and why this is not self-certification: that branch is UNMERGED to origin/main,
@@ -277,7 +278,7 @@ capabilities:
       dense-9b/recipes/model_snapshot_sync.sh: 4af7859f53f38db9b2752ae5715b0aba10e447c2b32acd860592cb24a0dae0bc
       careers-qwen/graft_cpt_into_servable.py: 7410ba2a408c53d309b56a0799a22eecf2f7c2f373d6eddbde45ebf0ad731b1a
       careers-qwen/measure_cpt_delta.py: c7076b9a9898833dd3bb01d962e58f994bbd3560175be4c8361e2533db52430e
-      careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+      careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
       careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
       careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
       careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
@@ -321,7 +322,7 @@ capabilities:
     content_sha:
       careers-qwen/repair_cpt_v7_provenance.sh: f6934b5ac48fdf61b2261f23816a07afa700b2ddb586b06e929777394ee4b255
       careers-qwen/repair_training_provenance.py: cc2e18ec08374c25b631181d1828b888e9fe0e0d6662ff4cbfb34fb9a7c149e3
-      careers-qwen/corpus_manifest.py: ffd75d0796b995cf63372c40dd1117d4a8e63204de69b029226b0e075e8852a0
+      careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
       careers-qwen/receipts/cpt_v7_eps1fix_corpus.manifest.json: c6e72c13ff8fda4d796d06e408b88b63ddde806979f144d0a21f8f20213bd46d
     scope: >
       Repairs the training-owned Expansion controller hold and four Spark staging copies only.

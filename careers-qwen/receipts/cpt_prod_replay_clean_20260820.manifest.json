@@ -1,0 +1,43 @@
+{
+  "content_gate": {
+    "forbidden_markers": {
+      "REPLAY: PASS": {
+        "decoded_hits": 0,
+        "token_hits": 0
+      },
+      "WRITE DISPATCH REPLAY": {
+        "decoded_hits": 0,
+        "token_hits": 0
+      },
+      "replay_write_dispatch.py": {
+        "decoded_hits": 0,
+        "token_hits": 0
+      }
+    },
+    "positive_control": {
+      "decoded_hits": 850,
+      "marker": "# repo:",
+      "token_hits": 849
+    },
+    "rows_scanned": 334
+  },
+  "corpus_bytes": 15067238,
+  "corpus_filename": "cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl",
+  "corpus_rows": 334,
+  "corpus_sha256": "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba",
+  "cycle_pad_tokens": 4165,
+  "inputs": [
+    {
+      "name": "cpt_public_repos_prod.jsonl",
+      "registered_sha256_prefix": "fff6dae26ad02e51",
+      "rows": 1209,
+      "sha256": "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685"
+    }
+  ],
+  "pack_set": "prod_v5",
+  "packer_sha256": "eaa51e4307ee5634609e130511dfda667f7b16e48f00bff5e212284b45757a87",
+  "schema": "palios.cpt_packed_corpus.v1",
+  "sequence_length": 8192,
+  "source_documents": 1209,
+  "tail_corpus_tokens": 4027
+}

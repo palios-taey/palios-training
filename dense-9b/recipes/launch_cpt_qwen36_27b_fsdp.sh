@@ -336,6 +336,12 @@ case "$CPT_DATA" in
         # SANCTION: tutor-assembled. Training ownership is tutor's per Jesse 2026-08-01
         # ("Treasurer just does pairs like everyone else... You are in charge").
         ;;
+    *cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl)
+        # Replay-clean corrected pack of source fff6dae2 (1209 rows). Spark artifact
+        # name from the 2026-08-20 CONTROL proof. Content pin below is the full packed
+        # sha256 503e18e8 and the four-node-verified sidecar 9d93b763. Packer bytes are
+        # not part of that sidecar identity. The allow-list name alone is not admission.
+        ;;
     *cpt_prod_v[0-9]*_packed_[0-9]*.jsonl)
         # PRODUCTION REPO SET, 2026-08-02. Jesse named the repos explicitly after the previous
         # corpus trained education and research repos Taey does not use, verbatim: "those repos are
@@ -420,6 +426,7 @@ esac
 # only, so it does not enforce the pinned content identity"). A recorded sha that is only
 # a comment is decoration; anything could sit at an allow-listed path. Pin it for real.
 # Entries with no pin are unaffected, so this is additive.
+# BEGIN_CORPUS_CONTENT_PIN
 case "$CPT_DATA" in
     *cpt_refresh_v2_packed.jsonl) EXPECT_CORPUS_SHA=d571ca45261cadee71a3bf206a0c6b91fc1358881c6a24d767293c198a019735 ;;
     # Sequence-length probe corpora, pinned by FULL digest. Produced by
@@ -454,6 +461,10 @@ case "$CPT_DATA" in
     # THE NAME WAS ALREADY ADMITTED by the cpt_prod_v[0-9]* glob above; without this row the
     # content pin would silently skip, which is the allow-list-as-bypass shape abfd463 hardened.
     *cpt_prod_v3_packed_8192.jsonl) EXPECT_CORPUS_SHA=3ec3587eb155731bfba395c7f270ca6afcc3f2c7fb14bac232984ba60b3ea61e ;;
+    *cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl)
+        EXPECT_CORPUS_SHA=503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba
+        EXPECT_MANIFEST_SHA=9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0
+        ;;
     *probe_packed_4096.jsonl)  EXPECT_CORPUS_SHA=1dccdd05d9d4776c9f3a2b27909f88c6e18830cf590e1b966c330c458d70ffc1 ;;
     *probe_packed_8192.jsonl)  EXPECT_CORPUS_SHA=d9a7bd45a357c8677c3b29a859ab98f4cdae711c5e988f1b2beb9dc5a3639324 ;;
     *probe_packed_16384.jsonl) EXPECT_CORPUS_SHA=5d3a8e6a84a4a5159177f5ab562d953aeda2a50469af2873aa5df2414f8ba93a ;;
@@ -467,8 +478,40 @@ case "$CPT_DATA" in
     # apply-machine and linkedin. The later directive governs, not the older artifact.
     # 2,717 rows / 5,334,849 tokens. Repo slice 1167r@779b4234 (0 NAMED credentials, 0 bundles rows).
     *cpt_qwen38_v2_nopack_8192.jsonl) EXPECT_CORPUS_SHA=3973c2af608974191c7db2568c008510aa1711bdb714eede31a33fe414576e97 ;;
-    *) EXPECT_CORPUS_SHA="" ;;
+    *)
+        echo "ERROR: CPT_DATA has no content pin: $CPT_DATA" >&2
+        echo "       Unknown packed filenames are fail-closed. Add a full sha256 pin or do not train." >&2
+        exit 1
+        ;;
 esac
+# Generation pointer is the only published view of a new pack. If it exists, mixed
+# logical corpus/manifest pairs after a crashed two-file replace cannot be trained.
+# Resolve from this launcher file, not caller cwd / git. A missing resolver with a
+# live pointer is fail-closed: never skip the pointer and train the stale logical file.
+if [ -f "${CPT_DATA}.generation" ]; then
+    _LAUNCHER_DIR=$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
+    _MANIFEST_PY="${_LAUNCHER_DIR}/../../careers-qwen/corpus_manifest.py"
+    if [ ! -f "$_MANIFEST_PY" ]; then
+        echo "ERROR: generation pointer exists but corpus_manifest.py is missing: ${_MANIFEST_PY}" >&2
+        exit 1
+    fi
+    _resolved=$(python3 "$_MANIFEST_PY" resolve --corpus "$CPT_DATA") || exit 1
+    CPT_DATA=$(printf '%s\n' "$_resolved" | sed -n '1p')
+    CPT_MANIFEST=$(printf '%s\n' "$_resolved" | sed -n '2p')
+    if [ -z "$CPT_DATA" ] || [ -z "${CPT_MANIFEST:-}" ]; then
+        echo "ERROR: generation resolve did not print corpus and manifest paths" >&2
+        exit 1
+    fi
+fi
+: "${CPT_MANIFEST:=${CPT_DATA}.manifest.json}"
+if [ -z "${EXPECT_CORPUS_SHA:-}" ]; then
+    echo "ERROR: CPT_DATA has no content pin after allow-list: $CPT_DATA" >&2
+    exit 1
+fi
+if [ ! -f "$CPT_DATA" ]; then
+    echo "ERROR: CPT_DATA is missing: $CPT_DATA" >&2
+    exit 1
+fi
 if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then
     # FULL 64-hex digest, not a prefix. A 16-char comparison is 64 bits — fine for a
     # human-readable log line, NOT for a content pin that admits training data
@@ -484,6 +527,21 @@ if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then
     fi
     echo "  corpus content pin OK (full sha256): ${_actual}"
 fi
+if [ -n "${EXPECT_MANIFEST_SHA:-}" ]; then
+    if [ ! -f "$CPT_MANIFEST" ]; then
+        echo "ERROR: CPT sidecar is missing: $CPT_MANIFEST" >&2
+        exit 1
+    fi
+    _mactual=$(sha256sum "$CPT_MANIFEST" | awk '{print $1}')
+    if [ "$_mactual" != "$EXPECT_MANIFEST_SHA" ]; then
+        echo "ERROR: CPT sidecar content pin MISMATCH for $CPT_MANIFEST" >&2
+        echo "       expected sha256 ${EXPECT_MANIFEST_SHA}" >&2
+        echo "       actual   sha256 ${_mactual}" >&2
+        exit 1
+    fi
+    echo "  sidecar content pin OK (full sha256): ${_mactual}"
+fi
+# END_CORPUS_CONTENT_PIN
 
 # SCHEMA GATE — the allow-list admits a NAME, the content pin admits BYTES, and neither
 # checks that the loader can actually READ the file. Both shipped DEFAULTS fail this:
