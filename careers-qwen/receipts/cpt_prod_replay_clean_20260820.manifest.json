@@ -8,6 +8,10 @@
       "WRITE DISPATCH REPLAY": {
         "decoded_hits": 0,
         "token_hits": 0
+      },
+      "replay_write_dispatch.py": {
+        "decoded_hits": 0,
+        "token_hits": 0
       }
     },
     "positive_control": {
@@ -15,13 +19,10 @@
       "marker": "# repo:",
       "token_hits": 849
     },
-    "replay_harness_headers": {
-      "decoded_hits": 0
-    },
     "rows_scanned": 334
   },
   "corpus_bytes": 15067238,
-  "corpus_filename": "cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl.gen.503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba",
+  "corpus_filename": "cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl",
   "corpus_rows": 334,
   "corpus_sha256": "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba",
   "cycle_pad_tokens": 4165,
@@ -34,7 +35,7 @@
     }
   ],
   "pack_set": "prod_v5",
-  "packer_sha256": "a8c30f82860b6b92580c1ccc5120eef0d39b452a3ef62263ceb08e8377b373ed",
+  "packer_sha256": "eaa51e4307ee5634609e130511dfda667f7b16e48f00bff5e212284b45757a87",
   "schema": "palios.cpt_packed_corpus.v1",
   "sequence_length": 8192,
   "source_documents": 1209,

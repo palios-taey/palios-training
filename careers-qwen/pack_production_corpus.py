@@ -1308,7 +1308,8 @@ def main():
             "cycle_pad_tokens": SEQ - tail_kept if tail_kept else 0,
             "content_gate": content_gate,
             "pack_set": args.pack_set,
-            "packer_sha256": sha256_file(os.path.abspath(__file__)),
+            # Sidecar identity is corpus + inputs + gates. Packer bytes are not
+            # admitted here; required_packed_sidecar_sha256 is the verified 9d93b763 file.
             "inputs": input_receipts,
         })
         corpus_gen, manifest_gen = publish_generation_artifacts(
