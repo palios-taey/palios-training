@@ -6,7 +6,8 @@ heredoc version collided its own delimiter with the shell's and silently truncat
 A resolver that can be mangled by quoting is not a gate.
 
 Contract, deliberately narrow:
-  success -> shell assignments on stdout (ENTRY=..., TRAINER=..., LIFECYCLE=...), exit 0
+  success -> shell assignments on stdout (ENTRY=..., TRAINER=..., LIFECYCLE=...,
+             LIFECYCLE_SUCCESS_STATES=...), exit 0
   refusal -> exactly one line beginning REFUSE:, exit 0 (the CALLER turns that into exit 1)
 
 The refusal path prints rather than exiting non-zero so the caller controls the exit code in one
@@ -34,6 +35,8 @@ import shlex
 import sys
 import tempfile
 import traceback
+
+from training_lifecycle import STATES as LIFECYCLE_STATES
 
 
 def sha256_file(path):
@@ -77,7 +80,7 @@ def refuse(msg):
 
 
 def emit_success(cap, body, extra_pins=None):
-    """Emit SHA/ENTRY/TRAINER/LIFECYCLE. Missing LIFECYCLE= would silently disable W3."""
+    """Emit the executable capability contract as shell assignments."""
     entry = body.get("entrypoint") or (body.get("stages") or [{}])[0].get("entrypoint", "")
     if not entry:
         return refuse(f"capability '{cap}' names no entrypoint.")
@@ -86,6 +89,28 @@ def emit_success(cap, body, extra_pins=None):
         return refuse(
             f"capability '{cap}' lifecycle must be YAML true or false, "
             f"not {lifecycle!r}."
+        )
+    success_states = body.get("lifecycle_success_states", [])
+    if not isinstance(success_states, list) or any(
+        not isinstance(state, str) or state not in LIFECYCLE_STATES
+        for state in success_states
+    ):
+        return refuse(
+            f"capability '{cap}' lifecycle_success_states must be a YAML list containing only "
+            f"known lifecycle states, not {success_states!r}."
+        )
+    if len(success_states) != len(set(success_states)):
+        return refuse(
+            f"capability '{cap}' lifecycle_success_states contains duplicates: {success_states!r}."
+        )
+    if lifecycle and not success_states:
+        return refuse(
+            f"capability '{cap}' enables lifecycle but names no lifecycle_success_states. "
+            "The caller cannot decide which journal states complete this capability invocation."
+        )
+    if not lifecycle and success_states:
+        return refuse(
+            f"capability '{cap}' names lifecycle_success_states while lifecycle is false."
         )
     pins = dict(body.get("content_sha") or {})
     if extra_pins:
@@ -97,6 +122,7 @@ def emit_success(cap, body, extra_pins=None):
     print(f"ENTRY={shlex.quote(str(entry))}")
     print(f"TRAINER={body.get('trainer', '')}")
     print(f"LIFECYCLE={'true' if lifecycle else 'false'}")
+    print(f"LIFECYCLE_SUCCESS_STATES={shlex.quote(':'.join(success_states))}")
     return 0
 
 
@@ -398,6 +424,7 @@ def selftest():
             "cpt_27b_4node": {
                 **adjudicated["capabilities"]["cpt_27b_4node"],
                 "lifecycle": True,
+                "lifecycle_success_states": ["FRAGMENTATION_EXIT", "CHECKPOINT_SAVED"],
             }
         }
     }
@@ -405,6 +432,9 @@ def selftest():
     expect_permit("L9 lifecycle true", code, text)
     if "LIFECYCLE=true" not in text:
         print(f"SELFTEST FAIL: L9 expected LIFECYCLE=true\n{text}")
+        failures += 1
+    if "LIFECYCLE_SUCCESS_STATES=FRAGMENTATION_EXIT:CHECKPOINT_SAVED" not in text:
+        print(f"SELFTEST FAIL: L9 expected capability-owned success states\n{text}")
         failures += 1
 
     life_bad = {
@@ -425,6 +455,7 @@ def selftest():
             "cpt_27b_4node": {
                 **candidate["capabilities"]["cpt_27b_4node"],
                 "lifecycle": True,
+                "lifecycle_success_states": ["FRAGMENTATION_EXIT", "CHECKPOINT_SAVED"],
             }
         },
     }
@@ -433,6 +464,29 @@ def selftest():
     if "LIFECYCLE=true" not in text:
         print(f"SELFTEST FAIL: L11 expected LIFECYCLE=true on authorized CANDIDATE\n{text}")
         failures += 1
+
+    missing_success_states = {
+        "capabilities": {
+            "cpt_27b_4node": {
+                **adjudicated["capabilities"]["cpt_27b_4node"],
+                "lifecycle": True,
+            }
+        }
+    }
+    code, text = run(missing_success_states, "cpt_27b_4node", files)
+    expect_refuse("L12 lifecycle requires success states", code, text, "lifecycle_success_states")
+
+    unknown_success_state = {
+        "capabilities": {
+            "cpt_27b_4node": {
+                **adjudicated["capabilities"]["cpt_27b_4node"],
+                "lifecycle": True,
+                "lifecycle_success_states": ["CHECKPOINT_SAVED", "MADE_UP"],
+            }
+        }
+    }
+    code, text = run(unknown_success_state, "cpt_27b_4node", files)
+    expect_refuse("L13 unknown success state", code, text, "known lifecycle states", "MADE_UP")
 
     if failures:
         print(f"SELFTEST: {failures} control(s) failed")
