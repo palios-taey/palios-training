@@ -449,13 +449,17 @@ campaign_receipts:
     provenance, weight-diff gate, 35-file seal verification and THOR_DELIVERED all passed;
     artifact SHA256 05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf.
 
-# No standing authorization remains. The previous live `authorization` block for
-# campaign_id cpt_prod_v6_repos_2ep is RETIRED below as a non-executable hold: it named a
-# pre-correction corpus identity and an invalid 255-step horizon for the corrected 334-row
-# packed geometry (measured spe=84 => full EPOCHS=3 horizon 252). One-use authority is not
-# transferable across corpus bytes or recipe decisions. The next launch-capable object must be
-# a fresh top-level `authorization` (not this hold) that binds one exact Family recipe verdict
-# plus the corrected corpus identity pins recorded here.
+# No standing authorization remains. Observed on origin/main tip 3be6a8bcc8e058d2ebf9004946a2f0541d3d5355:
+# (1) corpus identity changed to the corrected source/packed/sidecar digests below;
+# (2) the prior authorization's TOTAL_STEPS=255 / EPOCHS=3 horizon is invalidated for that
+#     corrected packed geometry (334 rows, 4 ranks, batch_per_rank=1 => spe=84; full-horizon
+#     contract is spe*epochs=252);
+# (3) authorization campaign_id cpt_prod_v6_repos_2ep remained present and unconsumed
+#     (no matching campaign_receipts entry), contradicting the prior "no standing authorization"
+#     comment while keeping CANDIDATE_PENDING_PRODUCTION_RUN launch-capable;
+# (4) one-use authorization does not transfer to new corpus identity or a new horizon without a
+#     new human authorization act. The next launch-capable object must be a fresh top-level
+#     `authorization` (not this hold) binding that act to the pins below.
 
 # NON-EXECUTABLE HOLD (not an authorization). Resolvers and taey-train MUST ignore this key.
 # Do not rename to `authorization` without a new human authorization act and exact pins.
@@ -464,11 +468,12 @@ authorization_hold:
   retired_campaign_id: cpt_prod_v6_repos_2ep
   status: AWAITING_EXACT_INPUT_HUMAN_AUTHORIZATION
   reason: >
-    Live pre-correction authorization contradicted the manifest's "no standing authorization"
-    comment, lacked corrected corpus identity pins, and is not valid for the corrected packed
-    corpus / horizon. Removed so CANDIDATE_PENDING_PRODUCTION_RUN fails closed without a fresh
-    authorization object.
+    Unconsumed prior authorization removed because observed corpus identity changed, the prior
+    255-step horizon is invalidated for the corrected packed geometry, and one-use authority
+    does not transfer without a new human authorization. CANDIDATE_PENDING_PRODUCTION_RUN now
+    fails closed until a fresh authorization object is written.
   # Exact prerequisites for any future reauthorization (content addresses only; no private paths):
   required_source_sha256: fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685
   required_packed_sha256: 503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba
-  required_sidecar_sha256: 9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0
+  # Packed-corpus manifest sidecar SHA-256 (not the packed jsonl; not a training receipt):
+  required_packed_sidecar_sha256: 9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0
