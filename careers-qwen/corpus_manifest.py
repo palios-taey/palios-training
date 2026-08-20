@@ -9,6 +9,7 @@ import sys
 
 
 SCHEMA = "palios.cpt_packed_corpus.v1"
+GENERATION_SCHEMA = "palios.cpt_packed_generation.v1"
 HEX = frozenset("0123456789abcdef")
 
 
@@ -97,15 +98,67 @@ def write_manifest(path, manifest):
     os.replace(stage, path)
 
 
+def generation_pointer_path(logical_corpus):
+    return logical_corpus + ".generation"
+
+
+def write_generation_pointer(pointer_path, corpus_path, manifest_path):
+    """Publish one atomic generation pointer after both artifacts exist and verify."""
+    verify_manifest(corpus_path, manifest_path)
+    payload = {
+        "schema": GENERATION_SCHEMA,
+        "corpus": os.path.basename(corpus_path),
+        "manifest": os.path.basename(manifest_path),
+        "corpus_sha256": sha256_file(corpus_path),
+        "manifest_sha256": sha256_file(manifest_path),
+    }
+    stage = pointer_path + ".tmp"
+    with open(stage, "w") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(stage, pointer_path)
+
+
+def resolve_generation(logical_corpus):
+    """Return (corpus, manifest). Pointer mismatch is mixed-generation and is refused.
+
+    No pointer: historical layout (logical corpus + logical.manifest.json).
+    """
+    pointer = generation_pointer_path(logical_corpus)
+    if not os.path.exists(pointer):
+        return os.path.abspath(logical_corpus), os.path.abspath(logical_corpus + ".manifest.json")
+    with open(pointer) as handle:
+        payload = json.load(handle)
+    if payload.get("schema") != GENERATION_SCHEMA:
+        raise ValueError(f"unsupported generation pointer schema: {payload.get('schema')!r}")
+    directory = os.path.dirname(os.path.abspath(pointer))
+    corpus = os.path.join(directory, payload["corpus"])
+    manifest = os.path.join(directory, payload["manifest"])
+    if sha256_file(corpus) != payload.get("corpus_sha256"):
+        raise ValueError("generation pointer corpus sha256 does not match the corpus file")
+    if sha256_file(manifest) != payload.get("manifest_sha256"):
+        raise ValueError("generation pointer manifest sha256 does not match the manifest file")
+    verify_manifest(corpus, manifest)
+    return corpus, manifest
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("verify",))
+    parser.add_argument("command", choices=("verify", "resolve"))
     parser.add_argument("--corpus", required=True)
-    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--manifest")
     parser.add_argument("--receipt-lines", action="store_true")
     args = parser.parse_args()
 
     try:
+        if args.command == "resolve":
+            corpus, _manifest = resolve_generation(args.corpus)
+            print(corpus)
+            return 0
+        if not args.manifest:
+            raise SystemExit("REFUSE: --manifest is required for verify")
         receipt = verify_manifest(args.corpus, args.manifest)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(f"REFUSE: {error}") from error

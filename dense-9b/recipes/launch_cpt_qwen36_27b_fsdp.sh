@@ -469,6 +469,12 @@ case "$CPT_DATA" in
     *cpt_qwen38_v2_nopack_8192.jsonl) EXPECT_CORPUS_SHA=3973c2af608974191c7db2568c008510aa1711bdb714eede31a33fe414576e97 ;;
     *) EXPECT_CORPUS_SHA="" ;;
 esac
+# Generation pointer is the only published view of a new pack. If it exists, mixed
+# logical corpus/manifest pairs after a crashed two-file replace cannot be trained.
+_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [ -n "${_REPO_ROOT}" ] && [ -f "${CPT_DATA}.generation" ]; then
+    CPT_DATA=$(python3 "${_REPO_ROOT}/careers-qwen/corpus_manifest.py" resolve --corpus "$CPT_DATA") || exit 1
+fi
 if [ -n "$EXPECT_CORPUS_SHA" ] && [ -f "$CPT_DATA" ]; then
     # FULL 64-hex digest, not a prefix. A 16-char comparison is 64 bits — fine for a
     # human-readable log line, NOT for a content pin that admits training data

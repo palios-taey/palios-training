@@ -22,7 +22,12 @@ Run on a Spark node (needs the Qwen3.6-27B tokenizer):
 """
 import argparse, json, os, re, sys
 
-from corpus_manifest import SCHEMA, sha256_file, write_manifest
+from corpus_manifest import (
+    SCHEMA,
+    sha256_file,
+    write_generation_pointer,
+    write_manifest,
+)
 
 # Packed block length, in tokens. DEFAULT UNCHANGED at 2560 — this is a parameterisation,
 # not a recipe change; the value is a recipe parameter and recipe parameters are
@@ -250,6 +255,8 @@ def replay_harness_source_row(doc_id, text):
 
 def _unlink_quiet(*paths):
     for path in paths:
+        if not path:
+            continue
         try:
             os.unlink(path)
         except FileNotFoundError:
@@ -613,11 +620,13 @@ def main():
         f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} tokens={total_tokens} tail_dropped=0"
     )
 
-    # Gates and sidecar staging run against tmp. Dest corpus+manifest are untouched
-    # until both candidates exist; a sidecar write failure therefore cannot replace
-    # a prior final pair.
-    manifest_path = args.manifest or args.out + ".manifest.json"
-    sidecar_candidate = manifest_path + ".candidate"
+    # Gates run against tmp. Visibility is one atomic generation pointer; dest
+    # logical corpus/manifest paths are never replaced, so process death cannot
+    # publish a mixed pair.
+    sidecar_candidate = tmp + ".manifest.json"
+    corpus_gen = None
+    manifest_gen = None
+    pointer_path = args.out + ".generation"
     promoted = False
     try:
         with open(tmp) as handle:
@@ -650,11 +659,13 @@ def main():
             raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
         corpus_sha = sha256_file(tmp)
         corpus_bytes = os.path.getsize(tmp)
-        if os.path.abspath(manifest_path) == os.path.abspath(args.out):
+        corpus_gen = args.out + ".gen." + corpus_sha[:16]
+        manifest_gen = corpus_gen + ".manifest.json"
+        if os.path.abspath(corpus_gen) == os.path.abspath(manifest_gen):
             sys.exit("ABORT: corpus and manifest paths must differ")
         write_manifest(sidecar_candidate, {
             "schema": SCHEMA,
-            "corpus_filename": os.path.basename(args.out),
+            "corpus_filename": os.path.basename(corpus_gen),
             "corpus_sha256": corpus_sha,
             "corpus_bytes": corpus_bytes,
             "corpus_rows": tmp_rows,
@@ -667,16 +678,25 @@ def main():
             "packer_sha256": sha256_file(os.path.abspath(__file__)),
             "inputs": input_receipts,
         })
-        os.replace(tmp, args.out)
-        os.replace(sidecar_candidate, manifest_path)
+        os.replace(tmp, corpus_gen)
+        os.replace(sidecar_candidate, manifest_gen)
+        write_generation_pointer(pointer_path, corpus_gen, manifest_gen)
         promoted = True
     finally:
         if not promoted:
-            _unlink_quiet(tmp, sidecar_candidate, sidecar_candidate + ".tmp")
+            _unlink_quiet(
+                tmp,
+                sidecar_candidate,
+                sidecar_candidate + ".tmp",
+                corpus_gen,
+                manifest_gen,
+                pointer_path + ".tmp",
+            )
 
     print(done_line, flush=True)
     print(f"[pack] OUTPUT sha256={corpus_sha}")
-    print(f"[pack] MANIFEST {manifest_path} sha256={sha256_file(manifest_path)}")
+    print(f"[pack] MANIFEST {manifest_gen} sha256={sha256_file(manifest_gen)}")
+    print(f"[pack] GENERATION {pointer_path}")
     print(f"[pack] register as: {args.pack_set}_packed_{SEQ} (inputs: "
           + ", ".join(f"{n}@{s}" for n, _, s in PACK_SETS[args.pack_set]) + ")")
 
