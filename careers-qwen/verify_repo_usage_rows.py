@@ -26,9 +26,11 @@ THE CHECKS, and what each one is for:
   SOURCE    meta.source names a repo the registry covers, so a reviewer can go read the claim.
   EMPTY     no all-whitespace <think></think>. 18 such blocks shipped in a lane labelled canonical
             and nothing mechanical was looking for them.
-  HUB       with --hub-contract, every row declares Taey's orchestrator seat and one or more of
-            verify/refuse/route; the corpus proves complete repo/process coverage against a reviewed
-            manifest. Legacy repo-usage rows do not acquire this posture by implication.
+  HUB       reserved Hub metadata activates this contract automatically, so omitting a CLI flag
+            cannot demote Hub-shaped rows to ordinary admission. Every row declares Taey's
+            orchestrator seat and one or more of verify/refuse/route; the corpus proves complete
+            repo/process coverage against a reviewed manifest. Legacy repo-usage rows do not
+            acquire this posture by implication.
 
 Exit non-zero if any row fails. There is no --force: adding one would reopen the hole this closes.
 """
@@ -50,6 +52,14 @@ UNIVERSAL = {"--help", "--version"}
 HUB_PROJECT = "taey_repo_fluency_v1"
 HUB_ACTIONS = {"verify", "refuse", "route"}
 HUB_COVERAGE_SCHEMA = "taey_hub_coverage_v1"
+HUB_META_KEYS = {
+    "curriculum_project",
+    "hub_seat",
+    "hub_role",
+    "hub_actions",
+    "code_authoring",
+    "coverage",
+}
 
 
 def load_registry(path: Path) -> tuple[dict[str, set[str]], set[str]]:
@@ -101,8 +111,31 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    if args.hub_contract != bool(args.coverage_manifest):
-        ap.error("--hub-contract and --coverage-manifest are required together")
+    hub_shape_detected = False
+    for rp in args.rows:
+        path = Path(rp)
+        if not path.is_file():
+            continue
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            meta = candidate.get("meta")
+            if isinstance(meta, dict) and HUB_META_KEYS.intersection(meta):
+                hub_shape_detected = True
+                break
+        if hub_shape_detected:
+            break
+
+    enforce_hub_contract = args.hub_contract or hub_shape_detected
+    if enforce_hub_contract != bool(args.coverage_manifest):
+        ap.error(
+            "Hub-shaped rows and --hub-contract require --coverage-manifest; "
+            "a coverage manifest requires Hub-shaped rows or --hub-contract"
+        )
 
     by_repo, repos = load_registry(Path(args.registry))
     all_flags = {f for s in by_repo.values() for f in s} | UNIVERSAL
@@ -116,7 +149,7 @@ def main() -> int:
     covered_processes: set[str] = set()
     observed_hub_actions: set[str] = set()
 
-    if args.hub_contract:
+    if enforce_hub_contract:
         coverage_path = Path(args.coverage_manifest)
         try:
             coverage_manifest = json.loads(coverage_path.read_text())
@@ -195,7 +228,7 @@ def main() -> int:
             if named not in repos:
                 failures.append(f"{tag}: meta.source names {named!r}, not a registry repo")
 
-            if args.hub_contract:
+            if enforce_hub_contract:
                 if meta.get("curriculum_project") != HUB_PROJECT:
                     failures.append(
                         f"{tag}: meta.curriculum_project must be {HUB_PROJECT!r}"
@@ -268,7 +301,7 @@ def main() -> int:
                 else:
                     held.append(f"{tag}: {f} not found anywhere in the registry")
 
-    if args.hub_contract:
+    if enforce_hub_contract:
         for label, required, covered in (
             ("repo", required_repos, covered_repos),
             ("process", required_processes, covered_processes),
@@ -289,12 +322,6 @@ def main() -> int:
             )
 
     print(f"  checked {total} row(s) across {len(args.rows)} file(s)")
-    if args.hub_contract:
-        print(
-            f"  hub coverage: {len(covered_repos)}/{len(required_repos)} repo(s), "
-            f"{len(covered_processes)}/{len(required_processes)} process(es), "
-            f"actions={sorted(observed_hub_actions)}"
-        )
     if held:
         print(f"\n  HELD FOR HUMAN REVIEW ({len(held)}) — the registry cannot see dynamically")
         print("  built flags, so these are unproven rather than proven absent:")
@@ -308,7 +335,12 @@ def main() -> int:
     if held:
         print("\n  no hard failures, but held rows must be resolved before these train.")
         return 2
-    if args.hub_contract:
+    if enforce_hub_contract:
+        print(
+            f"  hub coverage: {len(covered_repos)}/{len(required_repos)} repo(s), "
+            f"{len(covered_processes)}/{len(required_processes)} process(es), "
+            f"actions={sorted(observed_hub_actions)}"
+        )
         print(
             "  HUB STRUCTURE PASS — Taey is declared as orchestrator; verify/refuse/route and "
             "reviewed coverage are complete. Semantic posture still requires source review."

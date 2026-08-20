@@ -84,6 +84,14 @@ python3 careers-qwen/verify_repo_usage_rows.py \
   --rows <authored-row-files.jsonl>
 ```
 
+The verifier also activates the Hub gate automatically when any row contains a
+Hub-reserved metadata key (`curriculum_project`, `hub_seat`, `hub_role`,
+`hub_actions`, `code_authoring`, or `coverage`). Such rows cannot fall through to
+ordinary repo-usage admission when a caller omits `--hub-contract`: without the
+reviewed coverage manifest the invocation refuses, and with it the full Hub contract
+runs. The explicit flag remains a fail-closed assertion for a file whose rows omitted
+the required metadata entirely.
+
 The gate fails on missing or undeclared repositories/processes, missing Hub actions,
 the wrong seat or role, and any row that does not explicitly exclude code authoring.
 The ordinary flag, residue, shape, source, and empty-think checks still apply.
