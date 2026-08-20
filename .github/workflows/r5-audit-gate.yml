@@ -73,11 +73,24 @@ jobs:
           echo "PR #$PR_NUM head=$HEAD_SHA base=$BASE_REF"
 
           git fetch -q origin "$BASE_REF"
-          CHANGED="$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA" || true)"
+
+          # Fail-closed base/head resolution: never treat a diff/fetch error as
+          # an empty PR. Only rc=0 with truly empty stdout may pass as empty.
+          set +e
+          CHANGED="$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA" 2>/tmp/r5-diff.err)"
+          DIFF_RC=$?
+          set -e
+          if [ "$DIFF_RC" -ne 0 ]; then
+            echo "FAIL: git diff base/head resolution failed (rc=$DIFF_RC)"
+            echo "BASE_REF=$BASE_REF HEAD_SHA=$HEAD_SHA origin_base=origin/$BASE_REF"
+            cat /tmp/r5-diff.err >&2 || true
+            exit 1
+          fi
+
           echo "changed files:"
           if [ -z "$CHANGED" ]; then
             echo "  (none)"
-            echo "empty PR diff — Actions check gate succeeds."
+            echo "empty PR diff (git diff rc=0) — Actions check gate succeeds."
             exit 0
           fi
           printf '%s\n' "$CHANGED" | sed 's/^/  /'
