@@ -196,7 +196,86 @@ PACK_SETS = {
     "prod_v4": [
         ("cpt_public_repos_prod.jsonl", 1226, "e549870b892d2f72"),
     ],
+    # Forward correction, 2026-08-20. Exact same ten source commits as prod_v4, rebuilt through
+    # treasurer's source-locked selector after its existing no-tests rule was extended to cover
+    # replay_*.py verification harnesses. Historical prod_v4 stays registered above because V5
+    # trained on those exact bytes; this entry governs only future packing.
+    "prod_v5": [
+        ("cpt_public_repos_prod.jsonl", 1209, "fff6dae26ad02e51"),
+    ],
 }
+
+PACKED_CONTENT_POSITIVE_CONTROL = "# repo:"
+PACKED_CONTENT_FORBIDDEN = (
+    "replay_write_dispatch.py",
+    "WRITE DISPATCH REPLAY",
+    "REPLAY: PASS",
+)
+
+
+def _count_new_subsequence(values, needle, carry_length):
+    if not needle:
+        raise ValueError("packed-content marker tokenized to an empty sequence")
+    count = 0
+    last_start = len(values) - len(needle)
+    for start in range(last_start + 1):
+        if start + len(needle) <= carry_length:
+            continue
+        if values[start:start + len(needle)] == needle:
+            count += 1
+    return count
+
+
+def verify_packed_content(path, tokenizer):
+    markers = (PACKED_CONTENT_POSITIVE_CONTROL, *PACKED_CONTENT_FORBIDDEN)
+    token_markers = {
+        marker: tokenizer(marker, add_special_tokens=False)["input_ids"]
+        for marker in markers
+    }
+    max_marker_tokens = max(len(ids) for ids in token_markers.values())
+    token_hits = {marker: 0 for marker in markers}
+    decoded_hits = {marker: 0 for marker in markers}
+    carry = []
+    rows = 0
+    with open(path) as handle:
+        for line in handle:
+            row = json.loads(line)
+            ids = row.get("input_ids")
+            if not isinstance(ids, list) or not ids or any(not isinstance(i, int) for i in ids):
+                raise ValueError(f"packed row {rows} does not carry a non-empty integer input_ids list")
+            window = carry + ids
+            for marker, needle in token_markers.items():
+                token_hits[marker] += _count_new_subsequence(window, needle, len(carry))
+            decoded = tokenizer.decode(ids, skip_special_tokens=False)
+            for marker in markers:
+                decoded_hits[marker] += decoded.count(marker)
+            carry = window[-(max_marker_tokens - 1):] if max_marker_tokens > 1 else []
+            rows += 1
+    if rows == 0:
+        raise ValueError("packed corpus has no rows")
+    positive = PACKED_CONTENT_POSITIVE_CONTROL
+    if token_hits[positive] == 0 or decoded_hits[positive] == 0:
+        raise ValueError(
+            f"packed-content positive control is invisible: {positive!r} "
+            f"token_hits={token_hits[positive]} decoded_hits={decoded_hits[positive]}"
+        )
+    forbidden_hits = {
+        marker: {"token_hits": token_hits[marker], "decoded_hits": decoded_hits[marker]}
+        for marker in PACKED_CONTENT_FORBIDDEN
+    }
+    if any(result["token_hits"] or result["decoded_hits"] for result in forbidden_hits.values()):
+        raise ValueError(f"packed corpus contains forbidden replay-harness markers: {forbidden_hits}")
+    receipt = {
+        "positive_control": {
+            "marker": positive,
+            "token_hits": token_hits[positive],
+            "decoded_hits": decoded_hits[positive],
+        },
+        "forbidden_markers": forbidden_hits,
+        "rows_scanned": rows,
+    }
+    print(f"[pack] content gate VERIFIED: {json.dumps(receipt, sort_keys=True)}", flush=True)
+    return receipt
 
 
 def main():
@@ -281,6 +360,10 @@ def main():
                   f"({blocks/prev_blocks:.0%})")
     else:
         print("[pack] shrinkage gate SKIPPED (set PREV_CORPUS to the last production corpus)")
+    try:
+        content_gate = verify_packed_content(args.out, tok)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
     corpus_sha = sha256_file(args.out)
     manifest_path = args.manifest or args.out + ".manifest.json"
     if os.path.abspath(manifest_path) == os.path.abspath(args.out):
@@ -295,12 +378,14 @@ def main():
         "source_documents": stream_docs,
         "tail_corpus_tokens": tail_kept,
         "cycle_pad_tokens": SEQ - tail_kept if tail_kept else 0,
+        "content_gate": content_gate,
+        "pack_set": args.pack_set,
         "packer_sha256": sha256_file(os.path.abspath(__file__)),
         "inputs": input_receipts,
     })
     print(f"[pack] OUTPUT sha256={corpus_sha}")
     print(f"[pack] MANIFEST {manifest_path} sha256={sha256_file(manifest_path)}")
-    print(f"[pack] register as: cpt_production_v1_packed_{SEQ} (inputs: "
+    print(f"[pack] register as: {args.pack_set}_packed_{SEQ} (inputs: "
           + ", ".join(f"{n}@{s}" for n, _, s in PACK_SETS[args.pack_set]) + ")")
 
 
