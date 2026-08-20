@@ -103,11 +103,16 @@ jobs:
           fi
 
           # Risky: require BOTH auditor statuses = success on HEAD_SHA.
-          # Latest state per context (API returns newest-first).
-          STATUSES="$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate 2>/dev/null || echo '[]')"
-          grok_state="$(echo "$STATUSES" | jq -r '[.[] | select(.context=="audit/grok")] | .[0].state // "missing"')"
-          gk_state="$(echo "$STATUSES" | jq -r '[.[] | select(.context=="audit/gatekeeper")] | .[0].state // "missing"')"
+          # Use the combined-status endpoint (one JSON object). Do NOT use
+          # `gh api --paginate` on /statuses and feed it to jq as a single
+          # array — multi-page output is multiple arrays and silently breaks
+          # latest-per-context selection on noisy heads (CONTROL finding).
+          # Combined status includes the latest status object per context.
+          COMBINED="$(gh api "repos/$REPO/commits/$HEAD_SHA/status")"
+          grok_state="$(echo "$COMBINED" | jq -r '([.statuses[]? | select(.context=="audit/grok")][0].state) // "missing"')"
+          gk_state="$(echo "$COMBINED" | jq -r '([.statuses[]? | select(.context=="audit/gatekeeper")][0].state) // "missing"')"
           echo "audit/grok=$grok_state audit/gatekeeper=$gk_state"
+          echo "combined_state=$(echo "$COMBINED" | jq -r '.state // "missing"')"
 
           if [ "$grok_state" = "success" ] && [ "$gk_state" = "success" ]; then
             echo "R5 ENDORSED: grok + gatekeeper — Actions check gate succeeds."
