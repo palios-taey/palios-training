@@ -140,8 +140,10 @@ LAST_STATE=$(ssh -o BatchMode=yes spark@"$SPARK_MASTER" "$LAST_COMMAND" \
 if [ "$ENTRY_STATUS" -ne 0 ]; then
   die "entrypoint exited status $ENTRY_STATUS; lifecycle state reached: $LAST_STATE"
 fi
-[ "$LAST_STATE" = THOR_DELIVERED ] || \
-  die "entrypoint returned before THOR_DELIVERED; lifecycle state reached: $LAST_STATE"
+case ":${LIFECYCLE_SUCCESS_STATES:-}:" in
+  *":$LAST_STATE:"*) ;;
+  *) die "entrypoint returned at lifecycle state $LAST_STATE; capability $CAP accepts only: ${LIFECYCLE_SUCCESS_STATES:-<none>}" ;;
+esac
 
-echo "  lifecycle: THOR_DELIVERED — production operation complete"
+echo "  lifecycle: $LAST_STATE — $CAP invocation complete"
 exit 0
