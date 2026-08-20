@@ -536,7 +536,7 @@ PY
       EXPECTED_RESUME_DELTA=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["checkpoint_path"])' <<<"$LAST_EVENT")
       [ "${RESUME_DELTA:-}" = "$EXPECTED_RESUME_DELTA" ] || {
         echo "ABORT: continuation must resume the lifecycle checkpoint $EXPECTED_RESUME_DELTA;" >&2
-        echo "  received RESUME_DELTA=${RESUME_DELTA:-<unset>}. Refusing to replay an earlier session." >&2
+        echo "  received RESUME_DELTA=$RESUME_DELTA. Refusing to replay an earlier session." >&2
         exit 1
       }
       [ "$CAMPAIGN_RESUME_STEP" -eq "$PREVIOUS_STEP" ] || {

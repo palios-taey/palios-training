@@ -114,11 +114,12 @@ optional:
 #   Listed so the checker can tell a computed local from an un-classified input.
 local_shell_not_config:
   - ALL
+  - CAMPAIGN_RESUME_STEP
   - GEMM_FAILURES
   - GEMM_MEDIAN
   - GEMM_TFLOPS
   - CPT_LIFECYCLE
-  - EXPECTED_FRAGMENTATION
+  - EXPECTED_RESUME_DELTA
   - INITIAL_SESSION
   - LAST_STATE
   - LAST_EVENT

@@ -91,7 +91,7 @@ capabilities:
       # without it and ZERO producers, so a completed run could not be baked at all — the wall
       # cpt_prod_v4_repos_1ep hit. Intended change, re-pinned to the bytes that carry it.
       dense-9b/trainers/train_fsdp_dense_9b.py: c7bd257d457cded5a2f1feaf70fd59beef883f81f57cd9b2b7081e8e97515dec
-      dense-9b/recipes/run_4node_27b_cpt.sh: 93c278e753ae80383bc4e848d3a86021bb715b52e141c809d9a03ce72b28ee04
+      dense-9b/recipes/run_4node_27b_cpt.sh: ccccfe54262ce10a4102fd61f509ce91967a62d9191140299af89cf3087d4ab3
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
       dense-9b/instrumentation/capture_run.sh: 6c9e95a1c4e538dcccb72254d46837a51f74d4cc44f858b891f72ba0fdeda44e
       dense-9b/recipes/run_refresh_gate.sh: 974689c2086e3ed9f96459eeb0f5c8b3699185222e870e77c918b4ba357997fe
