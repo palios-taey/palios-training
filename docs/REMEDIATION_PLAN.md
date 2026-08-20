@@ -402,11 +402,12 @@ only from `CHECKPOINT_SAVED`. Any non-accepted state or non-zero entrypoint stat
 reusing a directory that already reached `THOR_DELIVERED` can confuse it, and `GEMM_PREFLIGHT_ONLY=1`
 exits before the lifecycle resume check. A fresh directory fail-closes; a reused one may not.
 
-**3. ONE DOOR IS NOW MECHANICAL AT THE LAUNCHER (task-2220f1b9).**
-`run_4node_27b_cpt.sh` fail-closes via `_resolve_capability` for `cpt_27b_4node` before any
-tmux/NCCL side effects. `capture_run.sh`, `run_till_done_v{2,3}.sh`, and `run_refresh_gate.sh`
-route through `scripts/taey-train cpt_27b_4node` so authorization **and** outer lifecycle checks
-apply. Prefer the taey-train door; the inner gate is the fail-closed backstop against direct bash.
+**3. ONE DOOR IS MECHANICAL BEFORE PREPARATION (task-2220f1b9).**
+`capture_run.sh`, `run_till_done_v{2,3}.sh`, and `run_refresh_gate.sh` first run the existing
+`TAEY_TRAIN_CHECK_ONLY=1 scripts/taey-train cpt_27b_4node` gate and exit on refusal before any
+remote, reboot, deploy, watchdog, capture, or durable-log side effect. Their real launch rechecks
+authorization and propagates failure. `run_4node_27b_cpt.sh` also fail-closes via
+`_resolve_capability` before tmux/NCCL as the direct-bash backstop.
 
 **4. `EXPORT_DCP` MUST BE UNSET.** A leftover value restores the inner script's first-step exit 0.
 Through `taey-train` with a fresh journal W3 still catches it, but do not rely on the backstop.

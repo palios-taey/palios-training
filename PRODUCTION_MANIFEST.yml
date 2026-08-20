@@ -94,10 +94,10 @@ capabilities:
       dense-9b/trainers/train_fsdp_dense_9b.py: 940535165ecf20f23f22782ab6b41d0e2db48151bd4f3ef1a32a10be5e3c55c2
       dense-9b/recipes/run_4node_27b_cpt.sh: f68cda855417146dc74c013fc79789f9ef3df22cfd22be11c91dcfe62bef4bf1
       dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
-      dense-9b/instrumentation/capture_run.sh: e58ab61f287cef013eff61e6b2e515fe7db140e7261f26f22590e4e58fc94ea2
-      dense-9b/recipes/run_refresh_gate.sh: 285c6ad6369313f287452bdb42d7c7ba01b969f7f5ba0b911d2080b4ecd9907c
-      dense-9b/recipes/run_till_done_v2.sh: 683d093d6a11fb02a0cfef47097126dd79383fd90019873de8ec8ce146b06911
-      dense-9b/recipes/run_till_done_v3.sh: 1b582922934e144b136bc7797bef48f40d3f456acd567ff681f1de6672fd2e11
+      dense-9b/instrumentation/capture_run.sh: 59ef33891ed795f79a257518eef3d3a5caf12571596475fdd41d14eb8f67fdd2
+      dense-9b/recipes/run_refresh_gate.sh: 0a093e0835d892a96b4932d7215e0191aa27ce68cb16e3fee7f454974d984b39
+      dense-9b/recipes/run_till_done_v2.sh: 9990c9c50d7f2de873aaddabd1ec565fa1c0471621465c8fb02118e3e4c404ae
+      dense-9b/recipes/run_till_done_v3.sh: aa89f1f90670e869cac4e5a68cab47b14c2c2a0eccd01d8503cc45e6a46d0af2
       scripts/taey-train: 72983a2fa4b4c043dd64c1a46409d3d6d62060e5b25663b041fd57f9fc426efe
       scripts/_resolve_capability.py: 6b5646fe4842a66631a50a12981d6aecd26524a6b041f6ce69d935e34255b321
       scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f

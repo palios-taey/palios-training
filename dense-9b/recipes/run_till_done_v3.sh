@@ -8,6 +8,12 @@
 # Pull-off/crash without a new checkpoint = automatic retry of the same target.
 # Targets hit the exact epoch boundaries 231/462/693 for per-epoch eval checkpoints.
 set -uo pipefail
+
+# Authorization must dominate every remote, reboot, deploy, watchdog, capture, and log side effect.
+_GATE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TAEY_TRAIN_CHECK_ONLY=1 "$_GATE_ROOT/scripts/taey-train" cpt_27b_4node || exit 1
+unset _GATE_ROOT
+
 NODES=($SPARK_MGMT_IPS)
 MASTER=${SPARK_MASTER}
 CKPT_DIR=${CKPT_DIR:-${SPARK_HOME}/training_outputs/production_v2}
@@ -124,7 +130,7 @@ while true; do
   OUTPUT_DIR=$CKPT_DIR \
   RESUME_DELTA=$CKPT_DIR/checkpoint-$cur \
   CLOCK_CAP=1600 \
-  >> "$DLOG.launch_a$attempt" 2>&1
+  >> "$DLOG.launch_a$attempt" 2>&1 || { say "ABORT: taey-train refused or failed"; exit 1; }
 
   # wait for the session to end (all tmux gone), max 3.5h
   say "session launched; waiting for exit"
