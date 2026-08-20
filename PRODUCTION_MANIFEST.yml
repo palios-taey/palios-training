@@ -473,10 +473,6 @@ authorizations:
     authorized_by: Jesse
     authorized_on: 2026-08-20
     input_contract:
-      training_campaign_id: cpt_prod_v6_clean_repos_2ep
-      checkpoint_kind: all_rank_complete_dcp
-      checkpoint_step: 168
-      trainer_meta_sha256: 8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262
       runtime_env:
         DCP_DIR: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep
         EXPECTED_CHECKPOINT_STEP: "168"
