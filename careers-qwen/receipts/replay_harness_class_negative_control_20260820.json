@@ -1,37 +1,183 @@
 {
-  "known_harness_rows": 13,
-  "legitimate_mention_docs": 4,
-  "refused": 13,
-  "refused_doc_ids": [
-    "repo::apply-machine::replay_agent_worker_cli.py",
-    "repo::apply-machine::replay_choice_resume_projection.py",
-    "repo::apply-machine::replay_dr_requester_contract.py",
-    "repo::apply-machine::replay_gate_on_gate_accounting.py",
-    "repo::apply-machine::replay_native_upload_protocol.py",
-    "repo::apply-machine::replay_navigation_dispatch.py",
-    "repo::apply-machine::replay_profile_mapping_contract.py",
-    "repo::apply-machine::replay_r6_submit_authority.py",
-    "repo::apply-machine::replay_salary_field_mapping_contract.py",
-    "repo::apply-machine::replay_semantic_ref_churn.py",
-    "repo::apply-machine::replay_submit_transport.py",
-    "repo::apply-machine::replay_type_filter_dispatch.py",
-    "repo::apply-machine::replay_write_dispatch.py"
-  ],
+  "acceptance": {
+    "corrected_mention_docs": 35,
+    "corrected_mention_rows": 40,
+    "corrected_packed_prefix": "503e18e8",
+    "corrected_packed_refused": false,
+    "corrected_source_prefix": "fff6dae2",
+    "historical_harness_docs": 13,
+    "historical_packed_prefix": "841df5ec",
+    "historical_packed_refused": true,
+    "historical_source_prefix": "e549870b"
+  },
+  "corrected_packed": {
+    "forbidden_markers": {
+      "REPLAY: PASS": {
+        "decoded_hits": 0,
+        "token_hits": 0
+      },
+      "WRITE DISPATCH REPLAY": {
+        "decoded_hits": 0,
+        "token_hits": 0
+      }
+    },
+    "path": "/home/spark/training_data/cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl",
+    "positive_control": {
+      "decoded_hits": 850,
+      "fired": true,
+      "marker": "# repo:",
+      "token_hits": 849
+    },
+    "refused": false,
+    "replay_harness_headers": {
+      "decoded_hits": 0
+    },
+    "rows_scanned": 334,
+    "sha256": "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba"
+  },
+  "corrected_source": {
+    "harness_doc_ids": [],
+    "harness_docs": 0,
+    "harness_rows": 0,
+    "mention_doc_ids": [
+      "repo::apply-machine::instructions.py",
+      "repo::apply-machine::rearm_submit.py",
+      "repo::apply-machine::submit_receipt.py",
+      "repo::claude-code-fleet-orchestrator::fleet_orchestrator/cli_orch_cron.py",
+      "repo::governance::GATE_B.md",
+      "repo::isma-core::MEMORY_GOVERNANCE.md",
+      "repo::isma-core::isma/scripts/disk_headroom_canary.sh",
+      "repo::isma-core::isma/src/hmm/eventlog.py",
+      "repo::palios-training::careers-qwen/CPT_REFRESH_RECIPE_v0.9.md",
+      "repo::palios-training::careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md",
+      "repo::palios-training::careers-qwen/TRAINING_BACKLOG.md",
+      "repo::palios-training::careers-qwen/consult_taey_becomes_operator.md",
+      "repo::palios-training::careers-qwen/pack_production_corpus.py",
+      "repo::palios-training::careers-qwen/train_lora_sft.py",
+      "repo::palios-training::dense-9b/experiments/RECIPE_v2_synthesis.md",
+      "repo::palios-training::dense-9b/experiments/RETENTION_BATTERY_SPEC.md",
+      "repo::palios-training::dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh",
+      "repo::taey-presence::dashboard/app.py",
+      "repo::taey-presence::docs/vertical_slice_2026-08-17/REPORT_TO_CHATS_2026-08-17.md",
+      "repo::taey-presence::docs/vertical_slice_2026-08-17/audits/round3_horizon_verdict.md",
+      "repo::taey-presence::docs/vertical_slice_2026-08-17/session_2026-08-17/instructions/orch_plan_as_ingested.md",
+      "repo::taey-presence::serving/soma_proxy.py",
+      "repo::taeys-hands::CONSULTATION_CONTRACT.md",
+      "repo::taeys-hands::consultation_v2/platforms/gemini/driver.py",
+      "repo::taeys-hands::consultation_v2/platforms/grok/driver.py",
+      "repo::taeys-hands::consultation_v2/platforms/perplexity/driver.py",
+      "repo::taeys-hands::consultation_v2/primitives.py",
+      "repo::taeys-hands::consultation_v2/supervised_ui_receipts.py",
+      "repo::taeys-hands::consultation_v2/supervised_ui_seat.py",
+      "repo::taeys-hands::consultation_v2/types.py",
+      "repo::taeys-hands::consultations/yaml_audit_2026-06-21/claude.md",
+      "repo::taeys-hands::docs/PUBLIC_SUPERVISED_TAEY_UI_SEAT_PLAN_2026-08-04.md",
+      "repo::taeys-hands::docs/UI_INTERACTION_AUTHORITY.md",
+      "repo::taeys-hands::docs/UI_SFT_REAL_TRACE_INVENTORY_2026-08-04.md",
+      "repo::taeys-hands::scripts/run_supervised_ui_seat.py"
+    ],
+    "mention_docs": 35,
+    "mention_rows": 40,
+    "path": "/home/spark/training_data/cpt_prod_src-fff6dae26ad02e51/cpt_public_repos_prod.jsonl",
+    "positive_control_rows": 844,
+    "rows": 1209,
+    "sha256": "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685"
+  },
+  "historical_packed": {
+    "forbidden_markers": {
+      "REPLAY: PASS": {
+        "decoded_hits": 7,
+        "token_hits": 0
+      },
+      "WRITE DISPATCH REPLAY": {
+        "decoded_hits": 1,
+        "token_hits": 1
+      }
+    },
+    "path": "/var/spark/isma/training/cpt_prod_v4_repos_packed_8192.jsonl",
+    "positive_control": {
+      "decoded_hits": 863,
+      "fired": true,
+      "marker": "# repo:",
+      "token_hits": 862
+    },
+    "refused": true,
+    "replay_harness_headers": {
+      "decoded_hits": 13
+    },
+    "rows_scanned": 339,
+    "sha256": "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03427815ddf"
+  },
+  "historical_source": {
+    "harness_doc_ids": [
+      "repo::apply-machine::replay_agent_worker_cli.py",
+      "repo::apply-machine::replay_choice_resume_projection.py",
+      "repo::apply-machine::replay_dr_requester_contract.py",
+      "repo::apply-machine::replay_gate_on_gate_accounting.py",
+      "repo::apply-machine::replay_native_upload_protocol.py",
+      "repo::apply-machine::replay_navigation_dispatch.py",
+      "repo::apply-machine::replay_profile_mapping_contract.py",
+      "repo::apply-machine::replay_r6_submit_authority.py",
+      "repo::apply-machine::replay_salary_field_mapping_contract.py",
+      "repo::apply-machine::replay_semantic_ref_churn.py",
+      "repo::apply-machine::replay_submit_transport.py",
+      "repo::apply-machine::replay_type_filter_dispatch.py",
+      "repo::apply-machine::replay_write_dispatch.py"
+    ],
+    "harness_docs": 13,
+    "harness_rows": 17,
+    "mention_doc_ids": [
+      "repo::apply-machine::instructions.py",
+      "repo::apply-machine::rearm_submit.py",
+      "repo::apply-machine::submit_receipt.py",
+      "repo::claude-code-fleet-orchestrator::fleet_orchestrator/cli_orch_cron.py",
+      "repo::governance::GATE_B.md",
+      "repo::isma-core::MEMORY_GOVERNANCE.md",
+      "repo::isma-core::isma/scripts/disk_headroom_canary.sh",
+      "repo::isma-core::isma/src/hmm/eventlog.py",
+      "repo::palios-training::careers-qwen/CPT_REFRESH_RECIPE_v0.9.md",
+      "repo::palios-training::careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md",
+      "repo::palios-training::careers-qwen/TRAINING_BACKLOG.md",
+      "repo::palios-training::careers-qwen/consult_taey_becomes_operator.md",
+      "repo::palios-training::careers-qwen/pack_production_corpus.py",
+      "repo::palios-training::careers-qwen/train_lora_sft.py",
+      "repo::palios-training::dense-9b/experiments/RECIPE_v2_synthesis.md",
+      "repo::palios-training::dense-9b/experiments/RETENTION_BATTERY_SPEC.md",
+      "repo::palios-training::dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh",
+      "repo::taey-presence::dashboard/app.py",
+      "repo::taey-presence::docs/vertical_slice_2026-08-17/REPORT_TO_CHATS_2026-08-17.md",
+      "repo::taey-presence::docs/vertical_slice_2026-08-17/audits/round3_horizon_verdict.md",
+      "repo::taey-presence::docs/vertical_slice_2026-08-17/session_2026-08-17/instructions/orch_plan_as_ingested.md",
+      "repo::taey-presence::serving/soma_proxy.py",
+      "repo::taeys-hands::CONSULTATION_CONTRACT.md",
+      "repo::taeys-hands::consultation_v2/platforms/gemini/driver.py",
+      "repo::taeys-hands::consultation_v2/platforms/grok/driver.py",
+      "repo::taeys-hands::consultation_v2/platforms/perplexity/driver.py",
+      "repo::taeys-hands::consultation_v2/primitives.py",
+      "repo::taeys-hands::consultation_v2/supervised_ui_receipts.py",
+      "repo::taeys-hands::consultation_v2/supervised_ui_seat.py",
+      "repo::taeys-hands::consultation_v2/types.py",
+      "repo::taeys-hands::consultations/yaml_audit_2026-06-21/claude.md",
+      "repo::taeys-hands::docs/PUBLIC_SUPERVISED_TAEY_UI_SEAT_PLAN_2026-08-04.md",
+      "repo::taeys-hands::docs/UI_INTERACTION_AUTHORITY.md",
+      "repo::taeys-hands::docs/UI_SFT_REAL_TRACE_INVENTORY_2026-08-04.md",
+      "repo::taeys-hands::scripts/run_supervised_ui_seat.py"
+    ],
+    "mention_docs": 35,
+    "mention_rows": 40,
+    "path": "/home/spark/training_data/cpt_prod_src-e549870b892d2f72/cpt_public_repos_prod.jsonl",
+    "positive_control_rows": 857,
+    "rows": 1226,
+    "sha256": "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
+  },
   "scanner": {
     "doc_id": "::replay_[^/]+\\.py$",
     "forbidden_literals": [
       "WRITE DISPATCH REPLAY",
       "REPLAY: PASS"
     ],
-    "header": "(?:^|\\n)# repo: \\S+ file: replay_[^/\\s]+\\.py(?=\\n|$)",
+    "header": "# repo: \\S+ file: replay_[^/\\s]+\\.py(?=\\n|$)",
     "positive_control": "# repo:"
   },
-  "schema": "palios.replay_harness_class_proof.v1",
-  "survived": 4,
-  "survived_doc_ids": [
-    "repo::apply-machine::instructions.py",
-    "repo::apply-machine::rearm_submit.py",
-    "repo::apply-machine::submit_receipt.py",
-    "repo::palios-training::careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md"
-  ]
+  "schema": "palios.replay_harness_class_proof.v2"
 }

@@ -214,7 +214,7 @@ PACKED_CONTENT_FORBIDDEN = (
 # list is how 6 of 13 replay_*.py rows survived the previous packed-content gate.
 REPLAY_HARNESS_DOC_ID = re.compile(r"::replay_[^/]+\.py$")
 REPLAY_HARNESS_HEADER = re.compile(
-    r"(?:^|\n)# repo: \S+ file: replay_[^/\s]+\.py(?=\n|$)"
+    r"# repo: \S+ file: replay_[^/\s]+\.py(?=\n|$)"
 )
 _HEADER_DECODE_CARRY = 128
 
@@ -256,7 +256,65 @@ def _unlink_quiet(*paths):
             continue
 
 
-def verify_packed_content(path, tokenizer):
+HISTORICAL_PACKED_SHA_PREFIX = "841df5ec"
+HISTORICAL_SOURCE_SHA_PREFIX = "e549870b"
+CORRECTED_SOURCE_SHA_PREFIX = "fff6dae2"
+CORRECTED_PACKED_SHA_PREFIX = "503e18e8"
+CORRECTED_MENTION_DOCS = 35
+CORRECTED_MENTION_ROWS = 40
+
+
+def _source_row_mentions_replay(doc_id, source_file, text):
+    blob = f"{text}\n{doc_id}\n{source_file}".lower()
+    return "replay" in blob
+
+
+def measure_source_jsonl(path):
+    sha = sha256_file(path)
+    harness_docs = []
+    mention_docs = []
+    harness_rows = 0
+    mention_rows = 0
+    positive_rows = 0
+    rows = 0
+    seen_harness = set()
+    seen_mention = set()
+    with open(path) as handle:
+        for line in handle:
+            payload = json.loads(line)
+            rows += 1
+            text = payload.get("text") or ""
+            meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+            doc_id = str(meta.get("doc_id") or "")
+            source_file = str(meta.get("source_file") or "")
+            if PACKED_CONTENT_POSITIVE_CONTROL in text:
+                positive_rows += 1
+            if replay_harness_source_row(doc_id, text):
+                harness_rows += 1
+                if doc_id not in seen_harness:
+                    seen_harness.add(doc_id)
+                    harness_docs.append(doc_id)
+                continue
+            if _source_row_mentions_replay(doc_id, source_file, text):
+                mention_rows += 1
+                if doc_id not in seen_mention:
+                    seen_mention.add(doc_id)
+                    mention_docs.append(doc_id)
+    return {
+        "path": os.path.abspath(path),
+        "sha256": sha,
+        "rows": rows,
+        "positive_control_rows": positive_rows,
+        "harness_rows": harness_rows,
+        "harness_docs": len(harness_docs),
+        "harness_doc_ids": harness_docs,
+        "mention_rows": mention_rows,
+        "mention_docs": len(mention_docs),
+        "mention_doc_ids": mention_docs,
+    }
+
+
+def measure_packed_content(path, tokenizer):
     markers = (PACKED_CONTENT_POSITIVE_CONTROL, *PACKED_CONTENT_FORBIDDEN)
     token_markers = {
         marker: tokenizer(marker, add_special_tokens=False)["input_ids"]
@@ -291,111 +349,145 @@ def verify_packed_content(path, tokenizer):
     if rows == 0:
         raise ValueError("packed corpus has no rows")
     positive = PACKED_CONTENT_POSITIVE_CONTROL
-    if token_hits[positive] == 0 or decoded_hits[positive] == 0:
-        raise ValueError(
-            f"packed-content positive control is invisible: {positive!r} "
-            f"token_hits={token_hits[positive]} decoded_hits={decoded_hits[positive]}"
-        )
     forbidden_hits = {
         marker: {"token_hits": token_hits[marker], "decoded_hits": decoded_hits[marker]}
         for marker in PACKED_CONTENT_FORBIDDEN
     }
-    if any(result["token_hits"] or result["decoded_hits"] for result in forbidden_hits.values()):
-        raise ValueError(f"packed corpus contains forbidden replay-harness markers: {forbidden_hits}")
-    if header_hits:
-        raise ValueError(
-            f"packed corpus contains replay-harness source headers: decoded_hits={header_hits}"
-        )
-    receipt = {
+    positive_fired = token_hits[positive] > 0 and decoded_hits[positive] > 0
+    forbidden_fired = any(
+        result["token_hits"] or result["decoded_hits"] for result in forbidden_hits.values()
+    )
+    refused = (not positive_fired) or forbidden_fired or header_hits > 0
+    return {
+        "path": os.path.abspath(path),
+        "sha256": sha256_file(path),
+        "rows_scanned": rows,
         "positive_control": {
             "marker": positive,
             "token_hits": token_hits[positive],
             "decoded_hits": decoded_hits[positive],
+            "fired": positive_fired,
         },
         "forbidden_markers": forbidden_hits,
         "replay_harness_headers": {"decoded_hits": header_hits},
-        "rows_scanned": rows,
+        "refused": refused,
     }
-    print(f"[pack] content gate VERIFIED: {json.dumps(receipt, sort_keys=True)}", flush=True)
-    return receipt
 
 
-# Measurement set for the class-proof receipt only. The live gate uses the regex
-# class above; it does not iterate this tuple.
-_KNOWN_HARNESS_FILES = (
-    "replay_agent_worker_cli.py",
-    "replay_choice_resume_projection.py",
-    "replay_dr_requester_contract.py",
-    "replay_gate_on_gate_accounting.py",
-    "replay_native_upload_protocol.py",
-    "replay_navigation_dispatch.py",
-    "replay_profile_mapping_contract.py",
-    "replay_r6_submit_authority.py",
-    "replay_salary_field_mapping_contract.py",
-    "replay_semantic_ref_churn.py",
-    "replay_submit_transport.py",
-    "replay_type_filter_dispatch.py",
-    "replay_write_dispatch.py",
-)
-_LEGITIMATE_MENTION_DOCS = (
-    (
-        "repo::apply-machine::instructions.py",
-        "# repo: apply-machine file: instructions.py\n\n"
-        r'replay_sha256=[0-9a-f]{64}',
-    ),
-    (
-        "repo::apply-machine::rearm_submit.py",
-        "# repo: apply-machine file: rearm_submit.py\n\n"
-        "only prior code naming the archive convention is replay_r6_submit_authority.py, "
-        "a REPLAY harness.",
-    ),
-    (
-        "repo::apply-machine::submit_receipt.py",
-        "# repo: apply-machine file: submit_receipt.py\n\n"
-        r'replay_sha256=[0-9a-f]{64}',
-    ),
-    (
-        "repo::palios-training::careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md",
-        "# repo: palios-training file: careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md\n\n"
-        '"eval_ref": "ep2_replay_action_<idx>"',
-    ),
-)
+def verify_packed_content(path, tokenizer):
+    receipt = measure_packed_content(path, tokenizer)
+    positive = receipt["positive_control"]
+    if not positive["fired"]:
+        raise ValueError(
+            f"packed-content positive control is invisible: {positive['marker']!r} "
+            f"token_hits={positive['token_hits']} decoded_hits={positive['decoded_hits']}"
+        )
+    forbidden_hits = receipt["forbidden_markers"]
+    if any(result["token_hits"] or result["decoded_hits"] for result in forbidden_hits.values()):
+        raise ValueError(f"packed corpus contains forbidden replay-harness markers: {forbidden_hits}")
+    header_hits = receipt["replay_harness_headers"]["decoded_hits"]
+    if header_hits:
+        raise ValueError(
+            f"packed corpus contains replay-harness source headers: decoded_hits={header_hits}"
+        )
+    print(f"[pack] content gate VERIFIED: {json.dumps({
+        'positive_control': receipt['positive_control'],
+        'forbidden_markers': receipt['forbidden_markers'],
+        'replay_harness_headers': receipt['replay_harness_headers'],
+        'rows_scanned': receipt['rows_scanned'],
+    }, sort_keys=True)}", flush=True)
+    return {
+        "positive_control": {
+            "marker": positive["marker"],
+            "token_hits": positive["token_hits"],
+            "decoded_hits": positive["decoded_hits"],
+        },
+        "forbidden_markers": forbidden_hits,
+        "replay_harness_headers": receipt["replay_harness_headers"],
+        "rows_scanned": receipt["rows_scanned"],
+    }
 
 
-def write_class_proof_receipt(path):
-    refused = []
-    for name in _KNOWN_HARNESS_FILES:
-        doc_id = f"repo::apply-machine::{name}"
-        text = f"# repo: apply-machine file: {name}\n\nbody\n"
-        if not replay_harness_source_row(doc_id, text):
-            raise SystemExit(f"ABORT: class proof failed to refuse {doc_id}")
-        refused.append({"doc_id": doc_id, "header": f"# repo: apply-machine file: {name}"})
-    survived = []
-    for doc_id, text in _LEGITIMATE_MENTION_DOCS:
-        if replay_harness_source_row(doc_id, text):
-            raise SystemExit(f"ABORT: class proof false-refused {doc_id}")
-        survived.append(doc_id)
-    if "REPLAY: PASS" not in PACKED_CONTENT_FORBIDDEN:
-        raise SystemExit("ABORT: class proof lost REPLAY: PASS")
-    if PACKED_CONTENT_POSITIVE_CONTROL != "# repo:":
-        raise SystemExit("ABORT: class proof lost positive control")
+def _require_sha_prefix(label, sha, prefix):
+    if not sha.startswith(prefix):
+        raise SystemExit(
+            f"ABORT: {label} sha256 {sha} does not start with required prefix {prefix}"
+        )
+
+
+def write_class_proof_receipt(
+    path,
+    *,
+    historical_packed,
+    historical_source,
+    corrected_source,
+    corrected_packed,
+    tokenizer_path,
+):
+    from transformers import AutoTokenizer
+
+    tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    hist_source = measure_source_jsonl(historical_source)
+    corr_source = measure_source_jsonl(corrected_source)
+    _require_sha_prefix("historical-source", hist_source["sha256"], HISTORICAL_SOURCE_SHA_PREFIX)
+    _require_sha_prefix("corrected-source", corr_source["sha256"], CORRECTED_SOURCE_SHA_PREFIX)
+    hist_packed = measure_packed_content(historical_packed, tok)
+    corr_packed = measure_packed_content(corrected_packed, tok)
+    _require_sha_prefix("historical-packed", hist_packed["sha256"], HISTORICAL_PACKED_SHA_PREFIX)
+    _require_sha_prefix("corrected-packed", corr_packed["sha256"], CORRECTED_PACKED_SHA_PREFIX)
+
+    errors = []
+    if hist_source["harness_docs"] != 13:
+        errors.append(
+            f"historical source harness docs {hist_source['harness_docs']} != 13"
+        )
+    if not hist_packed["positive_control"]["fired"]:
+        errors.append("historical packed positive control did not fire")
+    if not hist_packed["refused"]:
+        errors.append("historical packed gate passed; it must refuse")
+    if corr_source["harness_docs"] != 0:
+        errors.append(
+            f"corrected source harness docs {corr_source['harness_docs']} != 0"
+        )
+    if corr_source["mention_docs"] != CORRECTED_MENTION_DOCS:
+        errors.append(
+            f"corrected mention docs {corr_source['mention_docs']} != {CORRECTED_MENTION_DOCS}"
+        )
+    if corr_source["mention_rows"] != CORRECTED_MENTION_ROWS:
+        errors.append(
+            f"corrected mention rows {corr_source['mention_rows']} != {CORRECTED_MENTION_ROWS}"
+        )
+    if not corr_packed["positive_control"]["fired"]:
+        errors.append("corrected packed positive control did not fire")
+    if corr_packed["refused"]:
+        errors.append("corrected packed gate refused")
+    if errors:
+        raise SystemExit("ABORT: class proof against real artifacts failed: " + "; ".join(errors))
+
     receipt = {
-        "schema": "palios.replay_harness_class_proof.v1",
-        "known_harness_rows": 13,
-        "refused": len(refused),
-        "refused_doc_ids": [row["doc_id"] for row in refused],
-        "legitimate_mention_docs": 4,
-        "survived": len(survived),
-        "survived_doc_ids": survived,
+        "schema": "palios.replay_harness_class_proof.v2",
         "scanner": {
             "doc_id": REPLAY_HARNESS_DOC_ID.pattern,
             "header": REPLAY_HARNESS_HEADER.pattern,
             "forbidden_literals": list(PACKED_CONTENT_FORBIDDEN),
             "positive_control": PACKED_CONTENT_POSITIVE_CONTROL,
         },
+        "historical_source": hist_source,
+        "historical_packed": hist_packed,
+        "corrected_source": corr_source,
+        "corrected_packed": corr_packed,
+        "acceptance": {
+            "historical_packed_prefix": HISTORICAL_PACKED_SHA_PREFIX,
+            "historical_source_prefix": HISTORICAL_SOURCE_SHA_PREFIX,
+            "corrected_source_prefix": CORRECTED_SOURCE_SHA_PREFIX,
+            "corrected_packed_prefix": CORRECTED_PACKED_SHA_PREFIX,
+            "historical_harness_docs": 13,
+            "historical_packed_refused": True,
+            "corrected_mention_docs": CORRECTED_MENTION_DOCS,
+            "corrected_mention_rows": CORRECTED_MENTION_ROWS,
+            "corrected_packed_refused": False,
+        },
     }
-    if receipt["refused"] != 13 or receipt["survived"] != 4:
-        raise SystemExit(f"ABORT: class proof counts {receipt['refused']}/13 refused {receipt['survived']}/4 survived")
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -406,15 +498,31 @@ def write_class_proof_receipt(path):
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(stage, path)
-    print(json.dumps(receipt, sort_keys=True))
-    print(f"[pack] class proof VERIFIED: 13/13 refuse, 4/4 survive, receipt={path}")
+    print(json.dumps({
+        "historical_source_sha256": hist_source["sha256"],
+        "historical_packed_sha256": hist_packed["sha256"],
+        "corrected_source_sha256": corr_source["sha256"],
+        "corrected_packed_sha256": corr_packed["sha256"],
+        "historical_harness_docs": hist_source["harness_docs"],
+        "historical_packed_refused": hist_packed["refused"],
+        "historical_packed_positive_fired": hist_packed["positive_control"]["fired"],
+        "corrected_mention_docs": corr_source["mention_docs"],
+        "corrected_mention_rows": corr_source["mention_rows"],
+        "corrected_packed_refused": corr_packed["refused"],
+        "corrected_packed_positive_fired": corr_packed["positive_control"]["fired"],
+    }, sort_keys=True))
+    print(f"[pack] class proof VERIFIED against real artifacts: receipt={path}")
     return 0
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--class-proof", metavar="RECEIPT",
-                    help="write replay-harness class negative-control receipt and exit")
+                    help="write replay-harness class proof from real corpus artifacts and exit")
+    ap.add_argument("--historical-packed", help="packed corpus whose sha256 starts 841df5ec")
+    ap.add_argument("--historical-source", help="source jsonl whose sha256 starts e549870b")
+    ap.add_argument("--corrected-source", help="source jsonl whose sha256 starts fff6dae2")
+    ap.add_argument("--corrected-packed", help="packed corpus whose sha256 starts 503e18e8")
     ap.add_argument("--pack-set", default="production_v1", choices=sorted(PACK_SETS))
     ap.add_argument("--slices-dir")
     ap.add_argument("--tokenizer")
@@ -422,7 +530,25 @@ def main():
     ap.add_argument("--manifest", help="default: <out>.manifest.json")
     args = ap.parse_args()
     if args.class_proof:
-        return write_class_proof_receipt(args.class_proof)
+        needed = (
+            "historical_packed",
+            "historical_source",
+            "corrected_source",
+            "corrected_packed",
+            "tokenizer",
+        )
+        missing = [name for name in needed if not getattr(args, name)]
+        if missing:
+            ap.error("--class-proof requires "
+                     + ", ".join("--" + name.replace("_", "-") for name in missing))
+        return write_class_proof_receipt(
+            args.class_proof,
+            historical_packed=args.historical_packed,
+            historical_source=args.historical_source,
+            corrected_source=args.corrected_source,
+            corrected_packed=args.corrected_packed,
+            tokenizer_path=args.tokenizer,
+        )
     missing = [name for name in ("slices_dir", "tokenizer", "out") if not getattr(args, name)]
     if missing:
         ap.error("the following arguments are required unless --class-proof: "
