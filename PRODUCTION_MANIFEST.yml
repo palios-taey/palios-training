@@ -524,3 +524,41 @@ authorization:
     scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
     scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
     scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
+
+# BAKE AUTHORIZATION — a separate capability-bound act. The CPT receipt cannot authorize export,
+# conversion, graft, qualification, or delivery. Jesse directed this session to run the production
+# training process through baking and to report the resulting weight-diff; this object binds that
+# instruction to the exact completed V6 checkpoint and the exact candidate bake bytes below.
+authorizations:
+  - capability: bake_export
+    campaign_id: bake_prod_v6_clean_repos_2ep
+    authorized_by: Jesse
+    authorized_on: 2026-08-20
+    input_contract:
+      training_campaign_id: cpt_prod_v6_clean_repos_2ep
+      checkpoint_kind: all_rank_complete_dcp
+      checkpoint_step: 168
+      trainer_meta_sha256: 8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262
+      runtime_env:
+        DCP_DIR: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep
+    scope: >
+      Bake the independently verified all-rank step-168 final checkpoint for
+      cpt_prod_v6_clean_repos_2ep through coordinated sharded export, offline 851-tensor
+      conversion, the absolute base-to-final weight-diff gate, the per-run 1199-tensor servable
+      graft, provenance sealing, and THOR_DELIVERED. Stop below the 5e-05 weight-diff floor unless
+      an approved Chats review receipt authorizes finalization; do not launch SFT or promotion.
+    content_sha:
+      careers-qwen/post_cpt_pipeline.sh: c97a2e7fac31fb4f4cd3ffc7912a7da0e73e8094b1a2c56a89b474b25da080f1
+      dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
+      dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
+      dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
+      dense-9b/recipes/model_snapshot_sync.sh: 4af7859f53f38db9b2752ae5715b0aba10e447c2b32acd860592cb24a0dae0bc
+      careers-qwen/graft_cpt_into_servable.py: 7410ba2a408c53d309b56a0799a22eecf2f7c2f373d6eddbde45ebf0ad731b1a
+      careers-qwen/measure_cpt_delta.py: c7076b9a9898833dd3bb01d962e58f994bbd3560175be4c8361e2533db52430e
+      careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
+      careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
+      careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
+      careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
+      scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
+      scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
+      scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
