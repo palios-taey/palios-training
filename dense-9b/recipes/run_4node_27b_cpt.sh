@@ -428,6 +428,10 @@ fi
 : "${CLOCK_CAP:?set CLOCK_CAP — nvidia-smi -lgc PERSISTS ACROSS JOBS, so an unset value silently
 inherits whatever the previous run left. README section 7 records a run executing its whole
 length at a third of its clock with nothing in any log saying so.}"
+# RUN_ENV is an ALLOWLIST. CLOCK_CAP was applied only as a controller nvidia-smi -lgc here, so
+# the trainer's /proc/self/environ capture could not record it. Forward after :? so the
+# value that actually capped the nodes is the value run_config.env can name.
+RUN_ENV="$RUN_ENV CLOCK_CAP=$CLOCK_CAP"
 if [ "$CLOCK_CAP" != "0" ]; then
   echo "  thermal: capping graphics clock <= ${CLOCK_CAP}MHz on all 4 nodes (prevents ~94C hard-crash)"
   for h in "${ALL[@]}"; do
