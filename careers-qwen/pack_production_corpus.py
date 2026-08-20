@@ -24,6 +24,7 @@ import argparse, json, os, re, sys
 
 from corpus_manifest import (
     SCHEMA,
+    resolve_generation,
     sha256_file,
     write_generation_pointer,
     write_manifest,
@@ -217,9 +218,9 @@ PACKED_CONTENT_FORBIDDEN = (
 )
 # Class identity for replay harnesses. Do not enumerate filenames here: a literal
 # list is how 6 of 13 replay_*.py rows survived the previous packed-content gate.
-REPLAY_HARNESS_DOC_ID = re.compile(r"::replay_[^/]+\.py$")
+REPLAY_HARNESS_DOC_ID = re.compile(r"::(?:.+/)?replay_[^/]+\.py$")
 REPLAY_HARNESS_HEADER = re.compile(
-    r"# repo: \S+ file: replay_[^/\s]+\.py(?=\n|$)"
+    r"# repo: \S+ file: (?:.+/)?replay_[^/\s]+\.py(?=\n|$)"
 )
 _HEADER_DECODE_CARRY = 128
 
@@ -263,10 +264,10 @@ def _unlink_quiet(*paths):
             continue
 
 
-HISTORICAL_PACKED_SHA_PREFIX = "841df5ec"
-HISTORICAL_SOURCE_SHA_PREFIX = "e549870b"
-CORRECTED_SOURCE_SHA_PREFIX = "fff6dae2"
-CORRECTED_PACKED_SHA_PREFIX = "503e18e8"
+HISTORICAL_PACKED_SHA = "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03427815ddf"
+HISTORICAL_SOURCE_SHA = "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
+CORRECTED_SOURCE_SHA = "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685"
+CORRECTED_PACKED_SHA = "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba"
 CORRECTED_MENTION_DOCS = 35
 CORRECTED_MENTION_ROWS = 40
 
@@ -413,11 +414,79 @@ def verify_packed_content(path, tokenizer):
     }
 
 
-def _require_sha_prefix(label, sha, prefix):
-    if not sha.startswith(prefix):
+def _require_sha(label, sha, expected):
+    if sha != expected:
         raise SystemExit(
-            f"ABORT: {label} sha256 {sha} does not start with required prefix {prefix}"
+            f"ABORT: {label} sha256 {sha} does not equal required {expected}"
         )
+
+
+def prove_nested_selector():
+    harness_id = "repo::apply-machine::harness/replay_nested_contract.py"
+    harness_text = (
+        "# repo: apply-machine file: harness/replay_nested_contract.py\n\n"
+        "Offline replay for a nested path.\n"
+    )
+    mention_id = "repo::apply-machine::harness/notes.md"
+    mention_text = (
+        "# repo: apply-machine file: harness/notes.md\n\n"
+        "mentions replay machinery without being a replay_*.py file.\n"
+    )
+    if not replay_harness_source_row(harness_id, harness_text):
+        raise SystemExit("ABORT: nested replay harness was not refused")
+    if replay_harness_source_row(mention_id, mention_text):
+        raise SystemExit("ABORT: nested non-harness mention was refused")
+    return {
+        "nested_harness_refused": True,
+        "nested_harness_doc_id": harness_id,
+        "nested_mention_survived": True,
+        "nested_mention_doc_id": mention_id,
+    }
+
+
+def prove_generation_pointer():
+    import tempfile
+    import shutil
+
+    td = tempfile.mkdtemp()
+    try:
+        logical = os.path.join(td, "logical.jsonl")
+        with open(logical, "w") as handle:
+            handle.write("stale-logical\n")
+        with open(logical + ".manifest.json", "w") as handle:
+            handle.write("{}\n")
+        gen = os.path.join(td, "logical.jsonl.gen.deadbeef")
+        with open(gen, "w") as handle:
+            handle.write('{"input_ids":[1,2,3]}\n')
+        man = gen + ".manifest.json"
+        write_manifest(man, {
+            "schema": SCHEMA,
+            "corpus_filename": os.path.basename(gen),
+            "corpus_sha256": sha256_file(gen),
+            "corpus_bytes": os.path.getsize(gen),
+            "corpus_rows": 1,
+            "inputs": [{
+                "name": "x.jsonl",
+                "rows": 1,
+                "sha256": "a" * 64,
+                "registered_sha256_prefix": "a" * 16,
+            }],
+        })
+        write_generation_pointer(logical + ".generation", gen, man)
+        corpus, manifest = resolve_generation(logical)
+        if os.path.abspath(corpus) != os.path.abspath(gen):
+            raise SystemExit("ABORT: generation pointer did not resolve to the gen corpus")
+        if os.path.abspath(manifest) != os.path.abspath(man):
+            raise SystemExit("ABORT: generation pointer did not resolve to the gen manifest")
+        with open(gen, "w") as handle:
+            handle.write('{"input_ids":[9]}\n')
+        try:
+            resolve_generation(logical)
+        except ValueError:
+            return {"pointer_resolves": True, "mixed_pair_refused": True}
+        raise SystemExit("ABORT: mixed generation pair was accepted")
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
 
 
 def write_class_proof_receipt(
@@ -432,14 +501,16 @@ def write_class_proof_receipt(
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    nested = prove_nested_selector()
+    generation = prove_generation_pointer()
     hist_source = measure_source_jsonl(historical_source)
     corr_source = measure_source_jsonl(corrected_source)
-    _require_sha_prefix("historical-source", hist_source["sha256"], HISTORICAL_SOURCE_SHA_PREFIX)
-    _require_sha_prefix("corrected-source", corr_source["sha256"], CORRECTED_SOURCE_SHA_PREFIX)
+    _require_sha("historical-source", hist_source["sha256"], HISTORICAL_SOURCE_SHA)
+    _require_sha("corrected-source", corr_source["sha256"], CORRECTED_SOURCE_SHA)
     hist_packed = measure_packed_content(historical_packed, tok)
     corr_packed = measure_packed_content(corrected_packed, tok)
-    _require_sha_prefix("historical-packed", hist_packed["sha256"], HISTORICAL_PACKED_SHA_PREFIX)
-    _require_sha_prefix("corrected-packed", corr_packed["sha256"], CORRECTED_PACKED_SHA_PREFIX)
+    _require_sha("historical-packed", hist_packed["sha256"], HISTORICAL_PACKED_SHA)
+    _require_sha("corrected-packed", corr_packed["sha256"], CORRECTED_PACKED_SHA)
 
     errors = []
     if hist_source["harness_docs"] != 13:
@@ -470,22 +541,24 @@ def write_class_proof_receipt(
         raise SystemExit("ABORT: class proof against real artifacts failed: " + "; ".join(errors))
 
     receipt = {
-        "schema": "palios.replay_harness_class_proof.v2",
+        "schema": "palios.replay_harness_class_proof.v3",
         "scanner": {
             "doc_id": REPLAY_HARNESS_DOC_ID.pattern,
             "header": REPLAY_HARNESS_HEADER.pattern,
             "forbidden_literals": list(PACKED_CONTENT_FORBIDDEN),
             "positive_control": PACKED_CONTENT_POSITIVE_CONTROL,
         },
+        "nested_selector": nested,
+        "generation_pointer": generation,
         "historical_source": hist_source,
         "historical_packed": hist_packed,
         "corrected_source": corr_source,
         "corrected_packed": corr_packed,
         "acceptance": {
-            "historical_packed_prefix": HISTORICAL_PACKED_SHA_PREFIX,
-            "historical_source_prefix": HISTORICAL_SOURCE_SHA_PREFIX,
-            "corrected_source_prefix": CORRECTED_SOURCE_SHA_PREFIX,
-            "corrected_packed_prefix": CORRECTED_PACKED_SHA_PREFIX,
+            "historical_packed_sha256": HISTORICAL_PACKED_SHA,
+            "historical_source_sha256": HISTORICAL_SOURCE_SHA,
+            "corrected_source_sha256": CORRECTED_SOURCE_SHA,
+            "corrected_packed_sha256": CORRECTED_PACKED_SHA,
             "historical_harness_docs": 13,
             "historical_packed_refused": True,
             "corrected_mention_docs": CORRECTED_MENTION_DOCS,
@@ -515,6 +588,8 @@ def write_class_proof_receipt(
         "corrected_mention_rows": corr_source["mention_rows"],
         "corrected_packed_refused": corr_packed["refused"],
         "corrected_packed_positive_fired": corr_packed["positive_control"]["fired"],
+        "nested_harness_refused": nested["nested_harness_refused"],
+        "mixed_pair_refused": generation["mixed_pair_refused"],
     }, sort_keys=True))
     print(f"[pack] class proof VERIFIED against real artifacts: receipt={path}")
     return 0
