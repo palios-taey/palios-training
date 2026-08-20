@@ -67,6 +67,22 @@ def validate_event(event, line_no):
     if state in {"TRAINING", "FRAGMENTATION_EXIT", "CHECKPOINT_SAVED"}:
         if not isinstance(event.get("step"), int) or event["step"] < 0:
             raise LifecycleError(f"line {line_no} state {state} has no non-negative integer step")
+    if state == "SPEC_VALID":
+        for field in ("total_steps", "session_limit"):
+            if not isinstance(event.get(field), int) or event[field] <= 0:
+                raise LifecycleError(
+                    f"line {line_no} state SPEC_VALID has no positive integer {field}"
+                )
+        if "resume_step" in event and (
+            not isinstance(event["resume_step"], int) or event["resume_step"] < 0
+        ):
+            raise LifecycleError(
+                f"line {line_no} state SPEC_VALID has an invalid resume_step"
+            )
+        if event.get("resume_step", 0) >= event["total_steps"]:
+            raise LifecycleError(
+                f"line {line_no} state SPEC_VALID resume_step must be below total_steps"
+            )
     if state in {"FRAGMENTATION_EXIT", "CHECKPOINT_SAVED"}:
         if not isinstance(event.get("checkpoint_path"), str) or not event["checkpoint_path"]:
             raise LifecycleError(f"line {line_no} state {state} has no checkpoint_path")
@@ -145,6 +161,7 @@ def append_event(args):
         add_if_set(event, "served_root", args.served_root)
         add_if_set(event, "total_steps", args.total_steps, int)
         add_if_set(event, "session_limit", args.session_limit, int)
+        add_if_set(event, "resume_step", args.resume_step, int)
         add_if_set(event, "nodes", args.nodes, int)
         validate_event(event, len(events) + 1)
         previous_state = events[-1]["state"] if events else None
@@ -170,15 +187,46 @@ def validate_log(args):
         events = load_events(handle)
     if not events:
         raise LifecycleError("journal has no transitions")
-    if args.expected_fragmentation is not None:
-        observed = sum(event["state"] == "FRAGMENTATION_EXIT" for event in events)
-        if observed != args.expected_fragmentation:
+    expected_fragmentation = None
+    resume_step = None
+    if events[-1]["state"] in {"CHECKPOINT_SAVED", "BAKE_COMPLETE", "THOR_DELIVERED"}:
+        spec = events[0]
+        resume_step = spec.get("resume_step", 0)
+        total_steps = spec["total_steps"]
+        session_limit = spec["session_limit"]
+        remaining_steps = total_steps - resume_step
+        if remaining_steps <= 0:
             raise LifecycleError(
-                f"fragmentation exits observed={observed} expected={args.expected_fragmentation}"
+                f"SPEC_VALID total_steps={total_steps} does not exceed resume_step={resume_step}"
+            )
+        expected_fragmentation = max(
+            0, (remaining_steps + session_limit - 1) // session_limit - 1
+        )
+        if (
+            args.expected_fragmentation is not None
+            and args.expected_fragmentation != expected_fragmentation
+        ):
+            raise LifecycleError(
+                "caller fragmentation expectation "
+                f"{args.expected_fragmentation} disagrees with journal-derived "
+                f"{expected_fragmentation} (total_steps={total_steps} "
+                f"resume_step={resume_step} session_limit={session_limit})"
+            )
+        observed = sum(event["state"] == "FRAGMENTATION_EXIT" for event in events)
+        if observed != expected_fragmentation:
+            raise LifecycleError(
+                f"fragmentation exits observed={observed} expected={expected_fragmentation} "
+                f"(total_steps={total_steps} resume_step={resume_step} "
+                f"session_limit={session_limit})"
             )
     print(
         f"LIFECYCLE VALID transitions={len(events)} last={events[-1]['state']} "
         f"fragmentation_exits={sum(event['state'] == 'FRAGMENTATION_EXIT' for event in events)}"
+        + (
+            f" expected_fragmentation={expected_fragmentation} resume_step={resume_step}"
+            if expected_fragmentation is not None
+            else ""
+        )
     )
 
 
@@ -209,6 +257,7 @@ def build_parser():
     append.add_argument("--served-root")
     append.add_argument("--total-steps")
     append.add_argument("--session-limit")
+    append.add_argument("--resume-step")
     append.add_argument("--nodes")
     append.set_defaults(func=append_event)
     validate = sub.add_parser("validate")

@@ -91,14 +91,37 @@ export PATH="$HOME/.local/bin:/usr/local/cuda-13.0/bin:$PATH"
 export CUDA_HOME="/usr/local/cuda-13.0"
 export LD_LIBRARY_PATH="/usr/local/cuda-13.0/lib64:$LD_LIBRARY_PATH"
 
-# MODEL_PATH does NOT default. Training is cumulative: module N trains FROM module N-1's baked
-# result, so the base is a decision the operator states, never one this script picks. The previous
-# default here was ${SPARK_HOME}/models/Qwen3.6-27B — the raw untrained foundation — which meant an
-# unset MODEL_PATH silently discarded every prior CPT and SFT and restarted from scratch, while the
-# run otherwise looked normal. That exact confusion is already recorded as a training correction in
-# careers-qwen/data/corrections/seed_authoring.py:56. Same refuse-to-default idiom as TOTAL_STEPS
-# below, SFT_DIR under LORA_MODE, and TRAIN_BASE in post_cpt_pipeline.sh.
-export MODEL_PATH="${MODEL_PATH:?ERROR: MODEL_PATH must name the base to train FROM (e.g. the current baked servable). It is not defaulted — training is cumulative and the base is never guessed.}"
+# MODEL_PATH does NOT default. A DCP continuation constructs the model from the compatible
+# 851-tensor training architecture, then RESUME_DELTA restores the learned weights and resumable
+# state. The baked 1199-tensor servable and the 851-tensor _hf export use serving parameter names;
+# both load without proving that the DCP names landed, so accepting either can silently train the
+# wrong weights. The base is therefore an explicit operator decision and its tensor namespace is
+# checked before model construction.
+export MODEL_PATH="${MODEL_PATH:?ERROR: MODEL_PATH must name the compatible 851-tensor training architecture. A continuation also requires RESUME_DELTA; never use the baked servable or _hf export as MODEL_PATH.}"
+if [ -n "${RESUME_DELTA:-}" ] && [ "${LORA_MODE:-0}" != "1" ]; then
+    python3 - "$MODEL_PATH/model.safetensors.index.json" <<'PY'
+import json
+import os
+import sys
+
+index_path = sys.argv[1]
+if not os.path.isfile(index_path):
+    raise SystemExit(f"ERROR: continuation MODEL_PATH has no tensor index: {index_path}")
+names = set((json.load(open(index_path)) or {}).get("weight_map") or {})
+if (
+    len(names) != 851
+    or "lm_head.weight" not in names
+    or "model.embed_tokens.weight" not in names
+    or any(name.startswith("model.language_model.") for name in names)
+):
+    raise SystemExit(
+        "ERROR: continuation MODEL_PATH is not the 851-tensor training namespace; "
+        f"observed tensors={len(names)} model.embed_tokens={'model.embed_tokens.weight' in names} "
+        f"serving_names={any(name.startswith('model.language_model.') for name in names)}. "
+        "Use the training architecture base plus RESUME_DELTA, never a baked artifact."
+    )
+PY
+fi
 # LORA_MODE=1 (module training on the frozen CPT base) runs the SFT-pair path instead of CPT:
 # SFT_DIR points at the module corpus and the CPT corpus allow-list below is skipped. Unset
 # LORA_MODE => byte-identical legacy CPT behavior (sentinel + allow-list enforced).

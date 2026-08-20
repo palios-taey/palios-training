@@ -389,9 +389,8 @@ echo "$DONOR_RECEIPT"
 GRAFT_BASE=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["donor"])' <<<"$DONOR_RECEIPT")
 [ -n "$GRAFT_BASE" ] || { echo "ABORT: donor resolver returned no donor." >&2; exit 1; }
 
-EXPECTED_FRAGMENTATION=$(( (PROV_TOTAL_STEPS + PROV_SESSION_LIMIT - 1) / PROV_SESSION_LIMIT - 1 ))
 ssh -o BatchMode=yes spark@"$SPARK_MASTER" \
-  "python3 - validate --log '$DCP_DIR/lifecycle_events.jsonl' --expected-fragmentation '$EXPECTED_FRAGMENTATION'" \
+  "python3 - validate --log '$DCP_DIR/lifecycle_events.jsonl'" \
   < scripts/training_lifecycle.py
 LAST_EVENT=$(ssh -o BatchMode=yes spark@"$SPARK_MASTER" \
   "python3 - last --log '$DCP_DIR/lifecycle_events.jsonl' --json" < scripts/training_lifecycle.py)

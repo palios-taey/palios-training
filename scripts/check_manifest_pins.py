@@ -43,9 +43,11 @@ same class as invokers() treating a failed git grep as zero callers. `.github/wo
 manifest-pins.yml` fetches full history so CI can look; this abort is the durable rule
 for every other shallow tree.
 
-`--deployed` additionally hashes the copy on each Spark at `$SPARK_HOME/palios-training/<path>`
-and refuses on mismatch. CI cannot SSH, so it does not pass `--deployed`. `scripts/taey-train`
-does, whenever `fleet.env` is present. Skipping when fleet.env is absent is announced, not silent.
+`--deployed` additionally requires the invoking checkout to be a clean copy of public origin/main,
+requires every Spark checkout to have that exact HEAD and empty porcelain including untracked files,
+and hashes each pinned copy at `$SPARK_HOME/palios-training/<path>`. CI cannot SSH, so it does not
+pass `--deployed`. `scripts/taey-train` does whenever `fleet.env` is present. Skipping when fleet.env
+is absent is announced, not silent.
 
     python3 scripts/check_manifest_pins.py [--manifest PRODUCTION_MANIFEST.yml] [--deployed]
     python3 scripts/check_manifest_pins.py --self-test
@@ -59,6 +61,7 @@ import hashlib
 import io
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -301,11 +304,19 @@ def authorization_failures(doc):
     return failures
 
 
-def check(manifest_path, *, deployed=False, get_bytes=None, hash_remote=None):
+def check(
+    manifest_path,
+    *,
+    deployed=False,
+    get_bytes=None,
+    hash_remote=None,
+    git_remote=None,
+):
     """Return a list of error strings. Empty = pass. Never raises on a finding.
 
     get_bytes(path) -> bytes | None (None means missing). Defaults to reading the tree.
     hash_remote(host, remote_path) -> hex digest | None. Only used with deployed=True.
+    git_remote(host, repo_path) -> (head, porcelain, error). Only used with deployed=True.
     """
     if get_bytes is None:
         def get_bytes(path):  # noqa: F811
@@ -434,6 +445,63 @@ def check(manifest_path, *, deployed=False, get_bytes=None, hash_remote=None):
                     f"SPARK_HOME={spark_home!r} hosts={hosts!r}"
                 )
             else:
+                local_head = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                public_main = subprocess.run(
+                    ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                local_status = subprocess.run(
+                    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                expected_head = ""
+                if local_head.returncode != 0:
+                    err = (local_head.stderr or local_head.stdout or "git rev-parse failed").strip()
+                    failures.append(f"DEPLOYED       local Git HEAD is unreadable ({err}).")
+                elif public_main.returncode != 0:
+                    err = (public_main.stderr or public_main.stdout or "git ls-remote failed").strip()
+                    failures.append(
+                        "DEPLOYED       public origin/main is unreadable; current cannot be inferred "
+                        f"from a cached ref ({err})."
+                    )
+                else:
+                    head = (local_head.stdout or "").strip()
+                    expected_head = (public_main.stdout or "").split()[0]
+                    if not re.fullmatch(r"[0-9a-f]{40,64}", head):
+                        failures.append(f"DEPLOYED       local Git HEAD is unparseable: {head!r}")
+                        expected_head = ""
+                    elif not re.fullmatch(r"[0-9a-f]{40,64}", expected_head):
+                        failures.append(
+                            "DEPLOYED       public origin/main returned an unparseable revision: "
+                            f"{(public_main.stdout or '')[:120]!r}"
+                        )
+                        expected_head = ""
+                    elif head != expected_head:
+                        failures.append(
+                            "DEPLOYED       local HEAD is not current public origin/main.\n"
+                            f"                 local   {head}\n"
+                            f"                 public  {expected_head}"
+                        )
+
+                if local_status.returncode != 0:
+                    err = (local_status.stderr or local_status.stdout or "git status failed").strip()
+                    failures.append(f"DEPLOYED       local Git status is unreadable ({err}).")
+                elif local_status.stdout:
+                    failures.append(
+                        "DEPLOYED       local production repository is not clean:\n"
+                        f"{local_status.stdout.rstrip()}"
+                    )
+
                 if hash_remote is None:
                     def hash_remote(host, remote_path, _user=user):  # noqa: F811
                         try:
@@ -459,6 +527,56 @@ def check(manifest_path, *, deployed=False, get_bytes=None, hash_remote=None):
                         if not re.fullmatch(r"[0-9a-f]{64}", digest):
                             return None, f"unparseable sha256sum output: {(proc.stdout or '')[:80]!r}"
                         return digest, ""
+
+                if git_remote is None:
+                    def git_remote(host, repo_path, _user=user):  # noqa: F811
+                        command = (
+                            f"git -C {shlex.quote(repo_path)} rev-parse HEAD && "
+                            f"git -C {shlex.quote(repo_path)} status "
+                            "--porcelain=v1 --untracked-files=all"
+                        )
+                        try:
+                            proc = subprocess.run(
+                                [
+                                    "ssh",
+                                    "-o", "BatchMode=yes",
+                                    "-o", "ConnectTimeout=8",
+                                    f"{_user}@{host}",
+                                    command,
+                                ],
+                                capture_output=True,
+                                text=True,
+                                timeout=20,
+                                check=False,
+                            )
+                        except (OSError, subprocess.TimeoutExpired) as exc:
+                            return "", "", str(exc)
+                        if proc.returncode != 0:
+                            err = (proc.stderr or proc.stdout or "ssh failed").strip().split("\n")[0]
+                            return "", "", err
+                        lines = (proc.stdout or "").splitlines()
+                        if not lines or not re.fullmatch(r"[0-9a-f]{40,64}", lines[0]):
+                            return "", "", f"unparseable Git state: {(proc.stdout or '')[:120]!r}"
+                        return lines[0], "\n".join(lines[1:]), ""
+
+                repo_path = f"{spark_home.rstrip('/')}/palios-training"
+                for host in hosts:
+                    head, porcelain, err = git_remote(host, repo_path)
+                    if err:
+                        failures.append(
+                            f"DEPLOYED       production Git state on {host} is unreadable ({err})."
+                        )
+                    elif expected_head and head != expected_head:
+                        failures.append(
+                            f"DEPLOYED       production Git HEAD on {host} is not current.\n"
+                            f"                 expected {expected_head}\n"
+                            f"                 deployed {head}"
+                        )
+                    if porcelain:
+                        failures.append(
+                            f"DEPLOYED       production repository on {host} is not clean:\n"
+                            f"{porcelain}"
+                        )
 
                 for capability, body in sorted(capabilities.items()):
                     for path, expected in sorted(((body or {}).get("content_sha") or {}).items()):
@@ -697,7 +815,23 @@ def selftest() -> int:
         def bad_remote(host, remote_path):
             return "0" * 64, ""
 
-        errs, text = captured(lambda: check(manifest, deployed=True, hash_remote=bad_remote)[0])
+        def clean_remote_git(host, repo_path):
+            proc = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            return (proc.stdout or "").strip(), "", ""
+
+        errs, text = captured(
+            lambda: check(
+                manifest,
+                deployed=True,
+                hash_remote=bad_remote,
+                git_remote=clean_remote_git,
+            )[0]
+        )
         expect_fail("deployed bytes disagree with pin", errs or [], "DEPLOYED", text or "")
         os.environ.pop("FLEET_ENV", None)
 
