@@ -36,11 +36,18 @@ if [ -z "$CAP" ]; then
 fi
 shift
 
+for assignment in "$@"; do
+  case "$assignment" in
+    *=*) ;;
+    *) die "launch argument '$assignment' is not VAR=value; authorization inputs cannot be inferred." ;;
+  esac
+done
+
 # The resolver prints shell assignments on success, or a single REFUSE: line on failure.
 # It is deliberately NOT eval'd blind: an eval of a subshell `exit` does not exit this script,
 # which produced a gate that printed a refusal and then returned 0 — indistinguishable from
 # success to any caller. Caught only because the negative control checked $?.
-RESOLVED="$(python3 "$RESOLVER" "$MANIFEST" "$CAP")"
+RESOLVED="$(env "$@" python3 "$RESOLVER" "$MANIFEST" "$CAP")"
 case "$RESOLVED" in
   REFUSE:*) die "${RESOLVED#REFUSE:}" ;;
   "")       die "resolver produced no output for '$CAP' — refusing rather than guessing." ;;
