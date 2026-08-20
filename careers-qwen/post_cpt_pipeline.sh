@@ -650,10 +650,11 @@ ssh -o BatchMode=yes spark@"$SPARK_MASTER" \
 echo "  verified delivery complete; exact Spark export and bake transients retired"
 
 command -v taey-notify >/dev/null || {
-  echo "ABORT: in-band artifact is complete, but taey-notify is unavailable for the required infra handoff." >&2
+  echo "ABORT: in-band artifact is complete, but taey-notify is unavailable for the required control handoff." >&2
   exit 1
 }
-taey-notify infra \
+: "${POST_CPT_NOTIFY_TARGET:?set POST_CPT_NOTIFY_TARGET in fleet.env to the live control session that owns serving cutover}"
+taey-notify "$POST_CPT_NOTIFY_TARGET" \
   "POST-CPT READY: ${RUN_TAG} weight-diff=${diff_abs} IN_BAND; 1199-tensor candidate at ${CONVERT_SSH}:${DELIVERY_OUT}; artifact_sha256=${artifact_sha}; corpus_sha256=${corpus_sha}; training owns SFT staging, serving remains infra-owned." \
   --type response_ready
 
