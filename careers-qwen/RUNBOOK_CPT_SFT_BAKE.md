@@ -103,15 +103,20 @@ If you must parameterise, these are the eight the wrapper sets and **all of them
 TOTAL_STEPS=<campaign horizon>   SESSION_LIMIT=<burst>   SAVE_EVERY=$SESSION_LIMIT
 LR=1e-5   WARMUP_STEPS=15   CLOCK_CAP=1600
 ADAFACTOR_ALPHA_MODE=absolute   ADAFACTOR_EPS1=fp32   ADAFACTOR_DOSE_LOG=1
-RESUME_DELTA=<ckpt>   MODEL_PATH=<only if not chaining>
+RESUME_DELTA=<ckpt for a continuation>   MODEL_PATH=<base architecture; always required>
 ```
 **`TOTAL_STEPS` is the DECAY HORIZON, not the burst.** `SESSION_LIMIT` is the burst. Setting
 `TOTAL_STEPS` equal to one burst compresses a whole cosine schedule into it — warmup eats half,
 decay kills the rest. That is what produced the 2026-07-26 null run.
 
-**`RESUME_DELTA` is not optional for a continuation.** Unset = silently trains the raw base, and
-nothing warns. Always chain from the model currently in production. `SAVE_EVERY=SESSION_LIMIT`
-means final-only — **no mid-run saves, they break things** (Jesse, standing).
+**A continuation requires BOTH `MODEL_PATH` and `RESUME_DELTA`.** The controller's early gate accepts
+either one, but the per-node launcher requires `MODEL_PATH` unconditionally because it constructs the
+model before the trainer loads the DCP checkpoint post-prepare. Missing `MODEL_PATH` aborts loudly on
+every rank. Missing `RESUME_DELTA` is worse: it silently trains the raw base and nothing warns. Name the
+same base architecture that created the checkpoint, name the completed DCP checkpoint, verify both in
+the resolved-config banner, and require `Scheduler fast-forwarded to opt-step N` before accepting the
+resume. `SAVE_EVERY=SESSION_LIMIT` means final-only — **no mid-run saves, they break things** (Jesse,
+standing).
 
 **Verify while it runs:**
 - `COVERAGE PROOF: blocks/epoch ≈ dataset_blocks` — the corpus is fully consumed
