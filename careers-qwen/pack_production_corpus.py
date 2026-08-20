@@ -196,6 +196,20 @@ PACK_SETS = {
     "prod_v4": [
         ("cpt_public_repos_prod.jsonl", 1226, "e549870b892d2f72"),
     ],
+    # PROD_V5, 2026-08-20. Forward correction of prod_v4; historical source, packed corpus,
+    # checkpoints, and run receipts remain immutable. The source selector now excludes the full
+    # replay-harness role by filename or declared module docstring, and SOURCE_LOCK pins the same
+    # ten input commits used by prod_v4. The emitted row metadata preserves repo + commit identity
+    # without the host-local checkout_path that made equal builds differ across worktrees and
+    # exposed operator paths in rows marked public_safe.
+    #
+    # Verified from two isolated worktrees at treasurer PR16 head 7416a834:
+    #   rows=1,209, bytes=11,842,040, sha256=fff6dae26ad02e51...
+    #   replay_*.py docs=0, replay_write_dispatch.py=0, REPLAY: PASS=0
+    #   metadata values beginning /home/=0; the builder fails closed if one appears.
+    "prod_v5": [
+        ("cpt_public_repos_prod.jsonl", 1209, "fff6dae26ad02e51"),
+    ],
 }
 
 
