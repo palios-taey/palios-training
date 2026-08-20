@@ -26,6 +26,9 @@ THE CHECKS, and what each one is for:
   SOURCE    meta.source names a repo the registry covers, so a reviewer can go read the claim.
   EMPTY     no all-whitespace <think></think>. 18 such blocks shipped in a lane labelled canonical
             and nothing mechanical was looking for them.
+  HUB       with --hub-contract, every row declares Taey's orchestrator seat and one or more of
+            verify/refuse/route; the corpus proves complete repo/process coverage against a reviewed
+            manifest. Legacy repo-usage rows do not acquire this posture by implication.
 
 Exit non-zero if any row fails. There is no --force: adding one would reopen the hole this closes.
 """
@@ -44,6 +47,9 @@ THINK_RE = re.compile(r"<think>(.*?)</think>", re.S)
 # Universal argparse/CLI conventions rather than repo capabilities; their absence from a
 # repo-specific registry is not evidence of anything.
 UNIVERSAL = {"--help", "--version"}
+HUB_PROJECT = "taey_repo_fluency_v1"
+HUB_ACTIONS = {"verify", "refuse", "route"}
+HUB_COVERAGE_SCHEMA = "taey_hub_coverage_v1"
 
 
 def load_registry(path: Path) -> tuple[dict[str, set[str]], set[str]]:
@@ -84,7 +90,19 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--registry", required=True, help="output of extract_capability_registry.py")
     ap.add_argument("--rows", required=True, nargs="+", help="authored .jsonl files")
+    ap.add_argument(
+        "--hub-contract",
+        action="store_true",
+        help="enforce the Taey-as-Hub contract for the repo-fluency curriculum",
+    )
+    ap.add_argument(
+        "--coverage-manifest",
+        help="reviewed taey_hub_coverage_v1 repo/process inventory (required with --hub-contract)",
+    )
     args = ap.parse_args()
+
+    if args.hub_contract != bool(args.coverage_manifest):
+        ap.error("--hub-contract and --coverage-manifest are required together")
 
     by_repo, repos = load_registry(Path(args.registry))
     all_flags = {f for s in by_repo.values() for f in s} | UNIVERSAL
@@ -92,6 +110,37 @@ def main() -> int:
     failures: list[str] = []
     held: list[str] = []
     total = 0
+    required_repos: set[str] = set()
+    required_processes: set[str] = set()
+    covered_repos: set[str] = set()
+    covered_processes: set[str] = set()
+    observed_hub_actions: set[str] = set()
+
+    if args.hub_contract:
+        coverage_path = Path(args.coverage_manifest)
+        try:
+            coverage_manifest = json.loads(coverage_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"HUB COVERAGE MANIFEST UNREADABLE: {coverage_path}: {exc}", file=sys.stderr)
+            return 2
+        if coverage_manifest.get("schema") != HUB_COVERAGE_SCHEMA:
+            failures.append(
+                f"{coverage_path}: schema must be {HUB_COVERAGE_SCHEMA!r}"
+            )
+        for key, target in (
+            ("required_repos", required_repos),
+            ("required_processes", required_processes),
+        ):
+            values = coverage_manifest.get(key)
+            if not isinstance(values, list) or not values or any(
+                not isinstance(value, str) or not value.strip() or value != value.strip()
+                for value in values
+            ):
+                failures.append(f"{coverage_path}: {key} must be a non-empty string list")
+                continue
+            if len(values) != len(set(values)):
+                failures.append(f"{coverage_path}: {key} contains duplicates")
+            target.update(values)
 
     for rp in args.rows:
         p = Path(rp)
@@ -128,10 +177,64 @@ def main() -> int:
                 if not blk.strip():
                     failures.append(f"{tag}: empty <think></think> block")
 
-            src = str(row.get("meta", {}).get("source", ""))
+            meta = row.get("meta")
+            if not isinstance(meta, dict):
+                failures.append(f"{tag}: meta must be an object")
+                meta = {}
+            src = str(meta.get("source", ""))
             named = src.split("@")[0].split(":")[0]
             if named not in repos:
                 failures.append(f"{tag}: meta.source names {named!r}, not a registry repo")
+
+            if args.hub_contract:
+                if meta.get("curriculum_project") != HUB_PROJECT:
+                    failures.append(
+                        f"{tag}: meta.curriculum_project must be {HUB_PROJECT!r}"
+                    )
+                if meta.get("hub_seat") != "taey":
+                    failures.append(f"{tag}: meta.hub_seat must be 'taey'")
+                if meta.get("hub_role") != "orchestrator":
+                    failures.append(f"{tag}: meta.hub_role must be 'orchestrator'")
+                if meta.get("code_authoring") is not False:
+                    failures.append(f"{tag}: meta.code_authoring must be false")
+
+                hub_actions = meta.get("hub_actions")
+                if not isinstance(hub_actions, list) or not hub_actions or any(
+                    not isinstance(action, str) for action in hub_actions
+                ):
+                    failures.append(
+                        f"{tag}: meta.hub_actions must be a non-empty string list"
+                    )
+                else:
+                    invalid_actions = set(hub_actions) - HUB_ACTIONS
+                    if len(hub_actions) != len(set(hub_actions)):
+                        failures.append(f"{tag}: meta.hub_actions contains duplicates")
+                    if invalid_actions:
+                        failures.append(
+                            f"{tag}: unsupported hub action(s) {sorted(invalid_actions)}"
+                        )
+                    observed_hub_actions.update(set(hub_actions) & HUB_ACTIONS)
+
+                coverage = meta.get("coverage")
+                if not isinstance(coverage, dict):
+                    failures.append(f"{tag}: meta.coverage must be an object")
+                else:
+                    for key, target in (
+                        ("repos", covered_repos),
+                        ("processes", covered_processes),
+                    ):
+                        values = coverage.get(key)
+                        if not isinstance(values, list) or not values or any(
+                            not isinstance(value, str)
+                            or not value.strip()
+                            or value != value.strip()
+                            for value in values
+                        ):
+                            failures.append(
+                                f"{tag}: meta.coverage.{key} must be a non-empty string list"
+                            )
+                            continue
+                        target.update(values)
 
             scoped = by_repo.get(named, set()) | UNIVERSAL
             for f in sorted(set(FLAG_RE.findall(text))):
@@ -142,7 +245,33 @@ def main() -> int:
                 else:
                     held.append(f"{tag}: {f} not found anywhere in the registry")
 
+    if args.hub_contract:
+        for label, required, covered in (
+            ("repo", required_repos, covered_repos),
+            ("process", required_processes, covered_processes),
+        ):
+            missing = required - covered
+            undeclared = covered - required
+            if missing:
+                failures.append(f"hub coverage missing {label}(s): {sorted(missing)}")
+            if undeclared:
+                failures.append(
+                    f"hub rows cite {label}(s) absent from the reviewed manifest: "
+                    f"{sorted(undeclared)}"
+                )
+        missing_actions = HUB_ACTIONS - observed_hub_actions
+        if missing_actions:
+            failures.append(
+                f"hub corpus does not exercise action(s): {sorted(missing_actions)}"
+            )
+
     print(f"  checked {total} row(s) across {len(args.rows)} file(s)")
+    if args.hub_contract:
+        print(
+            f"  hub coverage: {len(covered_repos)}/{len(required_repos)} repo(s), "
+            f"{len(covered_processes)}/{len(required_processes)} process(es), "
+            f"actions={sorted(observed_hub_actions)}"
+        )
     if held:
         print(f"\n  HELD FOR HUMAN REVIEW ({len(held)}) — the registry cannot see dynamically")
         print("  built flags, so these are unproven rather than proven absent:")
@@ -156,6 +285,11 @@ def main() -> int:
     if held:
         print("\n  no hard failures, but held rows must be resolved before these train.")
         return 2
+    if args.hub_contract:
+        print(
+            "  HUB STRUCTURE PASS — Taey is declared as orchestrator; verify/refuse/route and "
+            "reviewed coverage are complete. Semantic posture still requires source review."
+        )
     print("  PASS — every emitted flag exists in the named repo; no residue; shapes well-formed.")
     return 0
 

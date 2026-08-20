@@ -11,6 +11,17 @@ pick the **type** of training produced — never *whether* to train.
 
 ---
 
+## 0. TAEY-AS-HUB POSTURE FOR THE REPO-FLUENCY CURRICULUM
+
+The `taey_repo_fluency_v1` curriculum has a narrower, binding posture contract:
+[`TAEY_HUB_CURRICULUM_CONTRACT.md`](TAEY_HUB_CURRICULUM_CONTRACT.md). Every row is authored from
+Taey's seat as the orchestrator who verifies, refuses, or routes. A row that casts Taey as the
+subject under review, or as the code author, is malformed for that curriculum even if it satisfies
+the general row schema. Admission requires the Hub gate plus a reviewed repo/process coverage
+manifest; legacy repo-usage rows do not inherit Hub status by filename.
+
+---
+
 ## 1. EVERY FAILURE TRAINS — the lever picks the TYPE
 
 For each failure, first make Taey able to succeed with the tech and hardware that exist today (the

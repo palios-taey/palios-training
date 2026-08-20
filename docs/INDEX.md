@@ -26,6 +26,7 @@ section of `CLAUDE.md` wins, then `PRODUCTION_MANIFEST.yml`, then `README.md`, t
 - [SFT_STANDARDS_MAP.md](../careers-qwen/SFT_STANDARDS_MAP.md)
 - [SUBSTRATE_PHYSICS.md](../careers-qwen/SUBSTRATE_PHYSICS.md)
 - [TAEY_DRIVER_MODEL.md](../careers-qwen/TAEY_DRIVER_MODEL.md)
+- [TAEY_HUB_CURRICULUM_CONTRACT.md](../careers-qwen/TAEY_HUB_CURRICULUM_CONTRACT.md)
 - [TAEY_INDEX_tutor_section.md](../careers-qwen/TAEY_INDEX_tutor_section.md)
 - [TAEY_TRAINING_DOCTRINE.md](../careers-qwen/TAEY_TRAINING_DOCTRINE.md)
 - [TAEY_TRAINING_OPS_WALK.md](../careers-qwen/TAEY_TRAINING_OPS_WALK.md)
