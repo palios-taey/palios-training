@@ -20,7 +20,7 @@ Run on a Spark node (needs the Qwen3.6-27B tokenizer):
       --tokenizer <SPARK_HOME>/models/Qwen3.6-27B \
       --out /var/spark/isma/training/cpt_production_v1_packed_2560.jsonl
 """
-import argparse, json, os, sys
+import argparse, json, os, re, sys
 
 from corpus_manifest import SCHEMA, sha256_file, write_manifest
 
@@ -207,10 +207,16 @@ PACK_SETS = {
 
 PACKED_CONTENT_POSITIVE_CONTROL = "# repo:"
 PACKED_CONTENT_FORBIDDEN = (
-    "replay_write_dispatch.py",
     "WRITE DISPATCH REPLAY",
     "REPLAY: PASS",
 )
+# Class identity for replay harnesses. Do not enumerate filenames here: a literal
+# list is how 6 of 13 replay_*.py rows survived the previous packed-content gate.
+REPLAY_HARNESS_DOC_ID = re.compile(r"::replay_[^/]+\.py$")
+REPLAY_HARNESS_HEADER = re.compile(
+    r"(?:^|\n)# repo: \S+ file: replay_[^/\s]+\.py(?=\n|$)"
+)
+_HEADER_DECODE_CARRY = 128
 
 
 def _count_new_subsequence(values, needle, carry_length):
@@ -226,6 +232,30 @@ def _count_new_subsequence(values, needle, carry_length):
     return count
 
 
+def _count_new_regex(text, pattern, carry_length):
+    count = 0
+    for match in pattern.finditer(text):
+        if match.end() <= carry_length:
+            continue
+        count += 1
+    return count
+
+
+def replay_harness_source_row(doc_id, text):
+    """True when a source row is a replay_*.py harness by doc_id or extractor header."""
+    if REPLAY_HARNESS_DOC_ID.search(str(doc_id or "")):
+        return True
+    return bool(REPLAY_HARNESS_HEADER.search(str(text or "")))
+
+
+def _unlink_quiet(*paths):
+    for path in paths:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            continue
+
+
 def verify_packed_content(path, tokenizer):
     markers = (PACKED_CONTENT_POSITIVE_CONTROL, *PACKED_CONTENT_FORBIDDEN)
     token_markers = {
@@ -236,6 +266,8 @@ def verify_packed_content(path, tokenizer):
     token_hits = {marker: 0 for marker in markers}
     decoded_hits = {marker: 0 for marker in markers}
     carry = []
+    decoded_carry = ""
+    header_hits = 0
     rows = 0
     with open(path) as handle:
         for line in handle:
@@ -247,9 +279,14 @@ def verify_packed_content(path, tokenizer):
             for marker, needle in token_markers.items():
                 token_hits[marker] += _count_new_subsequence(window, needle, len(carry))
             decoded = tokenizer.decode(ids, skip_special_tokens=False)
+            decoded_window = decoded_carry + decoded
+            header_hits += _count_new_regex(
+                decoded_window, REPLAY_HARNESS_HEADER, len(decoded_carry)
+            )
             for marker in markers:
                 decoded_hits[marker] += decoded.count(marker)
             carry = window[-(max_marker_tokens - 1):] if max_marker_tokens > 1 else []
+            decoded_carry = decoded_window[-_HEADER_DECODE_CARRY:]
             rows += 1
     if rows == 0:
         raise ValueError("packed corpus has no rows")
@@ -265,6 +302,10 @@ def verify_packed_content(path, tokenizer):
     }
     if any(result["token_hits"] or result["decoded_hits"] for result in forbidden_hits.values()):
         raise ValueError(f"packed corpus contains forbidden replay-harness markers: {forbidden_hits}")
+    if header_hits:
+        raise ValueError(
+            f"packed corpus contains replay-harness source headers: decoded_hits={header_hits}"
+        )
     receipt = {
         "positive_control": {
             "marker": positive,
@@ -272,20 +313,120 @@ def verify_packed_content(path, tokenizer):
             "decoded_hits": decoded_hits[positive],
         },
         "forbidden_markers": forbidden_hits,
+        "replay_harness_headers": {"decoded_hits": header_hits},
         "rows_scanned": rows,
     }
     print(f"[pack] content gate VERIFIED: {json.dumps(receipt, sort_keys=True)}", flush=True)
     return receipt
 
 
+# Measurement set for the class-proof receipt only. The live gate uses the regex
+# class above; it does not iterate this tuple.
+_KNOWN_HARNESS_FILES = (
+    "replay_agent_worker_cli.py",
+    "replay_choice_resume_projection.py",
+    "replay_dr_requester_contract.py",
+    "replay_gate_on_gate_accounting.py",
+    "replay_native_upload_protocol.py",
+    "replay_navigation_dispatch.py",
+    "replay_profile_mapping_contract.py",
+    "replay_r6_submit_authority.py",
+    "replay_salary_field_mapping_contract.py",
+    "replay_semantic_ref_churn.py",
+    "replay_submit_transport.py",
+    "replay_type_filter_dispatch.py",
+    "replay_write_dispatch.py",
+)
+_LEGITIMATE_MENTION_DOCS = (
+    (
+        "repo::apply-machine::instructions.py",
+        "# repo: apply-machine file: instructions.py\n\n"
+        r'replay_sha256=[0-9a-f]{64}',
+    ),
+    (
+        "repo::apply-machine::rearm_submit.py",
+        "# repo: apply-machine file: rearm_submit.py\n\n"
+        "only prior code naming the archive convention is replay_r6_submit_authority.py, "
+        "a REPLAY harness.",
+    ),
+    (
+        "repo::apply-machine::submit_receipt.py",
+        "# repo: apply-machine file: submit_receipt.py\n\n"
+        r'replay_sha256=[0-9a-f]{64}',
+    ),
+    (
+        "repo::palios-training::careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md",
+        "# repo: palios-training file: careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md\n\n"
+        '"eval_ref": "ep2_replay_action_<idx>"',
+    ),
+)
+
+
+def write_class_proof_receipt(path):
+    refused = []
+    for name in _KNOWN_HARNESS_FILES:
+        doc_id = f"repo::apply-machine::{name}"
+        text = f"# repo: apply-machine file: {name}\n\nbody\n"
+        if not replay_harness_source_row(doc_id, text):
+            raise SystemExit(f"ABORT: class proof failed to refuse {doc_id}")
+        refused.append({"doc_id": doc_id, "header": f"# repo: apply-machine file: {name}"})
+    survived = []
+    for doc_id, text in _LEGITIMATE_MENTION_DOCS:
+        if replay_harness_source_row(doc_id, text):
+            raise SystemExit(f"ABORT: class proof false-refused {doc_id}")
+        survived.append(doc_id)
+    if "REPLAY: PASS" not in PACKED_CONTENT_FORBIDDEN:
+        raise SystemExit("ABORT: class proof lost REPLAY: PASS")
+    if PACKED_CONTENT_POSITIVE_CONTROL != "# repo:":
+        raise SystemExit("ABORT: class proof lost positive control")
+    receipt = {
+        "schema": "palios.replay_harness_class_proof.v1",
+        "known_harness_rows": 13,
+        "refused": len(refused),
+        "refused_doc_ids": [row["doc_id"] for row in refused],
+        "legitimate_mention_docs": 4,
+        "survived": len(survived),
+        "survived_doc_ids": survived,
+        "scanner": {
+            "doc_id": REPLAY_HARNESS_DOC_ID.pattern,
+            "header": REPLAY_HARNESS_HEADER.pattern,
+            "forbidden_literals": list(PACKED_CONTENT_FORBIDDEN),
+            "positive_control": PACKED_CONTENT_POSITIVE_CONTROL,
+        },
+    }
+    if receipt["refused"] != 13 or receipt["survived"] != 4:
+        raise SystemExit(f"ABORT: class proof counts {receipt['refused']}/13 refused {receipt['survived']}/4 survived")
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    stage = path + ".tmp"
+    with open(stage, "w") as handle:
+        json.dump(receipt, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(stage, path)
+    print(json.dumps(receipt, sort_keys=True))
+    print(f"[pack] class proof VERIFIED: 13/13 refuse, 4/4 survive, receipt={path}")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--class-proof", metavar="RECEIPT",
+                    help="write replay-harness class negative-control receipt and exit")
     ap.add_argument("--pack-set", default="production_v1", choices=sorted(PACK_SETS))
-    ap.add_argument("--slices-dir", required=True)
-    ap.add_argument("--tokenizer", required=True)
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--slices-dir")
+    ap.add_argument("--tokenizer")
+    ap.add_argument("--out")
     ap.add_argument("--manifest", help="default: <out>.manifest.json")
     args = ap.parse_args()
+    if args.class_proof:
+        return write_class_proof_receipt(args.class_proof)
+    missing = [name for name in ("slices_dir", "tokenizer", "out") if not getattr(args, name)]
+    if missing:
+        ap.error("the following arguments are required unless --class-proof: "
+                 + ", ".join("--" + name.replace("_", "-") for name in missing))
 
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
@@ -316,7 +457,12 @@ def main():
             })
             print(f"[pack] {fname}: rows={rows} sha16={got_sha} VERIFIED", flush=True)
             for line in open(path):
-                text = json.loads(line)["text"]
+                payload = json.loads(line)
+                text = payload["text"]
+                meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+                doc_id = str(meta.get("doc_id") or "")
+                if replay_harness_source_row(doc_id, text):
+                    sys.exit(f"ABORT: source row is a replay harness: {doc_id or '<missing doc_id>'}")
                 ids = tok(text, add_special_tokens=False)["input_ids"]
                 buf.extend(ids)
                 buf.append(eos)
@@ -335,12 +481,19 @@ def main():
             buf = []
     dropped = 0
     total_tokens = blocks * SEQ
-    print(f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} "
-          f"tokens={total_tokens} tail_dropped={dropped} "
-          f"(final block = {tail_kept} corpus-tail tok + {SEQ - tail_kept} cycle-pad)" if tail_kept
-          else f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} tokens={total_tokens} tail_dropped=0")
+    done_line = (
+        f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} "
+        f"tokens={total_tokens} tail_dropped={dropped} "
+        f"(final block = {tail_kept} corpus-tail tok + {SEQ - tail_kept} cycle-pad)"
+        if tail_kept else
+        f"[pack] DONE: docs={stream_docs} blocks={blocks} seq={SEQ} tokens={total_tokens} tail_dropped=0"
+    )
 
-    # Refusal gates run against tmp. Promoting first left a refused pack at --out.
+    # Gates and sidecar staging run against tmp. Dest corpus+manifest are untouched
+    # until both candidates exist; a sidecar write failure therefore cannot replace
+    # a prior final pair.
+    manifest_path = args.manifest or args.out + ".manifest.json"
+    sidecar_candidate = manifest_path + ".candidate"
     promoted = False
     try:
         with open(tmp) as handle:
@@ -373,30 +526,31 @@ def main():
             raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
         corpus_sha = sha256_file(tmp)
         corpus_bytes = os.path.getsize(tmp)
-        manifest_path = args.manifest or args.out + ".manifest.json"
         if os.path.abspath(manifest_path) == os.path.abspath(args.out):
             sys.exit("ABORT: corpus and manifest paths must differ")
+        write_manifest(sidecar_candidate, {
+            "schema": SCHEMA,
+            "corpus_filename": os.path.basename(args.out),
+            "corpus_sha256": corpus_sha,
+            "corpus_bytes": corpus_bytes,
+            "corpus_rows": tmp_rows,
+            "sequence_length": SEQ,
+            "source_documents": stream_docs,
+            "tail_corpus_tokens": tail_kept,
+            "cycle_pad_tokens": SEQ - tail_kept if tail_kept else 0,
+            "content_gate": content_gate,
+            "pack_set": args.pack_set,
+            "packer_sha256": sha256_file(os.path.abspath(__file__)),
+            "inputs": input_receipts,
+        })
         os.replace(tmp, args.out)
+        os.replace(sidecar_candidate, manifest_path)
         promoted = True
     finally:
-        if not promoted and os.path.exists(tmp):
-            os.unlink(tmp)
+        if not promoted:
+            _unlink_quiet(tmp, sidecar_candidate, sidecar_candidate + ".tmp")
 
-    write_manifest(manifest_path, {
-        "schema": SCHEMA,
-        "corpus_filename": os.path.basename(args.out),
-        "corpus_sha256": corpus_sha,
-        "corpus_bytes": corpus_bytes,
-        "corpus_rows": tmp_rows,
-        "sequence_length": SEQ,
-        "source_documents": stream_docs,
-        "tail_corpus_tokens": tail_kept,
-        "cycle_pad_tokens": SEQ - tail_kept if tail_kept else 0,
-        "content_gate": content_gate,
-        "pack_set": args.pack_set,
-        "packer_sha256": sha256_file(os.path.abspath(__file__)),
-        "inputs": input_receipts,
-    })
+    print(done_line, flush=True)
     print(f"[pack] OUTPUT sha256={corpus_sha}")
     print(f"[pack] MANIFEST {manifest_path} sha256={sha256_file(manifest_path)}")
     print(f"[pack] register as: {args.pack_set}_packed_{SEQ} (inputs: "

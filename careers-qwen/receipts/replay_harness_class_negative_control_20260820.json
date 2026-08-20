@@ -1,0 +1,37 @@
+{
+  "known_harness_rows": 13,
+  "legitimate_mention_docs": 4,
+  "refused": 13,
+  "refused_doc_ids": [
+    "repo::apply-machine::replay_agent_worker_cli.py",
+    "repo::apply-machine::replay_choice_resume_projection.py",
+    "repo::apply-machine::replay_dr_requester_contract.py",
+    "repo::apply-machine::replay_gate_on_gate_accounting.py",
+    "repo::apply-machine::replay_native_upload_protocol.py",
+    "repo::apply-machine::replay_navigation_dispatch.py",
+    "repo::apply-machine::replay_profile_mapping_contract.py",
+    "repo::apply-machine::replay_r6_submit_authority.py",
+    "repo::apply-machine::replay_salary_field_mapping_contract.py",
+    "repo::apply-machine::replay_semantic_ref_churn.py",
+    "repo::apply-machine::replay_submit_transport.py",
+    "repo::apply-machine::replay_type_filter_dispatch.py",
+    "repo::apply-machine::replay_write_dispatch.py"
+  ],
+  "scanner": {
+    "doc_id": "::replay_[^/]+\\.py$",
+    "forbidden_literals": [
+      "WRITE DISPATCH REPLAY",
+      "REPLAY: PASS"
+    ],
+    "header": "(?:^|\\n)# repo: \\S+ file: replay_[^/\\s]+\\.py(?=\\n|$)",
+    "positive_control": "# repo:"
+  },
+  "schema": "palios.replay_harness_class_proof.v1",
+  "survived": 4,
+  "survived_doc_ids": [
+    "repo::apply-machine::instructions.py",
+    "repo::apply-machine::rearm_submit.py",
+    "repo::apply-machine::submit_receipt.py",
+    "repo::palios-training::careers-qwen/GAP_PAIR_INTAKE_SPEC_v1.md"
+  ]
+}
