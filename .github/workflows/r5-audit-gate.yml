@@ -122,8 +122,11 @@ jobs:
             exit 1
           fi
 
-          # Reconstruct one array; select latest per context by numeric id;
-          # fail closed on malformed JSON or ambiguous id/created_at ordering.
+          # Reconstruct one array; validate whole-sequence id/created_at
+          # monotonicity per context; only then select latest by numeric id.
+          # Fail closed on any adjacent inversion after sort_by(.id) — not just
+          # the top two rows (a newer conflicting timestamp at a later position
+          # must not be ignored).
           set +e
           EVAL="$(printf '%s' "$STREAM" | jq -s -e -c '
             if type != "array" then
@@ -140,12 +143,15 @@ jobs:
             | group_by(.context)
             | map(
                 sort_by(.id)
+                | . as $s
+                | if any(
+                    range(0; ($s | length) - 1);
+                    $s[.].created_at > $s[.+1].created_at
+                  ) then
+                    error("ambiguous ordering for context \($s[0].context): id/created_at inversion across sequence")
+                  else $s end
                 | reverse
-                | if length > 1 and (.[0].created_at < .[1].created_at) then
-                    error("ambiguous ordering for context \(.[0].context): higher id has older created_at")
-                  else
-                    {context: .[0].context, state: .[0].state, id: .[0].id}
-                  end
+                | {context: .[0].context, state: .[0].state, id: .[0].id}
               )
           ' 2>/tmp/r5-jq.err)"
           JQ_RC=$?
