@@ -113,6 +113,8 @@ while true; do
   for pid in $(ps -eo pid,args | awk '/^ *[0-9]+ bash thermal_watchdog.sh/{print $1}'); do kill "$pid" 2>/dev/null; done
   ( cd "$INSTR" && setsid bash -c "PULL_OFF=90 PERSIST=3 INTERVAL=8 LOG=watchdog_auto_a${attempt}.csv exec bash thermal_watchdog.sh" >> "$DLOG.watchdog" 2>&1 < /dev/null & )
 
+  # One door: resolve+authorize+lifecycle via taey-train (inner launcher also re-checks).
+  "$REPO_ROOT/scripts/taey-train" cpt_27b_4node \
   CPT_DATA=$CPT_DATA \
   CPT_PACKED=1 MAX_SEQ=$MAX_SEQ BATCH_SIZE_PER_RANK=$BATCH_SIZE_PER_RANK \
   TOTAL_STEPS=$TOTAL_STEPS SESSION_LIMIT=$SL SAVE_EVERY=$SL CHECKPOINT_DCP=1 \
@@ -122,7 +124,7 @@ while true; do
   OUTPUT_DIR=$CKPT_DIR \
   RESUME_DELTA=$CKPT_DIR/checkpoint-$cur \
   CLOCK_CAP=1600 \
-  bash "$RECIPES/run_4node_27b_cpt.sh" >> "$DLOG.launch_a$attempt" 2>&1
+  >> "$DLOG.launch_a$attempt" 2>&1
 
   # wait for the session to end (all tmux gone), max 3.5h
   say "session launched; waiting for exit"

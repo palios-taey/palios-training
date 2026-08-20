@@ -75,7 +75,18 @@ if [ -n "$_cap_missing" ]; then
   exit 1
 fi
 
-echo "=== [5/5] LAUNCH 27B training (instrumented) ==="
-echo "  -> $REPO/dense-9b/recipes/run_4node_27b_cpt.sh"
+echo "=== [5/5] LAUNCH 27B training (instrumented) via one door ==="
+echo "  -> $REPO/scripts/taey-train cpt_27b_4node [schedule VARs]"
 echo "  (monitor: node telem = ${SPARK_HOME}/telemetry/telem_*.csv ; Mira = $CAPDIR/{ups.csv,netconsole.log})"
-bash "$REPO/dense-9b/recipes/run_4node_27b_cpt.sh"
+# Forward only decided schedule vars; taey-train resolves cpt_27b_4node then runs the
+# manifest entrypoint. Direct bash of run_4node_27b_cpt.sh is refuse-closed at the launcher.
+_cap_args=()
+for _v in TOTAL_STEPS SESSION_LIMIT SAVE_EVERY MAX_SEQ LR WARMUP_STEPS BATCH_SIZE_PER_RANK \
+          CPT_PACKED CPT_DATA MODEL_PATH OUTPUT_DIR RESUME_DELTA CLOCK_CAP \
+          ADAFACTOR_ALPHA_MODE ADAFACTOR_EPS1 ADAFACTOR_DOSE_LOG CHECKPOINT_DCP; do
+  if eval "[ -n \"\${${_v}+x}\" ]"; then
+    _cap_args+=("${_v}=${!_v}")
+  fi
+done
+"$REPO/scripts/taey-train" cpt_27b_4node "${_cap_args[@]}"
+unset _cap_args _v
