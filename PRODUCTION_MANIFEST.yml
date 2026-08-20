@@ -272,7 +272,7 @@ capabilities:
     # never bit; a single one-sided edit would have left a losing block that still READ like a pin.
     # A gate whose text and whose effect can disagree is not a gate. Do not reintroduce a second one.
     content_sha:   # exact candidate bytes; promotion requires a controlled production receipt
-      careers-qwen/post_cpt_pipeline.sh: c97a2e7fac31fb4f4cd3ffc7912a7da0e73e8094b1a2c56a89b474b25da080f1
+      careers-qwen/post_cpt_pipeline.sh: 7c85f7d45c85cb87cc632cd713bf63e98e1d2c5534a909916eaee1ff8cde066b
       dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
       dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
       dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
@@ -451,76 +451,50 @@ campaign_receipts:
     Coordinated Artifact-B export, offline 851-tensor conversion, 1199-tensor graft,
     provenance, weight-diff gate, 35-file seal verification and THOR_DELIVERED all passed;
     artifact SHA256 05c5fe1138d7a6f2a318eec219d980d2a0dd7e859fced19cedf1612d50d742cf.
-
-# ONE-USE CLEAN-CORPUS AUTHORIZATION. Jesse directed tutor-codex in this session to stop unrelated
-# work, train the next two epochs, and train Taey on the operational material. This binds that act
-# to a fresh two-epoch optimizer/scheduler/data cycle initialized from the V5 model weights. It does
-# not restore the V5 optimizer, scheduler, RNG, epoch, or data position because those states were
-# formed against the retired 339-row corpus. The campaign is consumed only when this campaign_id is
-# recorded under campaign_receipts.
-authorization:
-  capability: cpt_27b_4node
+- capability: cpt_27b_4node
   campaign_id: cpt_prod_v6_clean_repos_2ep
-  authorized_by: Jesse
-  authorized_on: 2026-08-20
-  input_contract:
-    initialization_campaign_id: cpt_prod_v5_repos_1ep
-    initialization_kind: all_rank_complete_dcp_model_weights_only
-    initialization_source_step: 85
-    source_sha256: fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685
-    packed_sha256: 503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba
-    packed_sidecar_sha256: 9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0
-    packed_rows: 334
-    ranks: 4
-    batch_size_per_rank: 1
-    steps_per_epoch: 84
-    epochs: 2
-    total_steps: 168
-    session_limit: 84
-    runtime_env:
-      MODEL_PATH: ${SPARK_HOME}/models/Qwen3.8-27B_training_base_851_causallm
-      CPT_DATA: ${SPARK_HOME}/training_data/cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl
-      OUTPUT_DIR: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep
-      TOTAL_STEPS: "168"
-      SESSION_LIMIT: "84"
-      SAVE_EVERY: "84"
-      EPOCHS: "2"
-      MAX_SEQ: "8192"
-      BATCH_SIZE_PER_RANK: "1"
-      CPT_PACKED: "1"
-      LR: 1e-5
-      WARMUP_STEPS: "15"
-      CLOCK_CAP: "1600"
-      ADAFACTOR_ALPHA_MODE: absolute
-      ADAFACTOR_EPS1: fp32
-    session_envs:
-      - name: initialize_from_v5_model_weights
-        runtime_env:
-          RESUME_MODEL_ONLY: "1"
-          RESUME_DELTA: ${SPARK_HOME}/training_outputs/cpt_prod_v5_repos_1ep/final
-      - name: resume_clean_epoch_two
-        runtime_env:
-          RESUME_MODEL_ONLY: "0"
-          RESUME_DELTA: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep/checkpoint-84
-  scope: >
-    Initialize from the complete V5 DCP model weights only, start a fresh Adafactor optimizer and
-    168-step cosine schedule, and train exactly two full passes over the corrected 334-row packed
-    8192-token corpus. Stop after the all-rank step-84 checkpoint, reboot all four Sparks, and resume
-    that new checkpoint with full optimizer/scheduler/data state through step 168. Preserve
-    LR=1e-5, WARMUP_STEPS=15, CLOCK_CAP=1600, CPT_PACKED=1, MAX_SEQ=8192,
-    BATCH_SIZE_PER_RANK=1, ADAFACTOR_ALPHA_MODE=absolute, ADAFACTOR_EPS1=fp32, and dose logging.
-    Stop on any failed model-only initialization, coverage, horizon, dose, SR-delta, thermal,
-    checkpoint, or lifecycle gate. This authorization covers CPT only; SFT and promotion remain
-    separately gated.
-  content_sha:
-    dense-9b/recipes/launch_cpt_qwen36_27b_fsdp.sh: b229c37662b3249ac26971e15933c4fd937730fad04fb9bbcbc310766d336f94
-    dense-9b/trainers/train_fsdp_dense_9b.py: 81a97eff667e1cf45403e89a2f02708c8b5c63bacf70c4826234179e0b3683bd
-    dense-9b/recipes/run_4node_27b_cpt.sh: 26d0e565bc410ce0adaa837ba389fc5598e67d85084682850ac6ff2db26947b5
-    dense-9b/configs/fsdp_dense_27b.yaml: b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b
-    dense-9b/instrumentation/capture_run.sh: 59ef33891ed795f79a257518eef3d3a5caf12571596475fdd41d14eb8f67fdd2
-    dense-9b/recipes/run_refresh_gate.sh: 0a093e0835d892a96b4932d7215e0191aa27ce68cb16e3fee7f454974d984b39
-    dense-9b/recipes/run_till_done_v2.sh: 9990c9c50d7f2de873aaddabd1ec565fa1c0471621465c8fb02118e3e4c404ae
-    dense-9b/recipes/run_till_done_v3.sh: aa89f1f90670e869cac4e5a68cab47b14c2c2a0eccd01d8503cc45e6a46d0af2
-    scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
-    scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
-    scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
+  public_receipt: careers-qwen/receipts/cpt_prod_v6_clean_repos_2ep.manifest.json
+  public_receipt_sha256: 7860527d9f5ac386437ef250799cb7598572df5c13614c81af1c800f2a0784e1
+  executed_controller_sha256: 26d0e565bc410ce0adaa837ba389fc5598e67d85084682850ac6ff2db26947b5
+  executed_lifecycle_sha256: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
+  verified_outcome: >
+    CHECKPOINT_SAVED step 168 on all four ranks after the authorized two-session run;
+    SR-DELTA 0.80x bf16 ULP PASS; final trainer_meta SHA256
+    8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262 matched all four
+    nodes; checkpoint survived the mandated four-node reboot with zero trainers remaining.
+
+# BAKE AUTHORIZATION — a separate capability-bound act. The CPT receipt cannot authorize export,
+# conversion, graft, qualification, or delivery. Jesse assigned this session the training-and-baking
+# lane and then directed the current run through the documented production process. This object
+# binds that direction to the exact completed V6 checkpoint and the exact candidate bake bytes.
+authorizations:
+  - capability: bake_export
+    campaign_id: bake_prod_v6_clean_repos_2ep
+    authorized_by: Jesse
+    authorized_on: 2026-08-20
+    input_contract:
+      runtime_env:
+        DCP_DIR: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep
+        EXPECTED_CHECKPOINT_STEP: "168"
+        EXPECTED_TRAINER_META_SHA256: 8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262
+    scope: >
+      Bake the independently verified all-rank step-168 final checkpoint for
+      cpt_prod_v6_clean_repos_2ep through coordinated sharded export, offline 851-tensor
+      conversion, the absolute base-to-final weight-diff gate, the per-run 1199-tensor servable
+      graft, provenance sealing, and THOR_DELIVERED. Stop below the 5e-05 weight-diff floor unless
+      an approved Chats review receipt authorizes finalization; do not launch SFT or promotion.
+    content_sha:
+      careers-qwen/post_cpt_pipeline.sh: 7c85f7d45c85cb87cc632cd713bf63e98e1d2c5534a909916eaee1ff8cde066b
+      dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
+      dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
+      dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
+      dense-9b/recipes/model_snapshot_sync.sh: 4af7859f53f38db9b2752ae5715b0aba10e447c2b32acd860592cb24a0dae0bc
+      careers-qwen/graft_cpt_into_servable.py: 7410ba2a408c53d309b56a0799a22eecf2f7c2f373d6eddbde45ebf0ad731b1a
+      careers-qwen/measure_cpt_delta.py: c7076b9a9898833dd3bb01d962e58f994bbd3560175be4c8361e2533db52430e
+      careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
+      careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
+      careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
+      careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
+      scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
+      scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
+      scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f

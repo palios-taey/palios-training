@@ -9,6 +9,16 @@ cd "$REPO_ROOT"
 : "${SPARK_MASTER:?fleet.env did not load}"
 : "${SPARK_MGMT_IPS:?fleet.env did not load}"
 : "${DCP_DIR:?set DCP_DIR to the completed CPT output directory}"
+: "${EXPECTED_CHECKPOINT_STEP:?set EXPECTED_CHECKPOINT_STEP from the bake authorization}"
+: "${EXPECTED_TRAINER_META_SHA256:?set EXPECTED_TRAINER_META_SHA256 from the bake authorization}"
+
+case "$EXPECTED_CHECKPOINT_STEP" in
+  ''|*[!0-9]*) echo "ABORT: EXPECTED_CHECKPOINT_STEP must be a non-negative integer." >&2; exit 1;;
+esac
+[[ "$EXPECTED_TRAINER_META_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+  echo "ABORT: EXPECTED_TRAINER_META_SHA256 must be 64 lowercase hex characters." >&2
+  exit 1
+}
 
 ARTIFACT_STORE=${ARTIFACT_STORE:-${POST_CPT_ARTIFACT_STORE:-}}
 CONVERT_SSH=${CONVERT_SSH:-${POST_CPT_CONVERT_SSH:-}}
@@ -347,6 +357,32 @@ else
   CKPT_NAME="checkpoint-$CKPT"
   echo "  checkpoint selection: $CKPT_NAME (no final/ present — run did not reach its horizon)"
 fi
+
+[ "$CKPT" = "$EXPECTED_CHECKPOINT_STEP" ] || {
+  echo "ABORT: selected checkpoint step $CKPT does not match authorized step $EXPECTED_CHECKPOINT_STEP." >&2
+  exit 1
+}
+for rank in 0 1 2 3; do
+  node=${NODES[$rank]}
+  meta_path="$DCP_DIR/$CKPT_NAME/trainer_meta.pt"
+  meta_receipt=$(ssh -o BatchMode=yes -o ConnectTimeout=10 spark@"$node" \
+    "test -f '$meta_path' && python3 -c \"import torch; d=torch.load('$meta_path',map_location='cpu',weights_only=True); print(d['step'], d['num_ranks'])\" && sha256sum '$meta_path' | cut -d' ' -f1")
+  read -r meta_step meta_ranks <<<"$(sed -n '1p' <<<"$meta_receipt")"
+  meta_sha=$(sed -n '2p' <<<"$meta_receipt")
+  [ "$meta_step" = "$EXPECTED_CHECKPOINT_STEP" ] || {
+    echo "ABORT: rank$rank on $node trainer_meta step $meta_step does not match authorized step $EXPECTED_CHECKPOINT_STEP." >&2
+    exit 1
+  }
+  [ "$meta_ranks" = 4 ] || {
+    echo "ABORT: rank$rank on $node trainer_meta num_ranks=$meta_ranks, expected 4." >&2
+    exit 1
+  }
+  [ "$meta_sha" = "$EXPECTED_TRAINER_META_SHA256" ] || {
+    echo "ABORT: rank$rank on $node trainer_meta SHA256 $meta_sha does not match the authorized digest." >&2
+    exit 1
+  }
+done
+echo "  checkpoint identity: step $EXPECTED_CHECKPOINT_STEP, 4/4 trainer_meta SHA256 verified"
 
 echo "=== RUN CONFIG — captured from the live trainer ==="
 printf '  %-18s %s\n' training-base "$TRAIN_BASE" corpus "$CORPUS" checkpoint "$CKPT_NAME (step $CKPT)" \

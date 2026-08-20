@@ -1,0 +1,75 @@
+{
+  "format": "cpt-27b-training-receipt-v1",
+  "observed_at": "2026-08-20T22:50:16Z",
+  "campaign_id": "cpt_prod_v6_clean_repos_2ep",
+  "verdict": "CHECKPOINT_SAVED_REBOOT_VERIFIED",
+  "deployment": {
+    "commit": "835d6f30cf892a1b0dc0b2ca2879dddd395b26b2",
+    "controller_sha256": "26d0e565bc410ce0adaa837ba389fc5598e67d85084682850ac6ff2db26947b5",
+    "launcher_sha256": "b229c37662b3249ac26971e15933c4fd937730fad04fb9bbcbc310766d336f94",
+    "trainer_sha256": "81a97eff667e1cf45403e89a2f02708c8b5c63bacf70c4826234179e0b3683bd",
+    "config_sha256": "b3f1f3b2da0625e2d0225f8934641e86238ccf91858196c2eb38bc1544ce0d8b",
+    "lifecycle_sha256": "924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f"
+  },
+  "inputs": {
+    "initialization_campaign_id": "cpt_prod_v5_repos_1ep",
+    "initialization_kind": "all_rank_complete_dcp_model_weights_only",
+    "initialization_source_step": 85,
+    "source_sha256": "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685",
+    "packed_sha256": "503e18e8cd67c9bc88cd16bc266381adf13e2666a27c37ef074e1d1d3e2aefba",
+    "packed_sidecar_sha256": "9d93b763b36a68b999ec3c4fd2980ff72f9af55c1c8b5f55158912047fed2ca0",
+    "packed_rows": 334,
+    "packed_sequence_tokens": 8192
+  },
+  "recipe": {
+    "world_size": 4,
+    "epochs": 2,
+    "steps_per_epoch": 84,
+    "total_steps": 168,
+    "session_limit": 84,
+    "save_every": 84,
+    "learning_rate": 0.00001,
+    "warmup_steps": 15,
+    "batch_size_per_rank": 1,
+    "global_batch": 4,
+    "token_budget_per_step": 65536,
+    "graphics_clock_cap_mhz": 1600,
+    "adafactor_alpha_mode": "absolute",
+    "adafactor_eps1": "fp32",
+    "allocator_configuration": "expandable_segments:False"
+  },
+  "training": {
+    "completed_step": 168,
+    "coverage": "84 steps/epoch; 336 padded blocks for 334 dataset blocks",
+    "observed_tok_s_at_steady_state": 742,
+    "sr_delta_mean_abs": 0.00005185,
+    "sr_delta_bf16_ulp_multiple": 0.80,
+    "sr_delta_verdict": "PASS",
+    "lifecycle": {
+      "spec_valid_at": "2026-08-20T20:11:39.088Z",
+      "training_step_1_at": "2026-08-20T20:20:23.287Z",
+      "fragmentation_exit_step_84_at": "2026-08-20T21:21:39.563Z",
+      "checkpoint_saved_step_168_at": "2026-08-20T22:34:42.012Z"
+    }
+  },
+  "checkpoint": {
+    "path": "$SPARK_HOME/training_outputs/cpt_prod_v6_clean_repos_2ep/final",
+    "complete_ranks": 4,
+    "step": 168,
+    "epoch": 1,
+    "data_pos": 84,
+    "num_ranks": 4,
+    "trainer_meta_sha256": "8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262"
+  },
+  "cleanup": {
+    "post_training_reboot_verified_ranks": 4,
+    "trainers_after_reboot": 0,
+    "checkpoint_survived_reboot_ranks": 4
+  },
+  "next_gate": {
+    "capability": "bake_export",
+    "status": "SEPARATELY_AUTHORIZED_NOT_EXECUTED",
+    "weight_diff_band": [0.00005, 0.0008],
+    "below_band_action": "FULL_STOP_NO_GRAFT_NO_HANDOFF_NO_SFT"
+  }
+}
