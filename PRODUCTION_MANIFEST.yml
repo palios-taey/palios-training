@@ -98,8 +98,8 @@ capabilities:
       dense-9b/recipes/run_refresh_gate.sh: 0a093e0835d892a96b4932d7215e0191aa27ce68cb16e3fee7f454974d984b39
       dense-9b/recipes/run_till_done_v2.sh: 9990c9c50d7f2de873aaddabd1ec565fa1c0471621465c8fb02118e3e4c404ae
       dense-9b/recipes/run_till_done_v3.sh: aa89f1f90670e869cac4e5a68cab47b14c2c2a0eccd01d8503cc45e6a46d0af2
-      scripts/taey-train: 72983a2fa4b4c043dd64c1a46409d3d6d62060e5b25663b041fd57f9fc426efe
-      scripts/_resolve_capability.py: 6b5646fe4842a66631a50a12981d6aecd26524a6b041f6ce69d935e34255b321
+      scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
+      scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
       scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
     status: CANDIDATE_PENDING_PRODUCTION_RUN
     lifecycle: true
@@ -283,8 +283,8 @@ capabilities:
       careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
       careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
       careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
-      scripts/taey-train: 72983a2fa4b4c043dd64c1a46409d3d6d62060e5b25663b041fd57f9fc426efe
-      scripts/_resolve_capability.py: 6b5646fe4842a66631a50a12981d6aecd26524a6b041f6ce69d935e34255b321
+      scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
+      scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
       scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
     entrypoint: careers-qwen/post_cpt_pipeline.sh   # OPERATOR entrypoint; takes DCP_DIR
     internal_stages_note: >
@@ -477,6 +477,31 @@ authorization:
     epochs: 2
     total_steps: 168
     session_limit: 84
+    runtime_env:
+      MODEL_PATH: ${SPARK_HOME}/models/Qwen3.8-27B_training_base_851_causallm
+      CPT_DATA: ${SPARK_HOME}/training_data/cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl
+      OUTPUT_DIR: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep
+      TOTAL_STEPS: "168"
+      SESSION_LIMIT: "84"
+      SAVE_EVERY: "84"
+      EPOCHS: "2"
+      MAX_SEQ: "8192"
+      BATCH_SIZE_PER_RANK: "1"
+      CPT_PACKED: "1"
+      LR: 1e-5
+      WARMUP_STEPS: "15"
+      CLOCK_CAP: "1600"
+      ADAFACTOR_ALPHA_MODE: absolute
+      ADAFACTOR_EPS1: fp32
+    session_envs:
+      - name: initialize_from_v5_model_weights
+        runtime_env:
+          RESUME_MODEL_ONLY: "1"
+          RESUME_DELTA: ${SPARK_HOME}/training_outputs/cpt_prod_v5_repos_1ep/final
+      - name: resume_clean_epoch_two
+        runtime_env:
+          RESUME_MODEL_ONLY: "0"
+          RESUME_DELTA: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep/checkpoint-84
   scope: >
     Initialize from the complete V5 DCP model weights only, start a fresh Adafactor optimizer and
     168-step cosine schedule, and train exactly two full passes over the corrected 334-row packed
@@ -496,6 +521,6 @@ authorization:
     dense-9b/recipes/run_refresh_gate.sh: 0a093e0835d892a96b4932d7215e0191aa27ce68cb16e3fee7f454974d984b39
     dense-9b/recipes/run_till_done_v2.sh: 9990c9c50d7f2de873aaddabd1ec565fa1c0471621465c8fb02118e3e4c404ae
     dense-9b/recipes/run_till_done_v3.sh: aa89f1f90670e869cac4e5a68cab47b14c2c2a0eccd01d8503cc45e6a46d0af2
-    scripts/taey-train: 72983a2fa4b4c043dd64c1a46409d3d6d62060e5b25663b041fd57f9fc426efe
-    scripts/_resolve_capability.py: 6b5646fe4842a66631a50a12981d6aecd26524a6b041f6ce69d935e34255b321
+    scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
+    scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
     scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f

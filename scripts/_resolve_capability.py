@@ -191,6 +191,63 @@ def authorize_candidate(doc, cap, body, root, get_bytes):
                 f"{path} drifted: authorization pin {digest} tree {actual}. "
                 f"The authorization binds exact bytes; a one-byte change is a different campaign."
             )
+
+    input_contract = auth.get("input_contract") or {}
+    runtime_env = input_contract.get("runtime_env") or {}
+    if not isinstance(runtime_env, dict):
+        return False, None, (
+            f"authorization for '{cap}' input_contract.runtime_env must be a mapping."
+        )
+
+    def expected_value(raw):
+        expanded = os.path.expandvars(str(raw))
+        if "$" in expanded:
+            return None
+        return expanded
+
+    for key, raw_expected in runtime_env.items():
+        if not isinstance(key, str) or not key or not key.replace("_", "").isalnum():
+            return False, None, (
+                f"authorization for '{cap}' has invalid runtime env key {key!r}."
+            )
+        expected = expected_value(raw_expected)
+        if expected is None:
+            return False, None, (
+                f"authorization for '{cap}' runtime env {key} contains an unresolved variable."
+            )
+        actual = os.environ.get(key)
+        if actual != expected:
+            return False, None, (
+                f"authorization for '{cap}' requires {key}={expected!r}, got {actual!r}. "
+                "The launch arguments must match the human-authorized input contract."
+            )
+
+    session_envs = input_contract.get("session_envs") or []
+    if session_envs:
+        if not isinstance(session_envs, list) or any(not isinstance(item, dict) for item in session_envs):
+            return False, None, (
+                f"authorization for '{cap}' input_contract.session_envs must be a list of mappings."
+            )
+        matched = []
+        for item in session_envs:
+            name = str(item.get("name") or "<unnamed>")
+            required = item.get("runtime_env") or {}
+            if not isinstance(required, dict):
+                return False, None, (
+                    f"authorization for '{cap}' session {name!r} runtime_env must be a mapping."
+                )
+            if all(
+                expected_value(raw) is not None
+                and os.environ.get(key) == expected_value(raw)
+                for key, raw in required.items()
+            ):
+                matched.append(name)
+        if len(matched) != 1:
+            return False, None, (
+                f"authorization for '{cap}' launch matches {len(matched)} authorized sessions "
+                f"({matched!r}); exactly one of {[str(item.get('name') or '<unnamed>') for item in session_envs]!r} "
+                "must match."
+            )
     return True, pins, None
 
 
