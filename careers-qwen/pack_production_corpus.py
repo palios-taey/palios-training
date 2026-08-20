@@ -292,12 +292,64 @@ def bind_logical_paths(logical_out, logical_manifest):
     return logical_out, logical_manifest, logical_out + ".generation"
 
 
-def generation_artifact_paths(logical_out, corpus_sha):
-    """Gen-stamped filenames use the full 64-hex sha256, never a prefix."""
-    if not (isinstance(corpus_sha, str) and len(corpus_sha) == 64 and set(corpus_sha) <= _HEX):
-        raise SystemExit("ABORT: generation identity requires a full 64-hex sha256")
-    corpus_gen = os.path.abspath(logical_out) + ".gen." + corpus_sha
-    return corpus_gen, corpus_gen + ".manifest.json"
+def _full_sha256(value, label):
+    if not (isinstance(value, str) and len(value) == 64 and set(value) <= _HEX):
+        raise SystemExit(f"ABORT: {label} requires a full 64-hex sha256")
+    return value
+
+
+def generation_artifact_paths(logical_out, logical_manifest, corpus_sha, manifest_sha):
+    """Gen filenames are sha-stamped logical paths. --manifest names the sidecar."""
+    corpus_sha = _full_sha256(corpus_sha, "generation corpus identity")
+    manifest_sha = _full_sha256(manifest_sha, "generation manifest identity")
+    logical_out = os.path.abspath(logical_out)
+    logical_manifest = os.path.abspath(logical_manifest)
+    if os.path.dirname(logical_manifest) != os.path.dirname(logical_out):
+        raise SystemExit("ABORT: --manifest must be in the same directory as --out")
+    return (
+        logical_out + ".gen." + corpus_sha,
+        logical_manifest + ".gen." + manifest_sha,
+    )
+
+
+def install_if_absent(src, dest):
+    """Move src to dest only when dest is new. Never overwrite a live generation file."""
+    src = os.path.abspath(src)
+    dest = os.path.abspath(dest)
+    if src == dest:
+        return False
+    if os.path.exists(dest):
+        if sha256_file(dest) != sha256_file(src):
+            raise SystemExit(
+                f"ABORT: generation path {dest} already exists with different content"
+            )
+        os.unlink(src)
+        return False
+    os.replace(src, dest)
+    return True
+
+
+def publish_generation_artifacts(
+    tmp,
+    sidecar_candidate,
+    logical_out,
+    logical_manifest,
+    pointer_path,
+    *,
+    write_pointer,
+):
+    corpus_sha = sha256_file(tmp)
+    manifest_sha = sha256_file(sidecar_candidate)
+    corpus_gen, manifest_gen = generation_artifact_paths(
+        logical_out, logical_manifest, corpus_sha, manifest_sha
+    )
+    if os.path.abspath(corpus_gen) == os.path.abspath(manifest_gen):
+        raise SystemExit("ABORT: corpus and manifest paths must differ")
+    install_if_absent(tmp, corpus_gen)
+    install_if_absent(sidecar_candidate, manifest_gen)
+    if write_pointer:
+        write_generation_pointer(pointer_path, corpus_gen, manifest_gen)
+    return corpus_gen, manifest_gen
 
 
 def unpromoted_staging_paths(tmp, sidecar_candidate, pointer_path):
@@ -512,10 +564,10 @@ def prove_selector_legs():
     }
 
 
-def _toy_manifest(path, corpus_path):
+def _toy_manifest(path, corpus_path, corpus_filename=None):
     write_manifest(path, {
         "schema": SCHEMA,
-        "corpus_filename": os.path.basename(corpus_path),
+        "corpus_filename": corpus_filename or os.path.basename(corpus_path),
         "corpus_sha256": sha256_file(corpus_path),
         "corpus_bytes": os.path.getsize(corpus_path),
         "corpus_rows": 1,
@@ -678,6 +730,23 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
             + unknown.stderr.strip()
         )
 
+    corrected_name = "cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl"
+    if corrected_name not in block or CORRECTED_PACKED_SHA not in block:
+        raise SystemExit("ABORT: launcher pin block is missing the corrected packed identity")
+    if CORRECTED_MANIFEST_SHA not in block:
+        raise SystemExit("ABORT: launcher pin block is missing the corrected sidecar identity")
+    corrected_missing = os.path.join(work_dir, "missing-corrected", corrected_name)
+    corrected_run = _run_pin_script(script, corrected_missing, tree)
+    if corrected_run.returncode == 0:
+        raise SystemExit("ABORT: launcher accepted the corrected packed name with no file")
+    if "no content pin" in corrected_run.stderr:
+        raise SystemExit("ABORT: corrected packed filename was not admitted by the pin case")
+    if "CPT_DATA is missing" not in corrected_run.stderr:
+        raise SystemExit(
+            "ABORT: corrected packed name did not hit the missing-file gate: "
+            + corrected_run.stderr.strip()
+        )
+
     # Name that IS in the pin case, file absent → missing-file gate, not unknown.
     pinned_name = "cpt_prod_v3_packed_8192.jsonl"
     missing = os.path.join(work_dir, "missing", pinned_name)
@@ -795,21 +864,25 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
         "mixed_pair_fail_closed": True,
         "outside_git_pointer_resolved": True,
         "missing_resolver_fail_closed": True,
+        "corrected_packed_name_admitted": True,
+        "corrected_sidecar_pin_present": True,
     }
 
 
 def prove_publication_invariants(work_dir):
     sha = "ab" * 32
+    man_sha = "cd" * 32
     short = sha[:16]
     out = os.path.join(work_dir, "publish", "logical.jsonl")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    corpus_gen, manifest_gen = generation_artifact_paths(out, sha)
+    default_manifest = out + ".manifest.json"
+    corpus_gen, manifest_gen = generation_artifact_paths(out, default_manifest, sha, man_sha)
     if not corpus_gen.endswith(".gen." + sha):
-        raise SystemExit("ABORT: generation artifact path did not use the full sha256")
-    if short in os.path.basename(corpus_gen) and sha not in os.path.basename(corpus_gen):
-        raise SystemExit("ABORT: generation artifact path used a 16-hex prefix")
+        raise SystemExit("ABORT: generation artifact path did not use the full corpus sha256")
+    if not manifest_gen.endswith(".gen." + man_sha):
+        raise SystemExit("ABORT: generation sidecar path did not use the full manifest sha256")
     try:
-        generation_artifact_paths(out, short)
+        generation_artifact_paths(out, default_manifest, short, man_sha)
         raise SystemExit("ABORT: 16-hex generation identity was accepted")
     except SystemExit as error:
         if "full 64-hex" not in str(error):
@@ -822,6 +895,9 @@ def prove_publication_invariants(work_dir):
     _, bound_custom, _ = bind_logical_paths(out, custom)
     if bound_custom != os.path.abspath(custom):
         raise SystemExit("ABORT: --manifest same-dir path was ignored")
+    custom_gen = generation_artifact_paths(out, bound_custom, sha, man_sha)[1]
+    if os.path.basename(custom_gen) != os.path.basename(custom) + ".gen." + man_sha:
+        raise SystemExit("ABORT: --manifest did not name the generation sidecar")
     other = os.path.join(work_dir, "other-dir", "custom.manifest.json")
     os.makedirs(os.path.dirname(other), exist_ok=True)
     try:
@@ -848,12 +924,58 @@ def prove_publication_invariants(work_dir):
             raise SystemExit("ABORT: unpromoted cleanup mutated the live generation")
     if os.path.exists(tmp) or os.path.exists(sidecar):
         raise SystemExit("ABORT: unpromoted cleanup left staging files")
+
+    death_dir = os.path.join(work_dir, "death-before-pointer")
+    os.makedirs(death_dir, exist_ok=True)
+    death_out = os.path.join(death_dir, "logical.jsonl")
+    death_manifest = death_out + ".manifest.json"
+    death_pointer = death_out + ".generation"
+    tmp_a = death_out + ".tmp"
+    sidecar_a = tmp_a + ".manifest.json"
+    with open(tmp_a, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    death_corpus_sha = sha256_file(tmp_a)
+    death_corpus_name = os.path.basename(death_out) + ".gen." + death_corpus_sha
+    _toy_manifest(sidecar_a, tmp_a, corpus_filename=death_corpus_name)
+    first_corpus, first_manifest = publish_generation_artifacts(
+        tmp_a, sidecar_a, death_out, death_manifest, death_pointer, write_pointer=True
+    )
+    resolved_corpus, resolved_manifest = resolve_generation(death_out)
+    if os.path.abspath(resolved_manifest) != os.path.abspath(first_manifest):
+        raise SystemExit("ABORT: first publish pointer did not name the first sidecar")
+    old_sidecar = Path(first_manifest).read_bytes()
+    tmp_b = death_out + ".tmp"
+    sidecar_b = tmp_b + ".manifest.json"
+    with open(tmp_b, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    _toy_manifest(sidecar_b, tmp_b, corpus_filename=death_corpus_name)
+    with open(sidecar_b, "a") as handle:
+        handle.write(" ")
+    second_corpus, second_manifest = publish_generation_artifacts(
+        tmp_b, sidecar_b, death_out, death_manifest, death_pointer, write_pointer=False
+    )
+    if os.path.abspath(second_corpus) != os.path.abspath(first_corpus):
+        raise SystemExit("ABORT: same-SHA corpus was not reused")
+    if os.path.abspath(second_manifest) == os.path.abspath(first_manifest):
+        raise SystemExit("ABORT: changed sidecar reused the live sidecar path")
+    if Path(first_manifest).read_bytes() != old_sidecar:
+        raise SystemExit("ABORT: death before pointer overwrote the live sidecar")
+    still_corpus, still_manifest = resolve_generation(death_out)
+    if os.path.abspath(still_manifest) != os.path.abspath(first_manifest):
+        raise SystemExit("ABORT: death before pointer invalidated the live pointer")
+    write_generation_pointer(death_pointer, second_corpus, second_manifest)
+    done_corpus, done_manifest = resolve_generation(death_out)
+    if os.path.abspath(done_manifest) != os.path.abspath(second_manifest):
+        raise SystemExit("ABORT: completed pointer did not name the new sidecar")
+
     return {
         "full_sha_generation_identity": True,
         "prefix_identity_refused": True,
         "manifest_flag_bound": True,
+        "manifest_names_generation_sidecar": True,
         "manifest_other_dir_refused": True,
         "live_generation_survives_unpromoted_cleanup": True,
+        "death_before_pointer_preserves_live_pair": True,
     }
 
 
@@ -985,9 +1107,13 @@ def write_class_proof_receipt(
         "path_traversal_refused": generation["path_traversal_refused"],
         "full_sha_generation_identity": publication["full_sha_generation_identity"],
         "manifest_flag_bound": publication["manifest_flag_bound"],
+        "manifest_names_generation_sidecar": publication["manifest_names_generation_sidecar"],
         "live_generation_survives_unpromoted_cleanup": publication["live_generation_survives_unpromoted_cleanup"],
+        "death_before_pointer_preserves_live_pair": publication["death_before_pointer_preserves_live_pair"],
         "outside_git_pointer_resolved": launcher["outside_git_pointer_resolved"],
         "missing_resolver_fail_closed": launcher["missing_resolver_fail_closed"],
+        "corrected_packed_name_admitted": launcher["corrected_packed_name_admitted"],
+        "corrected_sidecar_pin_present": launcher["corrected_sidecar_pin_present"],
     }, sort_keys=True))
     print(f"[pack] class proof VERIFIED against real artifacts: receipt={path}")
     return 0
@@ -1144,14 +1270,9 @@ def main():
             raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
         corpus_sha = sha256_file(tmp)
         corpus_bytes = os.path.getsize(tmp)
-        corpus_gen, manifest_gen = generation_artifact_paths(args.out, corpus_sha)
-        if os.path.abspath(corpus_gen) == os.path.abspath(manifest_gen):
-            sys.exit("ABORT: corpus and manifest paths must differ")
-        if os.path.abspath(manifest_gen) == os.path.abspath(logical_manifest):
-            sys.exit("ABORT: gen sidecar must not replace the logical --manifest path")
         write_manifest(sidecar_candidate, {
             "schema": SCHEMA,
-            "corpus_filename": os.path.basename(corpus_gen),
+            "corpus_filename": os.path.basename(args.out) + ".gen." + corpus_sha,
             "corpus_sha256": corpus_sha,
             "corpus_bytes": corpus_bytes,
             "corpus_rows": tmp_rows,
@@ -1164,9 +1285,14 @@ def main():
             "packer_sha256": sha256_file(os.path.abspath(__file__)),
             "inputs": input_receipts,
         })
-        os.replace(tmp, corpus_gen)
-        os.replace(sidecar_candidate, manifest_gen)
-        write_generation_pointer(pointer_path, corpus_gen, manifest_gen)
+        corpus_gen, manifest_gen = publish_generation_artifacts(
+            tmp,
+            sidecar_candidate,
+            args.out,
+            logical_manifest,
+            pointer_path,
+            write_pointer=True,
+        )
         promoted = True
     finally:
         if not promoted:

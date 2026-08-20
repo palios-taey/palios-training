@@ -179,6 +179,8 @@
     "sha256": "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
   },
   "launcher": {
+    "corrected_packed_name_admitted": true,
+    "corrected_sidecar_pin_present": true,
     "missing_pinned_file_refused": true,
     "missing_resolver_fail_closed": true,
     "mixed_pair_fail_closed": true,
@@ -197,9 +199,11 @@
     "quoted_header_survived": true
   },
   "publication": {
+    "death_before_pointer_preserves_live_pair": true,
     "full_sha_generation_identity": true,
     "live_generation_survives_unpromoted_cleanup": true,
     "manifest_flag_bound": true,
+    "manifest_names_generation_sidecar": true,
     "manifest_other_dir_refused": true,
     "prefix_identity_refused": true
   },

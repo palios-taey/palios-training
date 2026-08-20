@@ -169,8 +169,9 @@ def main():
 
     try:
         if args.command == "resolve":
-            corpus, _manifest = resolve_generation(args.corpus)
+            corpus, manifest = resolve_generation(args.corpus)
             print(corpus)
+            print(manifest)
             return 0
         if not args.manifest:
             raise SystemExit("REFUSE: --manifest is required for verify")
