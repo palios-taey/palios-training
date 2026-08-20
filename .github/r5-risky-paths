@@ -1,48 +1,11 @@
-# R5 risky surfaces — a PR touching ANY of these requires both adversarial
-# auditors (audit/grok + audit/gatekeeper) to post a success commit status
-# before it can merge. The r5-audit-gate workflow enforces this mechanically
-# by failing the Actions job/check named `gate` (nonzero exit) when audits are
-# missing or not success. Branch protection must require that app-bound check;
-# PAT auditors may write only audit/<name> statuses (not the Actions check).
+# RETIRED (PR32 rework) — do not use for gating decisions.
 #
-# DESIGN for palios-training: this repo IS a public release artifact — every
-# recipe / trainer / config / audit verdict / doc is part of what ships publicly,
-# so the WHOLE content surface is risky (a bad change = a public-facing defect /
-# leaked path / cannot-lie metric). Fail-closed: gate the whole tree rather than
-# an allowlist that drifts. For this repo the R5 audit is "verify-claims-against-
-# repo" (per conductor 2026-06-17), not a session-exploit repro. One glob/line.
+# The r5-audit-gate workflow no longer reads this file. Every nonempty PR diff
+# is R5-risky by default. The previous allowlist missed 34 of 269 tracked files
+# (including moe-35b production trainers/recipes/configs) because shell
+# `case "$f" in $pat)` is path-prefix anchored (`trainers/*` never matched
+# `dense-9b/trainers/...`).
 #
-# All shipped training artifacts.
-#
-# MEASURED 2026-08-19: the five root-relative globs below matched ZERO of the 32
-# files PRODUCTION_MANIFEST.yml pins as production. The gate matches with shell
-# `case "$f" in $pat)` (r5-audit-gate.yml:89), which anchors at the start of the
-# path, so `trainers/*` never matches `dense-9b/trainers/train_fsdp_dense_9b.py`.
-# Nothing announced this: the gate posted "no R5 risky surface touched" and went
-# green. A PR rewriting the production trainer was waved through, while a PR that
-# only added markdown got the full two-auditor review — because `*.md` was the one
-# pattern that happened to match at any depth.
-#
-# The stated design was always "gate the whole tree rather than an allowlist that
-# drifts." These patterns are what that sentence was supposed to mean. The five
-# root-relative lines are kept because they cost nothing and would matter if those
-# directories are ever created at the root.
-dense-9b/*
-careers-qwen/*
-scripts/*
-tests/*
-schemas/*
-PRODUCTION_MANIFEST.yml
-recipes/*
-trainers/*
-configs/*
-audit_results/*
-proof_of_run/*
-# All public-facing docs + the provenance index:
-*.md
-# CI/gate config itself (self-protecting — a PR weakening the gate is gated):
-.github/workflows/*.yml
-.github/r5-risky-paths
-.gitleaks.toml
-# License:
-LICENSE
+# Kept as a tombstone so searches for r5-risky-paths still surface the defect
+# and the replacement rule. Safe to delete in a later cleanup once docs no
+# longer reference the path.
