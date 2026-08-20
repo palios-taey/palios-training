@@ -11,6 +11,54 @@
 # script does NOT reboot — it assumes clean nodes and refuses to kill-and-relaunch.
 set -uo pipefail
 
+# ── ONE DOOR (task-2220f1b9) ─────────────────────────────────────────────────
+# Authorization lives at this unique side-effect boundary, not only at
+# scripts/taey-train. Any tracked caller that used to bash this file directly
+# still cannot create cpt27b sessions without PRODUCTION_MANIFEST resolving
+# capability cpt_27b_4node. Prefer launching via:
+#   scripts/taey-train cpt_27b_4node [VAR=val ...]
+# which also owns outer lifecycle success-state checks.
+_ONE_DOOR_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "${_ONE_DOOR_ROOT}" ] || [ ! -f "${_ONE_DOOR_ROOT}/PRODUCTION_MANIFEST.yml" ]; then
+  echo "ABORT: one-door gate cannot locate PRODUCTION_MANIFEST.yml (run from the palios-training checkout)." >&2
+  exit 1
+fi
+_ONE_DOOR_RESOLVER="${_ONE_DOOR_ROOT}/scripts/_resolve_capability.py"
+_ONE_DOOR_MANIFEST="${_ONE_DOOR_ROOT}/PRODUCTION_MANIFEST.yml"
+if [ ! -f "${_ONE_DOOR_RESOLVER}" ]; then
+  echo "ABORT: one-door gate missing resolver at ${_ONE_DOOR_RESOLVER}." >&2
+  exit 1
+fi
+_ONE_DOOR_OUT="$(python3 "${_ONE_DOOR_RESOLVER}" "${_ONE_DOOR_MANIFEST}" cpt_27b_4node 2>/dev/null || true)"
+case "${_ONE_DOOR_OUT}" in
+  REFUSE:*)
+    echo "ABORT: cpt_27b_4node one-door gate — ${_ONE_DOOR_OUT#REFUSE:}" >&2
+    echo "  Direct launch of run_4node_27b_cpt.sh is not a sanctioned door." >&2
+    echo "  Use: scripts/taey-train cpt_27b_4node [VAR=val ...]" >&2
+    exit 1
+    ;;
+  "")
+    echo "ABORT: cpt_27b_4node one-door gate — resolver produced no output." >&2
+    exit 1
+    ;;
+esac
+# Prove the resolved entrypoint is this script (pin drift / wrong capability).
+_ONE_DOOR_ENTRY="$(printf '%s\n' "${_ONE_DOOR_OUT}" | awk -F= '/^ENTRY=/{print substr($0,7); exit}')"
+_ONE_DOOR_ENTRY="${_ONE_DOOR_ENTRY#\'}"
+_ONE_DOOR_ENTRY="${_ONE_DOOR_ENTRY%\'}"
+_ONE_DOOR_ENTRY="${_ONE_DOOR_ENTRY#\"}"
+_ONE_DOOR_ENTRY="${_ONE_DOOR_ENTRY%\"}"
+_ONE_DOOR_SELF="dense-9b/recipes/run_4node_27b_cpt.sh"
+case " ${_ONE_DOOR_ENTRY} " in
+  *" ${_ONE_DOOR_SELF} "*|*"${_ONE_DOOR_SELF}"*) ;;
+  *)
+    echo "ABORT: cpt_27b_4node one-door gate — resolved ENTRY=${_ONE_DOOR_ENTRY:-<empty>} is not ${_ONE_DOOR_SELF}." >&2
+    exit 1
+    ;;
+esac
+unset _ONE_DOOR_ROOT _ONE_DOOR_RESOLVER _ONE_DOOR_MANIFEST _ONE_DOOR_OUT _ONE_DOOR_ENTRY _ONE_DOOR_SELF
+# ── end one door ─────────────────────────────────────────────────────────────
+
 MASTER=${SPARK_MASTER}            # rank 0 — torchrun rendezvous host (${SPARK_RAIL_MASTER} rail)
 WORKERS=(${SPARK_MGMT_IPS#* })   # ranks 1,2,3
 ALL=("$MASTER" "${WORKERS[@]}")
