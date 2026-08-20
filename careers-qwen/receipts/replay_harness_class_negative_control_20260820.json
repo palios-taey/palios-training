@@ -86,6 +86,7 @@
   },
   "generation_pointer": {
     "mixed_pair_refused": true,
+    "path_traversal_refused": true,
     "pointer_resolves": true,
     "pre_pointer_does_not_publish_gen": true,
     "pre_pointer_incomplete_pair_not_resolved": true,
@@ -179,7 +180,9 @@
   },
   "launcher": {
     "missing_pinned_file_refused": true,
+    "missing_resolver_fail_closed": true,
     "mixed_pair_fail_closed": true,
+    "outside_git_pointer_resolved": true,
     "pre_pointer_unpublished_gen_not_selected": true,
     "same_generation_rerun_fail_closed": true,
     "unknown_filename_refused": true
@@ -192,6 +195,13 @@
     "packed_eos_header_matched": true,
     "quoted_header_doc_id": "repo::apply-machine::docs/quoting.md",
     "quoted_header_survived": true
+  },
+  "publication": {
+    "full_sha_generation_identity": true,
+    "live_generation_survives_unpromoted_cleanup": true,
+    "manifest_flag_bound": true,
+    "manifest_other_dir_refused": true,
+    "prefix_identity_refused": true
   },
   "scanner": {
     "doc_id": "::(?:.+/)?replay_[^/]+\\.py$",

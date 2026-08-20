@@ -24,7 +24,9 @@ import argparse, json, os, re, subprocess, sys
 from pathlib import Path
 
 from corpus_manifest import (
+    GENERATION_SCHEMA,
     SCHEMA,
+    pointer_member,
     resolve_generation,
     sha256_file,
     write_generation_pointer,
@@ -273,6 +275,39 @@ def _unlink_quiet(*paths):
             os.unlink(path)
         except FileNotFoundError:
             continue
+
+
+_HEX = frozenset("0123456789abcdef")
+
+
+def bind_logical_paths(logical_out, logical_manifest):
+    """Logical dest paths are never replaced. --manifest is same-dir as --out or defaulted."""
+    logical_out = os.path.abspath(logical_out)
+    if logical_manifest:
+        logical_manifest = os.path.abspath(logical_manifest)
+    else:
+        logical_manifest = logical_out + ".manifest.json"
+    if os.path.dirname(logical_manifest) != os.path.dirname(logical_out):
+        raise SystemExit("ABORT: --manifest must be in the same directory as --out")
+    return logical_out, logical_manifest, logical_out + ".generation"
+
+
+def generation_artifact_paths(logical_out, corpus_sha):
+    """Gen-stamped filenames use the full 64-hex sha256, never a prefix."""
+    if not (isinstance(corpus_sha, str) and len(corpus_sha) == 64 and set(corpus_sha) <= _HEX):
+        raise SystemExit("ABORT: generation identity requires a full 64-hex sha256")
+    corpus_gen = os.path.abspath(logical_out) + ".gen." + corpus_sha
+    return corpus_gen, corpus_gen + ".manifest.json"
+
+
+def unpromoted_staging_paths(tmp, sidecar_candidate, pointer_path):
+    """Failure cleanup is staging only. Never the live gen-stamped pair."""
+    return (
+        tmp,
+        sidecar_candidate,
+        sidecar_candidate + ".tmp",
+        pointer_path + ".tmp",
+    )
 
 
 HISTORICAL_PACKED_SHA = "841df5ec10461d34e6b994b2f858cc3ef943092ed6904aefed16b03427815ddf"
@@ -561,12 +596,36 @@ def prove_generation_pointer(work_dir):
     except ValueError:
         mixed_pair_refused = True
 
+    trav_logical = os.path.join(td, "trav.jsonl")
+    with open(trav_logical, "w") as handle:
+        handle.write("stale-trav\n")
+    trav_pointer = trav_logical + ".generation"
+    with open(trav_pointer, "w") as handle:
+        json.dump({
+            "schema": GENERATION_SCHEMA,
+            "corpus": "../escape.jsonl",
+            "manifest": "trav.jsonl.manifest.json",
+            "corpus_sha256": "a" * 64,
+            "manifest_sha256": "b" * 64,
+        }, handle)
+    try:
+        resolve_generation(trav_logical)
+        raise SystemExit("ABORT: pointer path traversal was accepted")
+    except ValueError:
+        path_traversal_refused = True
+    try:
+        pointer_member(td, "../escape.jsonl", "corpus")
+        raise SystemExit("ABORT: pointer_member accepted a parent path")
+    except ValueError:
+        pass
+
     return {
         "pointer_resolves": True,
         "pre_pointer_does_not_publish_gen": pre_pointer,
         "pre_pointer_incomplete_pair_not_resolved": pre_pointer_incomplete,
         "same_generation_rerun": same_generation_rerun,
         "mixed_pair_refused": mixed_pair_refused,
+        "path_traversal_refused": path_traversal_refused,
     }
 
 
@@ -579,6 +638,15 @@ def _run_pin_script(script, cpt_data, cwd):
     )
 
 
+def _write_pin_script(dest, block):
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    with open(dest, "w") as handle:
+        handle.write("#!/bin/bash\nset -euo pipefail\nCPT_DATA=\"$1\"\n")
+        handle.write(block)
+        handle.write("\n")
+    os.chmod(dest, 0o755)
+
+
 def prove_launcher_fail_closed(work_dir, launcher_path):
     text = Path(launcher_path).read_text(encoding="utf-8")
     start = text.find("# BEGIN_CORPUS_CONTENT_PIN")
@@ -586,24 +654,21 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
     if start < 0 or end < 0 or end <= start:
         raise SystemExit("ABORT: launcher is missing CORPUS_CONTENT_PIN markers")
     block = text[start:end + len("# END_CORPUS_CONTENT_PIN")]
-    repo = os.path.join(work_dir, "launcher-repo")
-    careers = os.path.join(repo, "careers-qwen")
+    tree = os.path.join(work_dir, "launcher-tree")
+    careers = os.path.join(tree, "careers-qwen")
+    recipes = os.path.join(tree, "dense-9b", "recipes")
     os.makedirs(careers, exist_ok=True)
+    os.makedirs(recipes, exist_ok=True)
     manifest_src = Path(__file__).resolve().parent / "corpus_manifest.py"
     Path(careers, "corpus_manifest.py").write_bytes(manifest_src.read_bytes())
-    init = subprocess.run(["git", "init", "--quiet", repo], capture_output=True, text=True)
-    if init.returncode != 0:
-        raise SystemExit("ABORT: git init for launcher proof failed: " + init.stderr.strip())
-    script = os.path.join(work_dir, "launcher-pin-check.sh")
-    with open(script, "w") as handle:
-        handle.write("#!/bin/bash\nset -euo pipefail\nCPT_DATA=\"$1\"\n")
-        handle.write(block)
-        handle.write("\n")
-    os.chmod(script, 0o755)
+    script = os.path.join(recipes, "launch_cpt_qwen36_27b_fsdp.sh")
+    _write_pin_script(script, block)
+    if os.path.exists(os.path.join(tree, ".git")):
+        raise SystemExit("ABORT: launcher proof tree must not be a git checkout")
 
     # Unknown basename hits the pin-case default, not an empty EXPECT skip.
     unknown = _run_pin_script(
-        script, os.path.join(work_dir, "unknown_packed_8192.jsonl"), repo
+        script, os.path.join(work_dir, "unknown_packed_8192.jsonl"), tree
     )
     if unknown.returncode == 0:
         raise SystemExit("ABORT: launcher accepted an unknown packed filename")
@@ -616,7 +681,7 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
     # Name that IS in the pin case, file absent → missing-file gate, not unknown.
     pinned_name = "cpt_prod_v3_packed_8192.jsonl"
     missing = os.path.join(work_dir, "missing", pinned_name)
-    missing_run = _run_pin_script(script, missing, repo)
+    missing_run = _run_pin_script(script, missing, tree)
     if missing_run.returncode == 0:
         raise SystemExit("ABORT: launcher accepted a pinned name whose file is missing")
     if "CPT_DATA is missing" not in missing_run.stderr:
@@ -635,7 +700,7 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
     with open(unpublished, "w") as handle:
         handle.write('{"input_ids":[1,2,3]}\n')
     _toy_manifest(unpublished + ".manifest.json", unpublished)
-    pre = _run_pin_script(script, logical, repo)
+    pre = _run_pin_script(script, logical, tree)
     if pre.returncode == 0:
         raise SystemExit("ABORT: launcher accepted stale logical with unpublished gen")
     logical_sha = sha256_file(logical)
@@ -666,7 +731,7 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
     _toy_manifest(sg_man, sg_gen)
     write_generation_pointer(sg_logical + ".generation", sg_gen, sg_man)
     write_generation_pointer(sg_logical + ".generation", sg_gen, sg_man)
-    sg = _run_pin_script(script, sg_logical, repo)
+    sg = _run_pin_script(script, sg_logical, tree)
     if sg.returncode == 0:
         raise SystemExit("ABORT: launcher accepted same-generation toy gen as pinned v3")
     sg_gen_sha = sha256_file(sg_gen)
@@ -687,7 +752,7 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
     # Mixed pair after publish: mutated gen must fail resolve, not train.
     with open(sg_gen, "w") as handle:
         handle.write('{"input_ids":[9]}\n')
-    mixed = _run_pin_script(script, sg_logical, repo)
+    mixed = _run_pin_script(script, sg_logical, tree)
     if mixed.returncode == 0:
         raise SystemExit("ABORT: launcher accepted a mixed generation pair")
     if "REFUSE" not in mixed.stderr:
@@ -696,12 +761,99 @@ def prove_launcher_fail_closed(work_dir, launcher_path):
             + mixed.stderr.strip()
         )
 
+    # Pointer exists, resolver missing: fail-closed, do not skip to stale logical.
+    blind = os.path.join(work_dir, "launcher-tree-no-resolver")
+    blind_recipes = os.path.join(blind, "dense-9b", "recipes")
+    os.makedirs(blind_recipes, exist_ok=True)
+    blind_script = os.path.join(blind_recipes, "launch_cpt_qwen36_27b_fsdp.sh")
+    _write_pin_script(blind_script, block)
+    blind_dir = os.path.join(work_dir, "missing-resolver")
+    os.makedirs(blind_dir, exist_ok=True)
+    blind_logical = os.path.join(blind_dir, pinned_name)
+    with open(blind_logical, "w") as handle:
+        handle.write("stale-missing-resolver\n")
+    blind_gen = blind_logical + ".gen.deadbeef"
+    with open(blind_gen, "w") as handle:
+        handle.write('{"input_ids":[1,2,3]}\n')
+    blind_man = blind_gen + ".manifest.json"
+    _toy_manifest(blind_man, blind_gen)
+    write_generation_pointer(blind_logical + ".generation", blind_gen, blind_man)
+    missing_resolver = _run_pin_script(blind_script, blind_logical, blind)
+    if missing_resolver.returncode == 0:
+        raise SystemExit("ABORT: launcher skipped a generation pointer when resolver was missing")
+    if "corpus_manifest.py is missing" not in missing_resolver.stderr:
+        raise SystemExit(
+            "ABORT: missing resolver did not fail-closed on the pointer: "
+            + missing_resolver.stderr.strip()
+        )
+
     return {
         "unknown_filename_refused": True,
         "missing_pinned_file_refused": True,
         "pre_pointer_unpublished_gen_not_selected": True,
         "same_generation_rerun_fail_closed": True,
         "mixed_pair_fail_closed": True,
+        "outside_git_pointer_resolved": True,
+        "missing_resolver_fail_closed": True,
+    }
+
+
+def prove_publication_invariants(work_dir):
+    sha = "ab" * 32
+    short = sha[:16]
+    out = os.path.join(work_dir, "publish", "logical.jsonl")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    corpus_gen, manifest_gen = generation_artifact_paths(out, sha)
+    if not corpus_gen.endswith(".gen." + sha):
+        raise SystemExit("ABORT: generation artifact path did not use the full sha256")
+    if short in os.path.basename(corpus_gen) and sha not in os.path.basename(corpus_gen):
+        raise SystemExit("ABORT: generation artifact path used a 16-hex prefix")
+    try:
+        generation_artifact_paths(out, short)
+        raise SystemExit("ABORT: 16-hex generation identity was accepted")
+    except SystemExit as error:
+        if "full 64-hex" not in str(error):
+            raise
+
+    logical_out, logical_manifest, pointer_path = bind_logical_paths(out, None)
+    if logical_manifest != logical_out + ".manifest.json":
+        raise SystemExit("ABORT: default --manifest path was not bound")
+    custom = os.path.join(os.path.dirname(out), "custom.manifest.json")
+    _, bound_custom, _ = bind_logical_paths(out, custom)
+    if bound_custom != os.path.abspath(custom):
+        raise SystemExit("ABORT: --manifest same-dir path was ignored")
+    other = os.path.join(work_dir, "other-dir", "custom.manifest.json")
+    os.makedirs(os.path.dirname(other), exist_ok=True)
+    try:
+        bind_logical_paths(out, other)
+        raise SystemExit("ABORT: --manifest in another directory was accepted")
+    except SystemExit as error:
+        if "same directory" not in str(error):
+            raise
+
+    live = os.path.join(work_dir, "publish", "logical.jsonl.gen." + sha)
+    with open(live, "w") as handle:
+        handle.write("LIVE-GENERATION\n")
+    tmp = out + ".tmp"
+    sidecar = tmp + ".manifest.json"
+    with open(tmp, "w") as handle:
+        handle.write("staging\n")
+    with open(sidecar, "w") as handle:
+        handle.write("{}\n")
+    _unlink_quiet(*unpromoted_staging_paths(tmp, sidecar, pointer_path))
+    if not os.path.exists(live):
+        raise SystemExit("ABORT: unpromoted cleanup deleted the live same-SHA generation")
+    with open(live) as handle:
+        if handle.read() != "LIVE-GENERATION\n":
+            raise SystemExit("ABORT: unpromoted cleanup mutated the live generation")
+    if os.path.exists(tmp) or os.path.exists(sidecar):
+        raise SystemExit("ABORT: unpromoted cleanup left staging files")
+    return {
+        "full_sha_generation_identity": True,
+        "prefix_identity_refused": True,
+        "manifest_flag_bound": True,
+        "manifest_other_dir_refused": True,
+        "live_generation_survives_unpromoted_cleanup": True,
     }
 
 
@@ -724,6 +876,7 @@ def write_class_proof_receipt(
     tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     nested = prove_selector_legs()
     generation = prove_generation_pointer(work_dir)
+    publication = prove_publication_invariants(work_dir)
     launcher = prove_launcher_fail_closed(work_dir, launcher_path)
     hist_source = measure_source_jsonl(historical_source)
     corr_source = measure_source_jsonl(corrected_source)
@@ -775,6 +928,7 @@ def write_class_proof_receipt(
         },
         "nested_selector": nested,
         "generation_pointer": generation,
+        "publication": publication,
         "launcher": launcher,
         "historical_source": hist_source,
         "historical_packed": hist_packed,
@@ -828,6 +982,12 @@ def write_class_proof_receipt(
         "pre_pointer_unpublished_gen_not_selected": launcher["pre_pointer_unpublished_gen_not_selected"],
         "same_generation_rerun_fail_closed": launcher["same_generation_rerun_fail_closed"],
         "mixed_pair_fail_closed": launcher["mixed_pair_fail_closed"],
+        "path_traversal_refused": generation["path_traversal_refused"],
+        "full_sha_generation_identity": publication["full_sha_generation_identity"],
+        "manifest_flag_bound": publication["manifest_flag_bound"],
+        "live_generation_survives_unpromoted_cleanup": publication["live_generation_survives_unpromoted_cleanup"],
+        "outside_git_pointer_resolved": launcher["outside_git_pointer_resolved"],
+        "missing_resolver_fail_closed": launcher["missing_resolver_fail_closed"],
     }, sort_keys=True))
     print(f"[pack] class proof VERIFIED against real artifacts: receipt={path}")
     return 0
@@ -883,6 +1043,7 @@ def main():
     if missing:
         ap.error("the following arguments are required unless --class-proof: "
                  + ", ".join("--" + name.replace("_", "-") for name in missing))
+    args.out, logical_manifest, pointer_path = bind_logical_paths(args.out, args.manifest)
 
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
@@ -951,7 +1112,6 @@ def main():
     sidecar_candidate = tmp + ".manifest.json"
     corpus_gen = None
     manifest_gen = None
-    pointer_path = args.out + ".generation"
     promoted = False
     try:
         with open(tmp) as handle:
@@ -984,10 +1144,11 @@ def main():
             raise SystemExit(f"ABORT: packed-content gate failed: {error}") from error
         corpus_sha = sha256_file(tmp)
         corpus_bytes = os.path.getsize(tmp)
-        corpus_gen = args.out + ".gen." + corpus_sha[:16]
-        manifest_gen = corpus_gen + ".manifest.json"
+        corpus_gen, manifest_gen = generation_artifact_paths(args.out, corpus_sha)
         if os.path.abspath(corpus_gen) == os.path.abspath(manifest_gen):
             sys.exit("ABORT: corpus and manifest paths must differ")
+        if os.path.abspath(manifest_gen) == os.path.abspath(logical_manifest):
+            sys.exit("ABORT: gen sidecar must not replace the logical --manifest path")
         write_manifest(sidecar_candidate, {
             "schema": SCHEMA,
             "corpus_filename": os.path.basename(corpus_gen),
@@ -1009,18 +1170,12 @@ def main():
         promoted = True
     finally:
         if not promoted:
-            _unlink_quiet(
-                tmp,
-                sidecar_candidate,
-                sidecar_candidate + ".tmp",
-                corpus_gen,
-                manifest_gen,
-                pointer_path + ".tmp",
-            )
+            _unlink_quiet(*unpromoted_staging_paths(tmp, sidecar_candidate, pointer_path))
 
     print(done_line, flush=True)
     print(f"[pack] OUTPUT sha256={corpus_sha}")
     print(f"[pack] MANIFEST {manifest_gen} sha256={sha256_file(manifest_gen)}")
+    print(f"[pack] LOGICAL_MANIFEST {logical_manifest} (never replaced)")
     print(f"[pack] GENERATION {pointer_path}")
     print(f"[pack] register as: {args.pack_set}_packed_{SEQ} (inputs: "
           + ", ".join(f"{n}@{s}" for n, _, s in PACK_SETS[args.pack_set]) + ")")

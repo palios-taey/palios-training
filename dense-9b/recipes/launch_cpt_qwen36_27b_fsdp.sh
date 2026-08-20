@@ -476,9 +476,16 @@ case "$CPT_DATA" in
 esac
 # Generation pointer is the only published view of a new pack. If it exists, mixed
 # logical corpus/manifest pairs after a crashed two-file replace cannot be trained.
-_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
-if [ -n "${_REPO_ROOT}" ] && [ -f "${CPT_DATA}.generation" ]; then
-    CPT_DATA=$(python3 "${_REPO_ROOT}/careers-qwen/corpus_manifest.py" resolve --corpus "$CPT_DATA") || exit 1
+# Resolve from this launcher file, not caller cwd / git. A missing resolver with a
+# live pointer is fail-closed: never skip the pointer and train the stale logical file.
+if [ -f "${CPT_DATA}.generation" ]; then
+    _LAUNCHER_DIR=$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
+    _MANIFEST_PY="${_LAUNCHER_DIR}/../../careers-qwen/corpus_manifest.py"
+    if [ ! -f "$_MANIFEST_PY" ]; then
+        echo "ERROR: generation pointer exists but corpus_manifest.py is missing: ${_MANIFEST_PY}" >&2
+        exit 1
+    fi
+    CPT_DATA=$(python3 "$_MANIFEST_PY" resolve --corpus "$CPT_DATA") || exit 1
 fi
 if [ -z "${EXPECT_CORPUS_SHA:-}" ]; then
     echo "ERROR: CPT_DATA has no content pin after allow-list: $CPT_DATA" >&2

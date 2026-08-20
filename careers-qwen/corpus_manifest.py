@@ -121,6 +121,21 @@ def write_generation_pointer(pointer_path, corpus_path, manifest_path):
     os.replace(stage, pointer_path)
 
 
+def pointer_member(directory, name, label):
+    """Resolve a pointer payload name to a file in directory. Basenames only."""
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"generation pointer {label} is missing")
+    if name != os.path.basename(name) or name in (".", ".."):
+        raise ValueError(f"generation pointer {label} must be a basename, not {name!r}")
+    if os.sep in name or (os.altsep and os.altsep in name):
+        raise ValueError(f"generation pointer {label} must be a basename, not {name!r}")
+    directory = os.path.abspath(directory)
+    path = os.path.abspath(os.path.join(directory, name))
+    if os.path.dirname(path) != directory:
+        raise ValueError(f"generation pointer {label} escapes the pointer directory")
+    return path
+
+
 def resolve_generation(logical_corpus):
     """Return (corpus, manifest). Pointer mismatch is mixed-generation and is refused.
 
@@ -134,8 +149,8 @@ def resolve_generation(logical_corpus):
     if payload.get("schema") != GENERATION_SCHEMA:
         raise ValueError(f"unsupported generation pointer schema: {payload.get('schema')!r}")
     directory = os.path.dirname(os.path.abspath(pointer))
-    corpus = os.path.join(directory, payload["corpus"])
-    manifest = os.path.join(directory, payload["manifest"])
+    corpus = pointer_member(directory, payload.get("corpus"), "corpus")
+    manifest = pointer_member(directory, payload.get("manifest"), "manifest")
     if sha256_file(corpus) != payload.get("corpus_sha256"):
         raise ValueError("generation pointer corpus sha256 does not match the corpus file")
     if sha256_file(manifest) != payload.get("manifest_sha256"):
