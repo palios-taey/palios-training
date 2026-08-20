@@ -49,6 +49,13 @@ It refuses an unknown capability, a status that is not `ADJUDICATED`, a file nam
 but absent from the tree, and **content drift** — a recorded sha256 that no longer matches the bytes
 on disk. There is no `--force`. Adding one would reopen the hole it closes.
 
+**Authorization precedes preparation.** Any wrapper that can perform remote, reboot, deploy,
+watchdog, capture, or durable-log side effects must first run
+`TAEY_TRAIN_CHECK_ONLY=1 scripts/taey-train <capability>` and exit on refusal. Calling the real
+`taey-train` only after preparing the cluster is too late: an unauthorized path has already changed
+production even when no trainer starts. The real launch rechecks the same gate and its failure must
+propagate; a wrapper must never continue with “session launched” after a refusal.
+
 **Why a launcher exists at all:** "use the production path" was once a rule enforced by memory, and
 memory lost. 27 launcher/trainer files sat in the tree and 47 more in history with nothing
 mechanically marking which was real. Agents grepped, found something plausible, and chose wrong.

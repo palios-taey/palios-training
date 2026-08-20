@@ -7,6 +7,12 @@
 # Clone of the production_v2-proven run_till_done_v2.sh loop, single target, fresh start.
 # Recipe: careers-qwen/CPT_REFRESH_RECIPE_v0.9.md (provisional 3-lane synthesis).
 set -uo pipefail
+
+# Authorization must dominate every remote, reboot, deploy, watchdog, capture, and log side effect.
+_GATE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TAEY_TRAIN_CHECK_ONLY=1 "$_GATE_ROOT/scripts/taey-train" cpt_27b_4node || exit 1
+unset _GATE_ROOT
+
 NODES=($SPARK_MGMT_IPS)
 MASTER=${SPARK_MASTER}
 CKPT_DIR=${SPARK_HOME}/training_outputs/cpt_refresh_v1
@@ -80,7 +86,9 @@ while true; do
   RESUME=""
   [ "$cur" -gt 0 ] 2>/dev/null && RESUME="RESUME_DELTA=$CKPT_DIR/checkpoint-$cur"
 
-  env $RESUME \
+  # shellcheck disable=SC2086
+  "$REPO_ROOT/scripts/taey-train" cpt_27b_4node \
+  $RESUME \
   CPT_DATA=/var/spark/isma/training/refresh_v1/MERGED_cpt_refresh_v1_train.jsonl \
   CPT_PACKED=1 MAX_SEQ=2560 BATCH_SIZE_PER_RANK=4 \
   TOTAL_STEPS=1565 SESSION_LIMIT=$SL SAVE_EVERY=$SL CHECKPOINT_DCP=1 \
@@ -89,7 +97,7 @@ while true; do
   MODEL_PATH=${SPARK_HOME}/models/prod_v2_ep3_hf \
   OUTPUT_DIR=$CKPT_DIR \
   CLOCK_CAP=1600 \
-  bash "$RECIPES/run_4node_27b_cpt.sh" >> "$DLOG.launch_a$attempt" 2>&1
+  >> "$DLOG.launch_a$attempt" 2>&1 || { say "ABORT: taey-train refused or failed"; exit 1; }
 
   say "session launched; waiting for exit"
   for t in $(seq 1 420); do

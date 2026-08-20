@@ -51,16 +51,18 @@ a registry entry for a variable nobody reads fails too.
 Still open after this cycle: Rule 5 capture remains manual. Rank-0 serialisation at first step is
 W3 work.
 
-## W3 — the run owns its lifecycle · **NOT STARTED**
+## W3 — the run owns its lifecycle · **COMPLETE — CAPABILITY-SCOPED**
 
-`taey-train` returns 0 when training has *started*. `scripts/taey-train:95` execs and returns its
-status; the launcher ends its monitor at the first optimizer step. Nothing records state
-transitions, which is why ~40 hours of this cycle cannot be accounted for.
+`taey-train` now preserves the entrypoint status and validates the durable rank-0 lifecycle journal
+before returning. Starting is not success, and an entrypoint failure cannot be hidden by a journal
+that already names an accepted state.
 
 Shape: states `SPEC_VALID → NODE_DEPLOY → TRAINING → FRAGMENTATION_EXIT* → CHECKPOINT_SAVED →
 BAKE_COMPLETE → THOR_DELIVERED`, one JSON line per transition to `lifecycle_events.jsonl`, and
-success returned only at `THOR_DELIVERED`. **This is the largest change and the one that answers
-"you never know when anything fails."**
+success returned only at the invoking capability's `lifecycle_success_states` from
+`PRODUCTION_MANIFEST.yml`. CPT and bake therefore have different legitimate invocation boundaries;
+only the end-to-end training-plus-bake campaign ends at `THOR_DELIVERED`. **This is the largest
+change and the one that answers "you never know when anything fails."**
 
 ## W4 — mainline · **PARTIAL**
 
@@ -381,28 +383,31 @@ that cannot tell a working gate from a broken one.
 Verdict: on the production door this head does not
 report success a run did not earn — CANDIDATE refuses without authorization, the resolver always
 emits `LIFECYCLE`, the CPT inner no longer exits at the first optimizer step under `CPT_LIFECYCLE=1`,
-`taey-train` requires `THOR_DELIVERED` and dies on entrypoint failure even when the journal already
-says `THOR_DELIVERED`, bake will not start from `FRAGMENTATION_EXIT`, and a leftover authorization
-after promotion is a CI failure (A1/A7).
+`taey-train` requires the capability-owned terminal state and dies on entrypoint failure even when
+the journal already names an accepted state, bake will not start from `FRAGMENTATION_EXIT`, and a
+leftover authorization after promotion is a CI failure (A1/A7).
 
 The residuals below are **not** blocks. They are the conditions under which that verdict holds, and
 several of them decide how the run must be launched. Read them as launch constraints, not trivia.
 
-**1. `taey-train` WILL EXIT 1 AFTER EVERY LEGITIMATE `FRAGMENTATION_EXIT`. This is W3 working.**
-With `lifecycle: true` on `cpt_27b_4node`, a multi-session campaign returns non-zero between
-sessions because the campaign has not reached `THOR_DELIVERED` yet. **Do not read that as a failed
-run, do not restart from scratch, and do not "fix" it.** A non-zero exit naming a state that is not
-`THOR_DELIVERED` is the launcher correctly refusing to call a started run a finished one. This is the
-single most likely thing to be misread at 3am by whoever is watching.
+**1. `taey-train` SUCCESS IS CAPABILITY-SCOPED, NOT CAMPAIGN-WIDE.**
+With `lifecycle: true` on `cpt_27b_4node`, an entrypoint success ending at
+`FRAGMENTATION_EXIT` or `CHECKPOINT_SAVED` returns 0 because those are the CPT capability's
+manifest-declared invocation boundaries. `bake_export` still accepts only `THOR_DELIVERED`.
+**Do not read CPT's exit 0 as delivery or as proof that every planned session is complete.** Read
+the printed lifecycle state: resume from the checkpoint after `FRAGMENTATION_EXIT`; proceed to bake
+only from `CHECKPOINT_SAVED`. Any non-accepted state or non-zero entrypoint status still fails.
 
 **2. A FRESH `OUTPUT_DIR` / `DCP_DIR` IS MANDATORY.** W3's last-state is not invocation-bound —
 reusing a directory that already reached `THOR_DELIVERED` can confuse it, and `GEMM_PREFLIGHT_ONLY=1`
 exits before the lifecycle resume check. A fresh directory fail-closes; a reused one may not.
 
-**3. LAUNCH ONLY THROUGH `scripts/taey-train`.** W1 is still documentation plus the one door:
-`dense-9b/instrumentation/capture_run.sh` and `dense-9b/recipes/run_till_done_v3.sh` **still invoke
-the inner launcher directly and skip the resolver entirely** — no manifest check, no authorization
-check, no lifecycle. They are not the door and must not be used for this campaign.
+**3. ONE DOOR IS MECHANICAL BEFORE PREPARATION (task-2220f1b9).**
+`capture_run.sh`, `run_till_done_v{2,3}.sh`, and `run_refresh_gate.sh` first run the existing
+`TAEY_TRAIN_CHECK_ONLY=1 scripts/taey-train cpt_27b_4node` gate and exit on refusal before any
+remote, reboot, deploy, watchdog, capture, or durable-log side effect. Their real launch rechecks
+authorization and propagates failure. `run_4node_27b_cpt.sh` also fail-closes via
+`_resolve_capability` before tmux/NCCL as the direct-bash backstop.
 
 **4. `EXPORT_DCP` MUST BE UNSET.** A leftover value restores the inner script's first-step exit 0.
 Through `taey-train` with a fresh journal W3 still catches it, but do not rely on the backstop.
@@ -421,16 +426,18 @@ Also open and already known: `never_defaulted()` is mode-unaware (mine); `CLAUDE
 manifest header are stale against the code.
 
 **What would invalidate the endorsement** (grok's own words, worth keeping as the falsifier):
-`taey-train cpt_27b_4node` or `bake_export` on a fresh run directory **exiting 0 without
-`THOR_DELIVERED` written by this campaign.**
+`taey-train cpt_27b_4node` on a fresh run directory **exiting 0 with a last state outside its
+manifest-declared `lifecycle_success_states`**, or `bake_export` exiting 0 without
+`THOR_DELIVERED` written by this campaign.
 
 ## R3 — the run, and what "done" means
 
 `scripts/taey-train cpt_27b_4node VAR=… …` — the one door, no inner script, no node-local edit.
 
 **Training starting is not the run succeeding.** `run_4node_27b_cpt.sh:351-359` prints
-`27B IS TRAINING` at the first optimizer step; that is confirmation of fit. Completion is the
-lifecycle journal reaching `THOR_DELIVERED` (W3), with:
+`27B IS TRAINING` at the first optimizer step; that is confirmation of fit. A CPT invocation is
+complete only at one of the CPT capability's manifest-declared lifecycle boundaries. The full
+training-plus-bake campaign is complete only when the journal reaches `THOR_DELIVERED` (W3), with:
 
 - weight-diff in band `5e-05..8e-04`, measured against the run's **own** source, never a pinned donor
 - tensor count `851 → 1199`, graft verified **by content**, not by count
