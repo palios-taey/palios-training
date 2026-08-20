@@ -361,7 +361,9 @@ constructs the legitimate case they forbid.
 
 **Anchored to `dd1c3a4`, which merged to `main` at `e21bebf`.** First written against `b907fb8`;
 tutor-grok re-endorsed on `dd1c3a4` and stated the residuals unchanged, so every constraint below
-still governs the run. `audit/grok` + `audit/gatekeeper` both success, `r5-audit-gate` green.
+still governs the run. `audit/grok` + `audit/gatekeeper` both success, and the
+Actions check `gate` (workflow `r5-audit-gate`) green — branch protection requires
+that app-bound check name, not a forgeable `r5-audit-gate` commit status.
 
 **The re-audit was EXECUTED, not read, and that is why this endorsement is worth more than the
 first one.** On `b907fb8` every static check passed while `lifecycle_call` would have aborted every

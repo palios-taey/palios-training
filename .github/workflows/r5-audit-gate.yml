@@ -5,19 +5,29 @@
 # (orchestrator #55, 2026-06-11). This makes it structural: a PR that touches a
 # risky surface (.github/r5-risky-paths) CANNOT merge until BOTH adversarial
 # auditors post a `success` commit status (audit/grok + audit/gatekeeper) on the
-# PR head SHA. GitHub branch protection requires the `r5-audit-gate` context this
-# workflow sets, so no human discipline is involved.
+# PR head SHA.
 #
-# Known limitation (Gatekeeper PR#57, non-blocking): this verifies the status
-# CONTEXT + STATE, not WHO posted it — anyone with statuses:write could forge an
-# auditor success. That is inherent to commit-status gates and bounded by repo
-# write access + branch protection (the fleet is a single trusted account). A
-# future hardening could verify the status creator / require signed verdicts.
+# How branch protection must be wired (post-PR28 process defect hardening):
+#   - Require the GitHub Actions check named `gate` (this job). That check is
+#     app-bound to GitHub Actions — not a forgeable commit-status context.
+#   - Do NOT require a commit status named `r5-audit-gate`. This workflow does
+#     not write any commit statuses.
+#   - PAT / human auditors may write ONLY `audit/<name>` statuses (e.g.
+#     audit/grok, audit/gatekeeper). They must not write the Actions check.
+#
+# Known limitation (Gatekeeper PR#57, non-blocking): this verifies the auditor
+# status CONTEXT + STATE, not WHO posted it — anyone with statuses:write could
+# forge an auditor success. That is inherent to commit-status auditor verdicts
+# and bounded by repo write access. A future hardening could verify the status
+# creator / require signed verdicts. Separately, the merge gate itself is now
+# the Actions job outcome (exit nonzero on missing/failed audits), which is
+# not writable via the commit-status API.
 #
 # Auditors post their verdict (on ENDORSE / BLOCK) with:
 #   gh api repos/$REPO/statuses/$SHA -f state=success -f context=audit/grok \
 #     -f description="ENDORSE" -f target_url=<verdict-log-url>
-# (state=failure on BLOCK). The gate re-evaluates on every status event.
+# (state=failure on BLOCK). The gate re-evaluates on pull_request and on
+# audit/grok|audit/gatekeeper status events.
 name: r5-audit-gate
 
 on:
@@ -27,18 +37,21 @@ on:
 
 permissions:
   contents: read
-  statuses: write
   pull-requests: read
+  # No statuses:write — this job must not mint r5-audit-gate (or any) commit
+  # statuses. Branch protection consumes the Actions check `gate` instead.
 
 jobs:
   gate:
     runs-on: ubuntu-latest
-    # Skip self-triggers: this workflow SETS the r5-audit-gate status, which is
-    # itself a status event — without this guard it would loop forever. Only
-    # react to the auditors' statuses (audit/*) and to pull_request events.
+    # Only pull_request events, or status events from the two auditor contexts.
+    # Do not react to other status contexts (avoids noise; there is no self-status
+    # to exclude because this workflow writes none).
     if: >-
       github.event_name == 'pull_request' ||
-      (github.event_name == 'status' && github.event.context != 'r5-audit-gate')
+      (github.event_name == 'status' &&
+       (github.event.context == 'audit/grok' ||
+        github.event.context == 'audit/gatekeeper'))
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,12 +81,6 @@ jobs:
           fi
           echo "PR #$PR_NUM head=$HEAD_SHA base=$BASE_REF"
 
-          set_status() {  # state, description
-            gh api -X POST "repos/$REPO/statuses/$HEAD_SHA" \
-              -f state="$1" -f context="r5-audit-gate" -f description="$2" >/dev/null
-            echo "r5-audit-gate -> $1 ($2)"
-          }
-
           # Changed files vs base.
           git fetch -q origin "$BASE_REF"
           CHANGED="$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA")"
@@ -91,18 +98,22 @@ jobs:
           done < .github/r5-risky-paths
 
           if [ "$RISKY" -eq 0 ]; then
-            set_status success "no R5 risky surface touched"
+            echo "no R5 risky surface touched — Actions check gate succeeds."
             exit 0
           fi
 
           # Risky: require BOTH auditor statuses = success on HEAD_SHA.
+          # Latest state per context (API returns newest-first).
           STATUSES="$(gh api "repos/$REPO/commits/$HEAD_SHA/statuses" --paginate 2>/dev/null || echo '[]')"
           grok_state="$(echo "$STATUSES" | jq -r '[.[] | select(.context=="audit/grok")] | .[0].state // "missing"')"
           gk_state="$(echo "$STATUSES" | jq -r '[.[] | select(.context=="audit/gatekeeper")] | .[0].state // "missing"')"
           echo "audit/grok=$grok_state audit/gatekeeper=$gk_state"
 
           if [ "$grok_state" = "success" ] && [ "$gk_state" = "success" ]; then
-            set_status success "R5 ENDORSED: grok + gatekeeper"
-          else
-            set_status failure "R5 required: grok=$grok_state gatekeeper=$gk_state (both must be success)"
+            echo "R5 ENDORSED: grok + gatekeeper — Actions check gate succeeds."
+            exit 0
           fi
+
+          echo "R5 required: grok=$grok_state gatekeeper=$gk_state (both must be success)"
+          echo "Failing the Actions job (nonzero exit). No commit status is written."
+          exit 1
