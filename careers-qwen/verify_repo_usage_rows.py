@@ -123,6 +123,9 @@ def main() -> int:
         except (OSError, json.JSONDecodeError) as exc:
             print(f"HUB COVERAGE MANIFEST UNREADABLE: {coverage_path}: {exc}", file=sys.stderr)
             return 2
+        if not isinstance(coverage_manifest, dict):
+            failures.append(f"{coverage_path}: root must be an object")
+            coverage_manifest = {}
         if coverage_manifest.get("schema") != HUB_COVERAGE_SCHEMA:
             failures.append(
                 f"{coverage_path}: schema must be {HUB_COVERAGE_SCHEMA!r}"
@@ -141,6 +144,12 @@ def main() -> int:
             if len(values) != len(set(values)):
                 failures.append(f"{coverage_path}: {key} contains duplicates")
             target.update(values)
+        unharvested_repos = required_repos - repos
+        if unharvested_repos:
+            failures.append(
+                f"{coverage_path}: required repo(s) absent from capability registry: "
+                f"{sorted(unharvested_repos)}"
+            )
 
     for rp in args.rows:
         p = Path(rp)
@@ -234,6 +243,20 @@ def main() -> int:
                                 f"{tag}: meta.coverage.{key} must be a non-empty string list"
                             )
                             continue
+                        if len(values) != len(set(values)):
+                            failures.append(f"{tag}: meta.coverage.{key} contains duplicates")
+                        if key == "repos":
+                            unharvested = set(values) - repos
+                            if unharvested:
+                                failures.append(
+                                    f"{tag}: meta.coverage.repos names repo(s) absent from "
+                                    f"capability registry: {sorted(unharvested)}"
+                                )
+                            if named not in values:
+                                failures.append(
+                                    f"{tag}: source repo {named!r} must appear in "
+                                    "meta.coverage.repos"
+                                )
                         target.update(values)
 
             scoped = by_repo.get(named, set()) | UNIVERSAL

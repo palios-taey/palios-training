@@ -48,7 +48,9 @@ metadata:
 
 `hub_actions` is a non-empty subset of `verify`, `refuse`, and `route`. The complete
 corpus must exercise all three. Every row names at least one repository and one process;
-the corpus must exactly cover the separately reviewed inventory.
+the row's verified `meta.source` repository must be among those named repositories, and
+every named repository must exist in the harvested capability registry. The corpus must
+exactly cover the separately reviewed inventory.
 
 Metadata makes the declared seat and coverage mechanically auditable. It does not prove
 that the emitted prose actually holds that posture. Source review must still read
@@ -69,7 +71,8 @@ The reviewed inventory is a versioned JSON document:
 
 The inventory is complete only after each repository has a public/private ruling and
 each process has a production owner and executable contract. Until that reviewed
-inventory exists, no p6 corpus can pass admission. An empty list is not coverage.
+inventory exists, no p6 corpus can pass admission. An empty list is not coverage, and an
+inventory repository absent from the capability registry is not reviewed coverage.
 
 Run the existing repo-usage verifier with the Hub gate enabled:
 
