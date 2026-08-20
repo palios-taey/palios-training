@@ -301,7 +301,6 @@ def measure_source_jsonl(path):
                     seen_mention.add(doc_id)
                     mention_docs.append(doc_id)
     return {
-        "path": os.path.abspath(path),
         "sha256": sha,
         "rows": rows,
         "positive_control_rows": positive_rows,
@@ -359,7 +358,6 @@ def measure_packed_content(path, tokenizer):
     )
     refused = (not positive_fired) or forbidden_fired or header_hits > 0
     return {
-        "path": os.path.abspath(path),
         "sha256": sha256_file(path),
         "rows_scanned": rows,
         "positive_control": {

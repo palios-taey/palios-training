@@ -21,7 +21,6 @@
         "token_hits": 0
       }
     },
-    "path": "/home/spark/training_data/cpt_prod_src-fff6dae26ad02e51_packed_8192.jsonl",
     "positive_control": {
       "decoded_hits": 850,
       "fired": true,
@@ -78,7 +77,6 @@
     ],
     "mention_docs": 35,
     "mention_rows": 40,
-    "path": "/home/spark/training_data/cpt_prod_src-fff6dae26ad02e51/cpt_public_repos_prod.jsonl",
     "positive_control_rows": 844,
     "rows": 1209,
     "sha256": "fff6dae26ad02e51614d03e41a1c426932eb55e0716c4771ff0479613e89e685"
@@ -94,7 +92,6 @@
         "token_hits": 1
       }
     },
-    "path": "/var/spark/isma/training/cpt_prod_v4_repos_packed_8192.jsonl",
     "positive_control": {
       "decoded_hits": 863,
       "fired": true,
@@ -165,7 +162,6 @@
     ],
     "mention_docs": 35,
     "mention_rows": 40,
-    "path": "/home/spark/training_data/cpt_prod_src-e549870b892d2f72/cpt_public_repos_prod.jsonl",
     "positive_control_rows": 857,
     "rows": 1226,
     "sha256": "e549870b892d2f72565981a44d2ef881715cc47fcd84c7c76cdc8ee9a816bc78"
