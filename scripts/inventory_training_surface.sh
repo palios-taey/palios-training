@@ -87,7 +87,9 @@ for h in ${SPARK_MGMT_IPS:-}; do
   say "    corpora: $(echo "$out" | cut -d: -f3)"
   say "    disk_free: $(echo "$out" | cut -d: -f4)"
 done
-[ "$i" -eq 0 ] && say "  # SPARK_MGMT_IPS unset — fleet section empty; source fleet.env and re-run."
+if [ "$i" -eq 0 ]; then
+  say "  # SPARK_MGMT_IPS unset — fleet section empty; source fleet.env and re-run."
+fi
 
 # ---------------------------------------------------------------- adjacent
 say ""
@@ -181,4 +183,6 @@ for h in ${SPARK_MGMT_IPS:-}; do
   say "    distinct_contents: $(echo "$out" | cut -d: -f2)"
   say "    editable_pth_overrides: $(echo "$out" | cut -d: -f3)"
 done
-[ "$i" -eq 0 ] && say "  # SPARK_MGMT_IPS unset - section empty; source fleet.env and re-run."
+if [ "$i" -eq 0 ]; then
+  say "  # SPARK_MGMT_IPS unset - section empty; source fleet.env and re-run."
+fi
