@@ -1,0 +1,100 @@
+{
+  "format": "cpt-27b-production-receipt-v1",
+  "campaign_id": "cpt_prod_v6_clean_repos_2ep",
+  "verdict": "THOR_DELIVERED_SERVING_VERIFIED",
+  "sealed_by": "conductor",
+  "sealing_note": "Independent production authorization + serving receipt, CONTROL-dispatched by conductor-codex. Operator-home paths rendered as portable locators; portable container roots (the /models serving roots) preserved EXACTLY as observed (cannot-lie). Manifest/gate wiring owned by tutor-codex. Reconciles the machine-invisible serving authorization: the earlier bake act said do-not-promote, Jesse's later act authorized serving; both preserved in timestamp order so an honest verifier sees the full chronology.",
+  "bake": {
+    "campaign_id": "bake_prod_v6_clean_repos_2ep",
+    "one_door_exit": 0,
+    "lifecycle": "THOR_DELIVERED",
+    "weight_diff": {
+      "abs_mean_dW": 0.000245247652856051,
+      "band": [5e-05, 0.0008],
+      "in_band": true,
+      "tensors": 1199
+    },
+    "trainers_running": 0,
+    "sparks": "4/4",
+    "seal": {
+      "file": "ARTIFACT_SHA256SUMS",
+      "node": "jetson",
+      "artifact": "cpt_prod_v6_clean_repos_2ep_servable",
+      "locator": "$ARTIFACT_STORE/cpt_prod_v6_clean_repos_2ep_servable/ARTIFACT_SHA256SUMS",
+      "sha256": "b98bd08065fabdb50df521334c508c463f6c44ce74a4f9667c9c4fb850928561",
+      "entries": 35,
+      "artifact_dir_top_level_files": 36,
+      "note": "V6 seal is ARTIFACT_SHA256SUMS (NOT SOURCE_SHA256SUMS); the seal file is one of the 36 top-level files. Do NOT inherit SOURCE_SHA256SUMS from V5. Locator is artifact-store-relative (node=jetson, $ARTIFACT_STORE) with no operator-home path."
+    }
+  },
+  "authorization_acts": [
+    {
+      "order": 1,
+      "timestamp": "2026-08-20T23:07:39Z",
+      "kind": "bake_export_authorization",
+      "source": {
+        "type": "git_commit",
+        "repo": "palios-taey/palios-training",
+        "ref": "public main",
+        "sha": "2a591580eaf641b7f44bde18c5246be0bb591af8",
+        "subject": "training: authorize V6 bake qualification (#40)",
+        "manifest": "careers-qwen/receipts/cpt_prod_v6_clean_repos_2ep.manifest.json"
+      },
+      "exact_scope": "an approved Chats review receipt authorizes finalization; do not launch SFT or promotion.",
+      "next_gate": {
+        "capability": "bake_export",
+        "status": "SEPARATELY_AUTHORIZED_NOT_EXECUTED",
+        "weight_diff_band": [5e-05, 0.0008],
+        "below_band_action": "FULL_STOP_NO_GRAFT_NO_HANDOFF_NO_SFT"
+      },
+      "interpretation": "As of the bake act, promotion/serving and SFT were NOT authorized (bake/CPT-qualification scope only)."
+    },
+    {
+      "order": 2,
+      "timestamp": "2026-08-20T23:08:32.487Z",
+      "kind": "jesse_serving_authorization",
+      "source": {
+        "type": "codex_session_rollout",
+        "rollout_id": "019fae18-6abf-7983-a3d0-ceca6c71ce01",
+        "rollout_filename": "rollout-2026-07-29T13-37-43-019fae18-6abf-7983-a3d0-ceca6c71ce01.jsonl",
+        "session_date": "2026/07/29",
+        "line": 61216,
+        "turn_id": "01a020c2-b3c7-75d1-81c0-bcabae2db307",
+        "locator": "codex-session-archive/2026/07/29/rollout-2026-07-29T13-37-43-019fae18-6abf-7983-a3d0-ceca6c71ce01.jsonl#L61216",
+        "role": "user",
+        "actor": "Jesse"
+      },
+      "exact_quote": "My authorization is go and follow production processes that worked previously. That is it. The new model needs to be baked and served as soon as ready.",
+      "interpretation": "Jesse authorizes bake AND serve via the previously-proven production process; this is the serving authorization the earlier bake act deferred. It does NOT authorize SFT."
+    }
+  ],
+  "sft_authorization": {
+    "authorized": false,
+    "note": "No SFT authorization exists. The 2a591580 bake act explicitly states 'do not launch SFT or promotion', and Jesse's 2026-08-20T23:08:32.487Z act authorizes bake and serve only, not SFT."
+  },
+  "serving": {
+    "mode": "node1_only_v6_replacement_of_v5",
+    "node1": {
+      "aliases": ["taey", "ep3"],
+      "resolved_root": "/models/cpt_prod_v6_clean_repos_2ep_servable",
+      "content_manifest_sha256": "f9f9dfbb25547841523325a4dfda0834ebe1346044abde7724793d52182f70db",
+      "raw_generation": "ready",
+      "proxy_generation": "V6_READY"
+    },
+    "node2": {
+      "aliases": ["taey", "ep3"],
+      "resolved_root": "/models/Qwen3.8-27B",
+      "status": "UNCHANGED",
+      "note": "Deliberate untrained control; MUST NOT be changed. Preserved through the node1-only cutover."
+    },
+    "alias_ambiguity": "ep3/taey resolve to V6 (/models/cpt_prod_v6_clean_repos_2ep_servable) on node1 but /models/Qwen3.8-27B (untrained control) on node2. Alias alone is NOT a reproducibility pin; every consumer/eval receipt must record host endpoint + resolved root. Do not rename live aliases mid-flight.",
+    "public_pr": {
+      "repo": "palios-taey/taey-presence",
+      "pr": 175,
+      "merge_sha": "0c9bfd7af07797ff00b301a2e92e2f32d8d85e9a",
+      "gates": ["index-contract", "public-clean", "stay-clean", "GitGuardian"]
+    }
+  },
+  "authority_verification": "Serving authority verified by treasurer from the Jesse user act at 2026-08-20T23:08:32.487Z (codex session rollout line 61216, turn 01a020c2-b3c7-75d1-81c0-bcabae2db307).",
+  "primary_provenance_preserved": true
+}
