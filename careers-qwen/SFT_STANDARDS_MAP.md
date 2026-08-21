@@ -19,6 +19,11 @@ This is a map of existing standards, not a new recipe. Canonical sources are
 - Run the governed manifest, residue/privacy scan, quarantine classification,
   and promotion-lineage checks before sanction or tokenization. Quarantined,
   deleted, or superseded material cannot re-enter by filename or count.
+- For `taey_repo_fluency_v1`, apply `TAEY_HUB_CURRICULUM_CONTRACT.md`: every
+  row declares Taey as the orchestrator who verifies, refuses, or routes; the
+  corpus proves exact repository/process coverage against the reviewed
+  inventory; no code-authoring lane exists. A structural gate does not replace
+  semantic source review of the emitted messages.
 - Treasurer owns sanction and corpus status. Tutor applies the mixture and dose
   decided through Chats. No training launch infers either approval.
 - Record base identity, horizon, corpus digest/config, dose proof, and outcome
@@ -36,6 +41,7 @@ This is a map of existing standards, not a new recipe. Canonical sources are
 | orchestration | real taey-plan/task/notify executions with evidence closure | live tracker/notification commands and completion evidence | no full trajectory admitted here |
 | Git maintenance | real status/log/blame/diff/topology/worktree/commit/push receipts | repository/git contract and digest verification | no full trajectory admitted here |
 | public repositories | production-observed executable contracts for each dependency repo | each repo's actual CLI/service contract and cross-repo receipt | inventory and traces required before admission |
+| Taey Hub curriculum | source-reviewed rows from Taey's verifying/refusing/routing seat | automatically detected Hub contract (or explicit `--hub-contract`) + reviewed repo/process coverage manifest | blocked until the reviewed inventory exists and every row passes semantic posture review |
 
 The 91-row atomic artifact was generated from real bundles but is deliberately
 not a training promotion. The stale swappable-LoRA topology and deleted/bad

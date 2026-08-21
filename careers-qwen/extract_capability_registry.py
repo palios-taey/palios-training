@@ -246,7 +246,7 @@ def main() -> int:
             k, _, v = item.partition("=")
             repo_map[k.strip()] = Path(v.strip())
 
-    missing = [n for n, p in repo_map.items() if not (p / ".git").is_dir()]
+    missing = [n for n, p in repo_map.items() if not git(p, "rev-parse", "--git-dir")]
     if missing:
         sys.exit(f"REFUSE: not a git checkout: {', '.join(missing)} — "
                  f"a registry built from a partial set would look complete.")
