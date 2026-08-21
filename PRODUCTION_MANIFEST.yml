@@ -292,7 +292,7 @@ capabilities:
       EXPORT_DCP stage, followed by bake_dcp_offline.py, graft, delta and provenance. tutor's
       first draft promoted the internal stage to entrypoint, which would have had an operator
       run a fragment of the pipeline and skip the graft and the tensor-count gates.
-    status: CANDIDATE_PENDING_PRODUCTION_RUN
+    status: CANDIDATE_PRODUCTION_OBSERVED_AUTHORIZATION_CONSUMED
     lifecycle: true
     lifecycle_success_states: [THOR_DELIVERED]
     stages:
@@ -462,39 +462,15 @@ campaign_receipts:
     SR-DELTA 0.80x bf16 ULP PASS; final trainer_meta SHA256
     8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262 matched all four
     nodes; checkpoint survived the mandated four-node reboot with zero trainers remaining.
-
-# BAKE AUTHORIZATION — a separate capability-bound act. The CPT receipt cannot authorize export,
-# conversion, graft, qualification, or delivery. Jesse assigned this session the training-and-baking
-# lane and then directed the current run through the documented production process. This object
-# binds that direction to the exact completed V6 checkpoint and the exact candidate bake bytes.
-authorizations:
-  - capability: bake_export
-    campaign_id: bake_prod_v6_clean_repos_2ep
-    authorized_by: Jesse
-    authorized_on: 2026-08-20
-    input_contract:
-      runtime_env:
-        DCP_DIR: ${SPARK_HOME}/training_outputs/cpt_prod_v6_clean_repos_2ep
-        EXPECTED_CHECKPOINT_STEP: "168"
-        EXPECTED_TRAINER_META_SHA256: 8f1194641d745beedec78586282b599fe3fa56230d49ed988275b19f5a9f0262
-    scope: >
-      Bake the independently verified all-rank step-168 final checkpoint for
-      cpt_prod_v6_clean_repos_2ep through coordinated sharded export, offline 851-tensor
-      conversion, the absolute base-to-final weight-diff gate, the per-run 1199-tensor servable
-      graft, provenance sealing, and THOR_DELIVERED. Stop below the 5e-05 weight-diff floor unless
-      an approved Chats review receipt authorizes finalization; do not launch SFT or promotion.
-    content_sha:
-      careers-qwen/post_cpt_pipeline.sh: 7c85f7d45c85cb87cc632cd713bf63e98e1d2c5534a909916eaee1ff8cde066b
-      dense-9b/recipes/bake_27b.sh: f591938c7de403f93a89bfaac2ce969baeab8068a58ce7822c53b063aea16117
-      dense-9b/recipes/bake_dcp_offline.py: 478e6001cf39951e4cb4bb1e845fcde44d04d5513148f77609937c346494f4ce
-      dense-9b/recipes/artifact_b_sync.sh: 84a5d8f1cb94bc03d79cdc6eee3bda86d98b5b38cda03407951c114ed41b8174
-      dense-9b/recipes/model_snapshot_sync.sh: 4af7859f53f38db9b2752ae5715b0aba10e447c2b32acd860592cb24a0dae0bc
-      careers-qwen/graft_cpt_into_servable.py: 7410ba2a408c53d309b56a0799a22eecf2f7c2f373d6eddbde45ebf0ad731b1a
-      careers-qwen/measure_cpt_delta.py: c7076b9a9898833dd3bb01d962e58f994bbd3560175be4c8361e2533db52430e
-      careers-qwen/corpus_manifest.py: a7b8ed76f64cdb9e797cdaaf2940f89b700d28cced5486bdefb4f0a9729757d3
-      careers-qwen/emit_training_provenance.py: 4ed10e384b0d99ee5950875cb89bf052ca3309ad5f1119ec3cd51618b5a4c3aa
-      careers-qwen/post_cpt_contract.py: b3af8896fa43ebf8441c9d86f27d69df68267679f4ceab806796a4e6a7eaad8e
-      careers-qwen/verify_artifact_b.py: e72fd5a9dde1e5fff7ad2a11afcf9fb92871dce61fe882a3b3bd60edde1e7cf8
-      scripts/taey-train: cc2fd5b34a7a94bce71c5c4f6419ed91ae4e090e31b75e5bba95ab720e7cdeba
-      scripts/_resolve_capability.py: 5fef38aabb377bd05f340d36579c3e151c1f8f36468e0a78971c75e3cd85200f
-      scripts/training_lifecycle.py: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
+- capability: bake_export
+  campaign_id: bake_prod_v6_clean_repos_2ep
+  public_receipt: careers-qwen/receipts/cpt_prod_v6_clean_repos_2ep.production.json
+  public_receipt_sha256: 63f5b87433d49912f3bfc4a0655d77900415035ba355011b2eeb2eeca22cabcb
+  executed_pipeline_sha256: 7c85f7d45c85cb87cc632cd713bf63e98e1d2c5534a909916eaee1ff8cde066b
+  executed_lifecycle_sha256: 924a8727f7dc23bdeaab595cc9df930edfd73c3d39608f3b47de8397671a796f
+  verified_outcome: >
+    THOR_DELIVERED after 1199-tensor graft and absolute mean weight diff
+    2.452476529e-04 IN BAND; ARTIFACT_SHA256SUMS sealed 35 entries under SHA256
+    b98bd08065fabdb50df521334c508c463f6c44ce74a4f9667c9c4fb850928561. The later
+    Jesse act authorized the production-process node1 cutover: node1 serves V6 and node2
+    remains the unchanged Qwen3.8-27B control. The receipt explicitly records no SFT authorization.
